@@ -65,9 +65,11 @@ export class RestaurantService {
       });
     }
 
+    const slug = input.slug || (await this.uniqueSlug(input.title || "rest"));
     const createData: Prisma.RestaurantUncheckedCreateInput = {
       companyId,
       title: input.title || "",
+      slug,
       currency: input.currency || "EUR",
       accentColor: input.accentColor || "#000000",
       languages: input.languages || ["en"],
@@ -76,5 +78,24 @@ export class RestaurantService {
       ...input,
     };
     return this.prisma.restaurant.create({ data: createData });
+  }
+
+  private async uniqueSlug(seed: string): Promise<string> {
+    const base = (seed || "rest")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40) || "rest";
+    let slug = base;
+    let i = 0;
+    while (await this.prisma.restaurant.findFirst({ where: { slug }, select: { id: true } })) {
+      i++;
+      slug = `${base}-${Math.random().toString(36).slice(2, 6)}`;
+      if (i > 10) {
+        slug = base + "-" + Date.now().toString(36);
+        break;
+      }
+    }
+    return slug;
   }
 }

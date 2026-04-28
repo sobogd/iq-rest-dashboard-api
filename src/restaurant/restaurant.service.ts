@@ -2,7 +2,49 @@ import { Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 
-type RestaurantPatch = Partial<Omit<Prisma.RestaurantUpdateInput, "company" | "tables" | "reservations" | "orders">>;
+interface RestaurantInput {
+  title?: string;
+  subtitle?: string | null;
+  description?: string | null;
+  slug?: string | null;
+  currency?: string;
+  source?: string | null;
+  backgroundType?: string | null;
+  accentColor?: string;
+  address?: string | null;
+  x?: string | null;
+  y?: string | null;
+  phone?: string | null;
+  instagram?: string | null;
+  whatsapp?: string | null;
+  languages?: string[];
+  defaultLanguage?: string;
+  hideTitle?: boolean;
+  reservationsEnabled?: boolean;
+  reservationMode?: string;
+  reservationSlotMinutes?: number;
+  workingHoursStart?: string;
+  workingHoursEnd?: string;
+  ordersEnabled?: boolean;
+  orderNameEnabled?: boolean;
+  orderPhoneEnabled?: boolean;
+  orderAddressEnabled?: boolean;
+  orderMode?: string;
+}
+
+const FIELDS: (keyof RestaurantInput)[] = [
+  "title", "subtitle", "description", "slug", "currency", "source", "backgroundType",
+  "accentColor", "address", "x", "y", "phone", "instagram", "whatsapp", "languages",
+  "defaultLanguage", "hideTitle", "reservationsEnabled", "reservationMode",
+  "reservationSlotMinutes", "workingHoursStart", "workingHoursEnd", "ordersEnabled",
+  "orderNameEnabled", "orderPhoneEnabled", "orderAddressEnabled", "orderMode",
+];
+
+function pickFields(raw: Record<string, unknown>): RestaurantInput {
+  const out: Record<string, unknown> = {};
+  for (const f of FIELDS) if (raw[f] !== undefined) out[f] = raw[f];
+  return out as RestaurantInput;
+}
 
 @Injectable()
 export class RestaurantService {
@@ -12,60 +54,27 @@ export class RestaurantService {
     return this.prisma.restaurant.findFirst({ where: { companyId } });
   }
 
-  async upsert(companyId: string, data: Record<string, unknown>) {
+  async upsert(companyId: string, raw: Record<string, unknown>) {
+    const input = pickFields(raw);
     const existing = await this.prisma.restaurant.findFirst({ where: { companyId } });
 
-    const allowed: RestaurantPatch = {
-      title: data.title as string | undefined,
-      subtitle: (data.subtitle as string | null | undefined),
-      description: data.description as string | null | undefined,
-      slug: data.slug as string | null | undefined,
-      currency: data.currency as string | undefined,
-      source: data.source as string | null | undefined,
-      backgroundType: data.backgroundType as string | null | undefined,
-      accentColor: data.accentColor as string | undefined,
-      address: data.address as string | null | undefined,
-      x: data.x as string | null | undefined,
-      y: data.y as string | null | undefined,
-      phone: data.phone as string | null | undefined,
-      instagram: data.instagram as string | null | undefined,
-      whatsapp: data.whatsapp as string | null | undefined,
-      languages: data.languages as string[] | undefined,
-      defaultLanguage: data.defaultLanguage as string | undefined,
-      hideTitle: data.hideTitle as boolean | undefined,
-      reservationsEnabled: data.reservationsEnabled as boolean | undefined,
-      reservationMode: data.reservationMode as string | undefined,
-      reservationSlotMinutes: data.reservationSlotMinutes as number | undefined,
-      workingHoursStart: data.workingHoursStart as string | undefined,
-      workingHoursEnd: data.workingHoursEnd as string | undefined,
-      ordersEnabled: data.ordersEnabled as boolean | undefined,
-      orderNameEnabled: data.orderNameEnabled as boolean | undefined,
-      orderPhoneEnabled: data.orderPhoneEnabled as boolean | undefined,
-      orderAddressEnabled: data.orderAddressEnabled as boolean | undefined,
-      orderMode: data.orderMode as string | undefined,
-    };
-
-    // Drop undefined keys.
-    const patch: Prisma.RestaurantUpdateInput = {};
-    for (const [k, v] of Object.entries(allowed)) {
-      if (v !== undefined) (patch as Record<string, unknown>)[k] = v;
-    }
-
     if (existing) {
-      return this.prisma.restaurant.update({ where: { id: existing.id }, data: patch });
+      return this.prisma.restaurant.update({
+        where: { id: existing.id },
+        data: input as Prisma.RestaurantUpdateInput,
+      });
     }
 
-    return this.prisma.restaurant.create({
-      data: {
-        title: (allowed.title as string) || "",
-        currency: (allowed.currency as string) || "EUR",
-        accentColor: (allowed.accentColor as string) || "#000000",
-        languages: (allowed.languages as string[]) || ["en"],
-        defaultLanguage: (allowed.defaultLanguage as string) || "en",
-        ...patch,
-        company: { connect: { id: companyId } },
-        startedFromScratch: true,
-      },
-    });
+    const createData: Prisma.RestaurantUncheckedCreateInput = {
+      companyId,
+      title: input.title || "",
+      currency: input.currency || "EUR",
+      accentColor: input.accentColor || "#000000",
+      languages: input.languages || ["en"],
+      defaultLanguage: input.defaultLanguage || "en",
+      startedFromScratch: true,
+      ...input,
+    };
+    return this.prisma.restaurant.create({ data: createData });
   }
 }

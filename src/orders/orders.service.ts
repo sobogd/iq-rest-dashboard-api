@@ -14,16 +14,19 @@ export class OrdersService {
   }
 
   async create(companyId: string, body: { items: unknown[]; total?: number; tableNumber?: number | null; customerName?: string | null }) {
-    return this.prisma.order.create({
-      data: {
-        companyId,
-        items: body.items as Prisma.InputJsonValue,
-        total: body.total !== undefined ? new Prisma.Decimal(body.total) : null,
-        tableNumber: body.tableNumber ?? null,
-        customerName: body.customerName ?? null,
-        status: "active",
-      },
-    });
+    const restaurant = await this.prisma.restaurant.findFirst({ where: { companyId }, select: { id: true, currency: true } });
+    if (!restaurant) throw new NotFoundException("Restaurant not found");
+    const data: Prisma.OrderUncheckedCreateInput = {
+      companyId,
+      restaurantId: restaurant.id,
+      items: body.items as Prisma.InputJsonValue,
+      total: new Prisma.Decimal(body.total ?? 0),
+      currency: restaurant.currency,
+      tableNumber: body.tableNumber ?? null,
+      customerName: body.customerName ?? null,
+      status: "new",
+    };
+    return this.prisma.order.create({ data });
   }
 
   async patch(companyId: string, id: string, body: { status?: string; items?: unknown[]; total?: number }) {

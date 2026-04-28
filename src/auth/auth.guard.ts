@@ -11,7 +11,7 @@ const SESSION_COOKIE = "iqr_session";
 const EMAIL_COOKIE = "iqr_email";
 
 export interface AuthedRequest extends Request {
-  authUser: { userId: string; companyId: string; email: string };
+  authUser: { userId: string; companyId: string; email: string; onboardingStep: number };
 }
 
 @Injectable()

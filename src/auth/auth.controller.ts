@@ -58,7 +58,13 @@ export class AuthController {
     if (!session || !email) return { authenticated: false };
     try {
       const user = await this.auth.resolveSession(session, email);
-      return { authenticated: true, email: user.email, userId: user.userId, companyId: user.companyId };
+      return {
+        authenticated: true,
+        email: user.email,
+        userId: user.userId,
+        companyId: user.companyId,
+        onboardingStep: user.onboardingStep,
+      };
     } catch {
       return { authenticated: false };
     }

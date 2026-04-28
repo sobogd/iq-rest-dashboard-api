@@ -163,18 +163,18 @@ export class AuthService {
   }
 
   /** Resolve user from session cookie. Throws Unauthorized when missing/invalid. */
-  async resolveSession(cookieValue: string | undefined, email: string | undefined): Promise<{ userId: string; companyId: string; email: string }> {
+  async resolveSession(cookieValue: string | undefined, email: string | undefined): Promise<{ userId: string; companyId: string; email: string; onboardingStep: number }> {
     if (!cookieValue || !email) throw new UnauthorizedException();
     const tokenHash = hashSessionToken(cookieValue);
     const user = await this.prisma.user.findUnique({
       where: { email },
-      include: { companies: { take: 1 } },
+      include: { companies: { take: 1, include: { company: { select: { id: true, onboardingStep: true } } } } },
     });
     if (!user || !user.sessionToken) throw new UnauthorizedException();
     if (!safeCompare(user.sessionToken, tokenHash)) throw new UnauthorizedException();
-    const companyId = user.companies[0]?.companyId;
-    if (!companyId) throw new UnauthorizedException();
-    return { userId: user.id, companyId, email: user.email };
+    const company = user.companies[0]?.company;
+    if (!company) throw new UnauthorizedException();
+    return { userId: user.id, companyId: company.id, email: user.email, onboardingStep: company.onboardingStep };
   }
 
   async logout(email: string | undefined): Promise<void> {

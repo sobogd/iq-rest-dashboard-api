@@ -1,0 +1,1 @@
+ALTER TABLE "companies" ALTER COLUMN "scanLimit" SET DEFAULT 320;

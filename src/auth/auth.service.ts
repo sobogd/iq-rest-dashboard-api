@@ -25,6 +25,19 @@ const SEND_LIMIT_MAX = 5;
 const VERIFY_LIMIT_WINDOW = 15 * 60 * 1000;
 const VERIFY_LIMIT_MAX = 10;
 
+// Companies created before LEGACY_DASHBOARD_CUTOFF (ISO date) keep using
+// the old monolith dashboard at iq-rest.com/<locale>/dashboard. The new
+// SPA detects the flag after login and redirects them. If the env var is
+// not set, no company is treated as legacy.
+function isLegacyCompany(createdAt: Date | null | undefined): boolean {
+  if (!createdAt) return false;
+  const cutoffRaw = process.env.LEGACY_DASHBOARD_CUTOFF;
+  if (!cutoffRaw) return false;
+  const cutoff = new Date(cutoffRaw);
+  if (isNaN(cutoff.getTime())) return false;
+  return createdAt < cutoff;
+}
+
 @Injectable()
 export class AuthService {
   private sendAttempts = new Map<string, { count: number; resetAt: number }>();
@@ -102,7 +115,7 @@ export class AuthService {
     return { isNewUser };
   }
 
-  async verifyOtp(emailRaw: string, code: string): Promise<{ token: string; userId: string; onboardingStep: number; isNewUser: boolean }> {
+  async verifyOtp(emailRaw: string, code: string): Promise<{ token: string; userId: string; onboardingStep: number; isNewUser: boolean; legacyDashboard: boolean }> {
     const email = validateEmail(emailRaw);
     if (!email || !code) throw new BadRequestException("Email and code required");
 
@@ -159,7 +172,14 @@ export class AuthService {
 
     const companyEdge = user.companies[0];
     const onboardingStep = companyEdge?.company?.onboardingStep ?? 0;
-    return { token, userId: user.id, onboardingStep, isNewUser: !companyEdge?.company || onboardingStep < 3 };
+    const legacyDashboard = isLegacyCompany(companyEdge?.company?.createdAt);
+    return {
+      token,
+      userId: user.id,
+      onboardingStep,
+      isNewUser: !companyEdge?.company || onboardingStep < 3,
+      legacyDashboard,
+    };
   }
 
   /** Resolve user from session cookie. Throws Unauthorized when missing/invalid.
@@ -172,7 +192,7 @@ export class AuthService {
     cookieValue: string | undefined,
     email: string | undefined,
     impersonation?: { adminOrigSession?: string; adminOrigEmail?: string },
-  ): Promise<{ userId: string; companyId: string; email: string; onboardingStep: number }> {
+  ): Promise<{ userId: string; companyId: string; email: string; onboardingStep: number; legacyDashboard: boolean }> {
     if (!cookieValue || !email) throw new UnauthorizedException();
     const adminEmail = impersonation?.adminOrigEmail;
     const adminSession = impersonation?.adminOrigSession;
@@ -192,7 +212,7 @@ export class AuthService {
 
     const user = await this.prisma.user.findUnique({
       where: { email },
-      include: { companies: { take: 1, include: { company: { select: { id: true, onboardingStep: true } } } } },
+      include: { companies: { take: 1, include: { company: { select: { id: true, onboardingStep: true, createdAt: true } } } } },
     });
     if (!user) throw new UnauthorizedException();
     const company = user.companies[0]?.company;
@@ -205,7 +225,13 @@ export class AuthService {
       }
     }
 
-    return { userId: user.id, companyId: company.id, email: user.email, onboardingStep: company.onboardingStep };
+    return {
+      userId: user.id,
+      companyId: company.id,
+      email: user.email,
+      onboardingStep: company.onboardingStep,
+      legacyDashboard: isLegacyCompany(company.createdAt),
+    };
   }
 
   async logout(email: string | undefined): Promise<void> {
@@ -222,6 +248,7 @@ export class AuthService {
     email: string;
     onboardingStep: number;
     isNewUser: boolean;
+    legacyDashboard: boolean;
   }> {
     if (!credential) throw new BadRequestException("Missing credential");
     const clientId = this.config.get<string>("GOOGLE_CLIENT_ID");
@@ -243,7 +270,7 @@ export class AuthService {
 
     let user = await this.prisma.user.findUnique({
       where: { email },
-      include: { companies: { take: 1, include: { company: { select: { id: true, onboardingStep: true } } } } },
+      include: { companies: { take: 1, include: { company: { select: { id: true, onboardingStep: true, createdAt: true } } } } },
     });
     let isNewUser = false;
 
@@ -265,7 +292,7 @@ export class AuthService {
       });
       user = await this.prisma.user.findUnique({
         where: { id: created.id },
-        include: { companies: { take: 1, include: { company: { select: { id: true, onboardingStep: true } } } } },
+        include: { companies: { take: 1, include: { company: { select: { id: true, onboardingStep: true, createdAt: true } } } } },
       });
     }
 
@@ -279,6 +306,7 @@ export class AuthService {
     });
 
     const onboardingStep = user.companies[0]?.company?.onboardingStep ?? 0;
-    return { token, userId: user.id, email, onboardingStep, isNewUser };
+    const legacyDashboard = isLegacyCompany(user.companies[0]?.company?.createdAt);
+    return { token, userId: user.id, email, onboardingStep, isNewUser, legacyDashboard };
   }
 }

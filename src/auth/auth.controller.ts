@@ -16,6 +16,12 @@ import { authCookieOptions } from "../common/session-utils";
 
 const SESSION_COOKIE = "iqr_session";
 const EMAIL_COOKIE = "iqr_email";
+// Legacy monolith (iq-rest.com) reads these cookie names. We mirror the
+// new API's cookies under the legacy names on the apex domain so that a
+// user signing in on the new SPA stays signed in when redirected to the
+// old dashboard (and vice versa).
+const LEGACY_SESSION_COOKIE = "session";
+const LEGACY_EMAIL_COOKIE = "user_email";
 
 @Controller("auth")
 export class AuthController {
@@ -31,12 +37,14 @@ export class AuthController {
   @Post("verify-otp")
   @HttpCode(HttpStatus.OK)
   async verifyOtp(@Body() dto: VerifyOtpDto, @Res({ passthrough: true }) res: Response) {
-    const { token, onboardingStep, isNewUser } = await this.auth.verifyOtp(dto.email, dto.code);
+    const { token, onboardingStep, isNewUser, legacyDashboard } = await this.auth.verifyOtp(dto.email, dto.code);
     const domain = this.config.get<string>("COOKIE_DOMAIN") || undefined;
     const opts = authCookieOptions(domain);
     res.cookie(SESSION_COOKIE, token, opts);
     res.cookie(EMAIL_COOKIE, dto.email, { ...opts, httpOnly: false });
-    return { ok: true, onboardingStep, isNewUser };
+    res.cookie(LEGACY_SESSION_COOKIE, token, opts);
+    res.cookie(LEGACY_EMAIL_COOKIE, dto.email, { ...opts, httpOnly: false });
+    return { ok: true, onboardingStep, isNewUser, legacyDashboard };
   }
 
   @Post("google")
@@ -47,12 +55,15 @@ export class AuthController {
     const opts = authCookieOptions(domain);
     res.cookie(SESSION_COOKIE, result.token, opts);
     res.cookie(EMAIL_COOKIE, result.email, { ...opts, httpOnly: false });
+    res.cookie(LEGACY_SESSION_COOKIE, result.token, opts);
+    res.cookie(LEGACY_EMAIL_COOKIE, result.email, { ...opts, httpOnly: false });
     return {
       ok: true,
       email: result.email,
       userId: result.userId,
       onboardingStep: result.onboardingStep,
       isNewUser: result.isNewUser,
+      legacyDashboard: result.legacyDashboard,
     };
   }
 
@@ -69,6 +80,8 @@ export class AuthController {
     const baseOpts = { path: "/", ...(domain ? { domain } : {}) };
     res.clearCookie(SESSION_COOKIE, baseOpts);
     res.clearCookie(EMAIL_COOKIE, baseOpts);
+    res.clearCookie(LEGACY_SESSION_COOKIE, baseOpts);
+    res.clearCookie(LEGACY_EMAIL_COOKIE, baseOpts);
     res.clearCookie("iqr_admin_original_session", baseOpts);
     res.clearCookie("iqr_admin_original_email", baseOpts);
     res.clearCookie("iqr_admin_original_user_id", baseOpts);
@@ -94,6 +107,7 @@ export class AuthController {
         userId: user.userId,
         companyId: user.companyId,
         onboardingStep: user.onboardingStep,
+        legacyDashboard: user.legacyDashboard,
         impersonatedBy: adminOrigEmail || null,
       };
     } catch {

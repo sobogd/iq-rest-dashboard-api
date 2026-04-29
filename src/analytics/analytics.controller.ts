@@ -82,6 +82,26 @@ export class AnalyticsController {
   ) {
     if (!body.event) return { ok: false, error: "event required" };
     const sessionId = ensureSessionCookie(req, res, body.sessionId);
+    // Race-safety: if the client posted a different sessionId hint than the
+    // cookie carries (e.g. one tab generated a UUID while another's
+    // Set-Cookie was still in flight), reattach any rows under that hint to
+    // the canonical cookie session and drop the stray row. Without this we
+    // end up with two Session rows for the same visit.
+    if (body.sessionId && body.sessionId !== sessionId) {
+      const stray = await this.prisma.session.findUnique({
+        where: { id: body.sessionId },
+        select: { id: true },
+      });
+      if (stray) {
+        await this.prisma.analyticsEvent.updateMany({
+          where: { sessionId: stray.id },
+          data: { sessionId },
+        });
+        await this.prisma.session
+          .delete({ where: { id: stray.id } })
+          .catch(() => undefined);
+      }
+    }
 
     const ua = req.headers["user-agent"] || null;
     const ip = extractIp(req);

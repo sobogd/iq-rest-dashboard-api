@@ -13,6 +13,7 @@ import { randomUUID } from "node:crypto";
 import { UAParser } from "ua-parser-js";
 import { AuthGuard, type AuthedRequest } from "../auth/auth.guard";
 import { PrismaService } from "../prisma/prisma.service";
+import { getRequestCountry } from "../common/geo";
 
 const COOKIE_NAME = "analytics_sid";
 const COOKIE_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000;
@@ -82,8 +83,14 @@ export class AnalyticsController {
 
     const ua = req.headers["user-agent"] || null;
     const ip = extractIp(req);
-    const country = readCookie(req, "geo_country") || null;
-    const city = readCookie(req, "geo_city") || null;
+    // Prefer Cloudflare/Vercel geo headers over the legacy geo_* cookies
+    // (the dashboard SPA never sets them, but `cf-ipcountry` reaches us in prod).
+    const cfCity = req.headers["cf-ipcity"];
+    const country = getRequestCountry(req) || readCookie(req, "geo_country") || null;
+    const city =
+      (typeof cfCity === "string" && cfCity ? decodeURIComponent(cfCity) : null) ||
+      readCookie(req, "geo_city") ||
+      null;
     const landingPage = (body.meta?.page as string) || null;
 
     let browser: string | null = null;

@@ -162,18 +162,49 @@ export class AuthService {
     return { token, userId: user.id, onboardingStep, isNewUser: !companyEdge?.company || onboardingStep < 3 };
   }
 
-  /** Resolve user from session cookie. Throws Unauthorized when missing/invalid. */
-  async resolveSession(cookieValue: string | undefined, email: string | undefined): Promise<{ userId: string; companyId: string; email: string; onboardingStep: number }> {
+  /** Resolve user from session cookie. Throws Unauthorized when missing/invalid.
+   *
+   *  When admin_original_* cookies are present we are inside an impersonation
+   *  session: validate the **admin's** session token (kept untouched in
+   *  iqr_session) and skip target sessionToken validation entirely so the
+   *  target user keeps their existing login. */
+  async resolveSession(
+    cookieValue: string | undefined,
+    email: string | undefined,
+    impersonation?: { adminOrigSession?: string; adminOrigEmail?: string },
+  ): Promise<{ userId: string; companyId: string; email: string; onboardingStep: number }> {
     if (!cookieValue || !email) throw new UnauthorizedException();
-    const tokenHash = hashSessionToken(cookieValue);
+    const adminEmail = impersonation?.adminOrigEmail;
+    const adminSession = impersonation?.adminOrigSession;
+    const isImpersonating = Boolean(adminEmail && adminSession);
+
+    if (isImpersonating) {
+      const adminDomain = (process.env.ADMIN_EMAIL_DOMAIN || "iq-rest.com").toLowerCase();
+      if (!adminEmail!.toLowerCase().endsWith("@" + adminDomain)) {
+        throw new UnauthorizedException();
+      }
+      const adminUser = await this.prisma.user.findUnique({ where: { email: adminEmail! } });
+      if (!adminUser?.sessionToken) throw new UnauthorizedException();
+      if (!safeCompare(adminUser.sessionToken, hashSessionToken(adminSession!))) {
+        throw new UnauthorizedException();
+      }
+    }
+
     const user = await this.prisma.user.findUnique({
       where: { email },
       include: { companies: { take: 1, include: { company: { select: { id: true, onboardingStep: true } } } } },
     });
-    if (!user || !user.sessionToken) throw new UnauthorizedException();
-    if (!safeCompare(user.sessionToken, tokenHash)) throw new UnauthorizedException();
+    if (!user) throw new UnauthorizedException();
     const company = user.companies[0]?.company;
     if (!company) throw new UnauthorizedException();
+
+    if (!isImpersonating) {
+      if (!user.sessionToken) throw new UnauthorizedException();
+      if (!safeCompare(user.sessionToken, hashSessionToken(cookieValue))) {
+        throw new UnauthorizedException();
+      }
+    }
+
     return { userId: user.id, companyId: company.id, email: user.email, onboardingStep: company.onboardingStep };
   }
 

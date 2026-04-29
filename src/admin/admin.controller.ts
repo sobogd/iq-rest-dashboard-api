@@ -21,7 +21,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { AdminGuard } from "./admin.guard";
 import { AuthService } from "../auth/auth.service";
 import { MailService } from "../mail/mail.service";
-import { authCookieOptions, generateSessionToken, hashSessionToken } from "../common/session-utils";
+import { authCookieOptions } from "../common/session-utils";
 import type { AuthedRequest } from "../auth/auth.guard";
 
 const SESSION_COOKIE = "iqr_session";
@@ -296,20 +296,16 @@ export class AdminController {
     const domain = this.config.get<string>("COOKIE_DOMAIN") || undefined;
     const opts = authCookieOptions(domain);
 
-    // Save admin originals so we can restore on exit.
+    // Save admin originals so we can restore on exit. We deliberately keep
+    // iqr_session unchanged (still the admin's token); only iqr_email points
+    // to the target. resolveSession sees admin_original_* cookies and:
+    //   - validates the admin's token against the admin user's sessionToken,
+    //   - returns the target user's identity (looked up by iqr_email).
+    // The target user's sessionToken is never touched, so they stay logged
+    // in everywhere else.
     res.cookie(ADMIN_ORIG_SESSION, adminSession, { ...opts, httpOnly: true });
     res.cookie(ADMIN_ORIG_EMAIL, adminAuth.email, { ...opts, httpOnly: true });
     res.cookie(ADMIN_ORIG_USER_ID, adminAuth.userId, { ...opts, httpOnly: true });
-
-    // Issue a fresh session for the target user (overwrites their existing token).
-    const token = generateSessionToken();
-    const tokenHash = hashSessionToken(token);
-    await this.prisma.user.update({
-      where: { id: target.id },
-      data: { sessionToken: tokenHash },
-    });
-
-    res.cookie(SESSION_COOKIE, token, opts);
     res.cookie(EMAIL_COOKIE, target.email, { ...opts, httpOnly: false });
 
     return { ok: true };

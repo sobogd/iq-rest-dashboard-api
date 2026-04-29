@@ -70,17 +70,24 @@ export class AuthController {
 
   @Get("check")
   async check(@Req() req: Request) {
-    const session = req.cookies?.[SESSION_COOKIE];
-    const email = req.cookies?.[EMAIL_COOKIE];
+    const cookies = req.cookies as Record<string, string | undefined> | undefined;
+    const session = cookies?.[SESSION_COOKIE];
+    const email = cookies?.[EMAIL_COOKIE];
     if (!session || !email) return { authenticated: false };
+    const adminOrigSession = cookies?.["iqr_admin_original_session"];
+    const adminOrigEmail = cookies?.["iqr_admin_original_email"];
     try {
-      const user = await this.auth.resolveSession(session, email);
+      const user = await this.auth.resolveSession(session, email, {
+        adminOrigSession,
+        adminOrigEmail,
+      });
       return {
         authenticated: true,
         email: user.email,
         userId: user.userId,
         companyId: user.companyId,
         onboardingStep: user.onboardingStep,
+        impersonatedBy: adminOrigEmail || null,
       };
     } catch {
       return { authenticated: false };

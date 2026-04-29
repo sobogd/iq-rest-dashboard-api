@@ -50,23 +50,14 @@ export class AdminController {
   @Get("companies")
   async listCompanies(@Query() query: ListQuery) {
     const filter = query.filter || "all";
-    const tz = query.tz || "UTC";
-    const todayStart = startOfDayInTz(tz);
     const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 
-    let todayActiveIds: Set<string> | null = null;
-    if (filter === "today_active") {
-      const rows = await this.prisma.$queryRaw<{ companyId: string }[]>`
-        SELECT DISTINCT "companyId"
-        FROM page_views
-        WHERE "createdAt" >= ${todayStart}
-      `;
-      todayActiveIds = new Set(rows.map((r) => r.companyId));
-      if (todayActiveIds.size === 0) return { companies: [], total: 0 };
-    }
-
-    const where: Record<string, unknown> = {};
-    if (todayActiveIds) where.id = { in: [...todayActiveIds] };
+    // "active" = company has menu scans (page views) within the last 30 days.
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const where =
+      filter === "active"
+        ? { pageViews: { some: { createdAt: { gte: thirtyDaysAgo } } } }
+        : {};
 
     const companies = await this.prisma.company.findMany({
       where,
@@ -83,7 +74,7 @@ export class AdminController {
     });
 
     const ids = companies.map((c) => c.id);
-    const [monthly, today] = ids.length
+    const [monthly, lastVisits] = ids.length
       ? await Promise.all([
           this.prisma.$queryRaw<{ companyId: string; count: bigint }[]>`
             SELECT "companyId", COUNT(DISTINCT "sessionId") AS count
@@ -92,17 +83,20 @@ export class AdminController {
               AND "createdAt" >= ${startOfMonth}
             GROUP BY "companyId"
           `,
-          this.prisma.$queryRaw<{ companyId: string; count: bigint }[]>`
-            SELECT "companyId", COUNT(DISTINCT "sessionId") AS count
-            FROM page_views
+          this.prisma.$queryRaw<{ companyId: string; last: Date | null }[]>`
+            SELECT "companyId",
+              GREATEST(
+                COALESCE(MAX("lastSeenAt"), 'epoch'::timestamp),
+                COALESCE(MAX("updatedAt"), 'epoch'::timestamp)
+              ) AS last
+            FROM sessions
             WHERE "companyId" = ANY(${ids}::text[])
-              AND "createdAt" >= ${todayStart}
             GROUP BY "companyId"
           `,
         ])
       : [[], []];
     const monthlyMap = new Map(monthly.map((r) => [r.companyId, Number(r.count)]));
-    const todayMap = new Map(today.map((r) => [r.companyId, Number(r.count)]));
+    const lastVisitMap = new Map(lastVisits.map((r) => [r.companyId, r.last]));
 
     const items = companies.map((c) => ({
       id: c.id,
@@ -113,7 +107,7 @@ export class AdminController {
       itemsCount: c._count.items,
       messagesCount: c._count.supportMessages,
       monthlyViews: monthlyMap.get(c.id) || 0,
-      todayViews: todayMap.get(c.id) || 0,
+      lastVisit: lastVisitMap.get(c.id)?.toISOString() ?? null,
       scanLimit: c.plan === "FREE" ? c.scanLimit : null,
       emailsSent: c.emailsSent,
     }));

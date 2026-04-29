@@ -347,12 +347,25 @@ export class AdminController {
   // ────────────────── ANALYTICS ──────────────────
 
   @Get("analytics/sessions-list")
-  async sessionsList(@Query("period") period = "today", @Query("tz") tz = "UTC") {
+  async sessionsList(
+    @Query("period") period = "today",
+    @Query("tz") tz = "UTC",
+    @Query("offset") offsetRaw = "0",
+    @Query("limit") limitRaw = "5",
+  ) {
     const { dateFrom, dateTo } = computeDateRange(period, tz);
     const dateFilter = dateTo ? { gte: dateFrom, lt: dateTo } : { gte: dateFrom };
+    const offset = Math.max(0, parseInt(offsetRaw, 10) || 0);
+    const limit = Math.min(2000, Math.max(1, parseInt(limitRaw, 10) || 1000));
+
+    const where = { events: { some: { createdAt: dateFilter } } };
+    const total = await this.prisma.session.count({ where });
 
     const sessionsList = await this.prisma.session.findMany({
-      where: { events: { some: { createdAt: dateFilter } } },
+      where,
+      orderBy: { updatedAt: "desc" },
+      skip: offset,
+      take: limit,
       select: {
         id: true,
         country: true,
@@ -366,11 +379,6 @@ export class AdminController {
     });
 
     const MAX_GAP_MS = 10 * 60 * 1000;
-    sessionsList.sort((a, b) => {
-      const aLast = a.events[a.events.length - 1]?.createdAt ?? a.createdAt;
-      const bLast = b.events[b.events.length - 1]?.createdAt ?? b.createdAt;
-      return bLast.getTime() - aLast.getTime();
-    });
 
     const sessions = sessionsList.map((s) => {
       const lastEvent = s.events[s.events.length - 1]?.createdAt ?? s.createdAt;
@@ -391,7 +399,7 @@ export class AdminController {
       };
     });
 
-    return { sessions };
+    return { sessions, total, hasMore: offset + sessions.length < total };
   }
 
   @Get("analytics/sessions")
@@ -401,15 +409,22 @@ export class AdminController {
     @Query("from") from?: string,
     @Query("to") to?: string,
     @Query("country") country?: string,
+    @Query("eventOffset") eventOffsetRaw = "0",
+    @Query("eventLimit") eventLimitRaw = "15",
   ) {
     if (sessionId) {
+      const eventOffset = Math.max(0, parseInt(eventOffsetRaw, 10) || 0);
+      const eventLimit = Math.min(200, Math.max(1, parseInt(eventLimitRaw, 10) || 15));
       const session = await this.prisma.session.findUnique({
         where: { id: sessionId },
         include: {
           events: {
-            orderBy: { createdAt: "asc" },
+            orderBy: { createdAt: "desc" },
+            skip: eventOffset,
+            take: eventLimit,
             select: { id: true, event: true, sessionId: true, meta: true, createdAt: true },
           },
+          _count: { select: { events: true } },
         },
       });
       let restaurantName: string | null = null;
@@ -451,7 +466,11 @@ export class AdminController {
               updatedAt: session.updatedAt,
             }
           : null,
-        events: session?.events || [],
+        events: (session?.events || []).slice().reverse(),
+        eventsTotal: session?._count?.events ?? 0,
+        hasMore: session
+          ? eventOffset + session.events.length < (session._count?.events ?? 0)
+          : false,
       };
     }
 
@@ -574,6 +593,9 @@ function computeDateRange(period: string, tz: string): { dateFrom: Date; dateTo?
   const todayStart = startOfDayInTz(tz);
   if (period === "yesterday") {
     return { dateFrom: new Date(todayStart.getTime() - 86400000), dateTo: todayStart };
+  }
+  if (period === "all") {
+    return { dateFrom: new Date(0) };
   }
   if (period === "7days") {
     return { dateFrom: new Date(todayStart.getTime() - 7 * 86400000) };

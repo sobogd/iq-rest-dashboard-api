@@ -17,6 +17,7 @@ import { StripeModule } from "./stripe/stripe.module";
 import { GeoModule } from "./geo/geo.module";
 import { AnalyticsModule } from "./analytics/analytics.module";
 import { AdminModule } from "./admin/admin.module";
+import { CronModule } from "./cron/cron.module";
 import { HealthController } from "./health/health.controller";
 
 @Module({
@@ -39,6 +40,7 @@ import { HealthController } from "./health/health.controller";
     GeoModule,
     AnalyticsModule,
     AdminModule,
+    CronModule,
   ],
   controllers: [HealthController],
 })

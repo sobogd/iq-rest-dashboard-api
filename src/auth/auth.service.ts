@@ -28,7 +28,7 @@ const VERIFY_LIMIT_MAX = 10;
 // Companies created before this cutoff keep using the old monolith
 // dashboard at iq-rest.com/<locale>/dashboard. Hardcoded to the new SPA
 // launch date.
-const LEGACY_DASHBOARD_CUTOFF = new Date("2026-04-29T00:00:00.000Z");
+const LEGACY_DASHBOARD_CUTOFF = new Date("2026-04-28T00:00:00.000Z");
 
 function isLegacyCompany(createdAt: Date | null | undefined): boolean {
   if (!createdAt) return false;

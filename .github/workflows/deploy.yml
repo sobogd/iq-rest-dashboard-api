@@ -1,0 +1,115 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Build
+        run: npm run build
+
+      - name: Copy artifacts to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: deployer
+          key: ${{ secrets.SSH_KEY }}
+          source: "dist/,package.json,package-lock.json,prisma/"
+          target: "/home/deploy/apps/iq-rest-dashboard-api"
+          rm: false
+          overwrite: true
+
+      - name: Write .env from secrets
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          ENV_PORT: ${{ secrets.PORT }}
+          ENV_NODE_ENV: ${{ secrets.NODE_ENV }}
+          ENV_DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ENV_JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          ENV_JWT_EXPIRES_IN: ${{ secrets.JWT_EXPIRES_IN }}
+          ENV_COOKIE_NAME: ${{ secrets.COOKIE_NAME }}
+          ENV_COOKIE_DOMAIN: ${{ secrets.COOKIE_DOMAIN }}
+          ENV_COOKIE_SECURE: ${{ secrets.COOKIE_SECURE }}
+          ENV_CORS_ORIGINS: ${{ secrets.CORS_ORIGINS }}
+          ENV_APP_URL: ${{ secrets.APP_URL }}
+          ENV_ANALYTICS_COOKIE_DOMAIN: ${{ secrets.ANALYTICS_COOKIE_DOMAIN }}
+          ENV_SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          ENV_SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          ENV_SMTP_USER: ${{ secrets.SMTP_USER }}
+          ENV_SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          ENV_FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
+          ENV_S3_HOST: ${{ secrets.S3_HOST }}
+          ENV_S3_KEY: ${{ secrets.S3_KEY }}
+          ENV_S3_TOKEN: ${{ secrets.S3_TOKEN }}
+          ENV_S3_NAME: ${{ secrets.S3_NAME }}
+          ENV_S3_REGION: ${{ secrets.S3_REGION }}
+          ENV_GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ENV_STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          ENV_STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: deployer
+          key: ${{ secrets.SSH_KEY }}
+          envs: ENV_PORT,ENV_NODE_ENV,ENV_DATABASE_URL,ENV_JWT_SECRET,ENV_JWT_EXPIRES_IN,ENV_COOKIE_NAME,ENV_COOKIE_DOMAIN,ENV_COOKIE_SECURE,ENV_CORS_ORIGINS,ENV_APP_URL,ENV_ANALYTICS_COOKIE_DOMAIN,ENV_SMTP_HOST,ENV_SMTP_PORT,ENV_SMTP_USER,ENV_SMTP_PASS,ENV_FROM_EMAIL,ENV_S3_HOST,ENV_S3_KEY,ENV_S3_TOKEN,ENV_S3_NAME,ENV_S3_REGION,ENV_GEMINI_API_KEY,ENV_STRIPE_SECRET_KEY,ENV_STRIPE_WEBHOOK_SECRET
+          script: |
+            set -e
+            mkdir -p /home/deploy/apps/iq-rest-dashboard-api
+            cat > /home/deploy/apps/iq-rest-dashboard-api/.env <<EOF
+            PORT=$ENV_PORT
+            NODE_ENV=$ENV_NODE_ENV
+            DATABASE_URL=$ENV_DATABASE_URL
+            JWT_SECRET=$ENV_JWT_SECRET
+            JWT_EXPIRES_IN=$ENV_JWT_EXPIRES_IN
+            COOKIE_NAME=$ENV_COOKIE_NAME
+            COOKIE_DOMAIN=$ENV_COOKIE_DOMAIN
+            COOKIE_SECURE=$ENV_COOKIE_SECURE
+            CORS_ORIGINS=$ENV_CORS_ORIGINS
+            APP_URL=$ENV_APP_URL
+            ANALYTICS_COOKIE_DOMAIN=$ENV_ANALYTICS_COOKIE_DOMAIN
+            SMTP_HOST=$ENV_SMTP_HOST
+            SMTP_PORT=$ENV_SMTP_PORT
+            SMTP_USER=$ENV_SMTP_USER
+            SMTP_PASS=$ENV_SMTP_PASS
+            FROM_EMAIL=$ENV_FROM_EMAIL
+            S3_HOST=$ENV_S3_HOST
+            S3_KEY=$ENV_S3_KEY
+            S3_TOKEN=$ENV_S3_TOKEN
+            S3_NAME=$ENV_S3_NAME
+            S3_REGION=$ENV_S3_REGION
+            GEMINI_API_KEY=$ENV_GEMINI_API_KEY
+            STRIPE_SECRET_KEY=$ENV_STRIPE_SECRET_KEY
+            STRIPE_WEBHOOK_SECRET=$ENV_STRIPE_WEBHOOK_SECRET
+            EOF
+            chmod 600 /home/deploy/apps/iq-rest-dashboard-api/.env
+
+      - name: Install runtime deps and restart
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: deployer
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            set -e
+            cd /home/deploy/apps/iq-rest-dashboard-api
+            npm ci --omit=dev --legacy-peer-deps
+            npx prisma generate
+            npx prisma migrate deploy || true
+            pm2 restart dashboard-api --update-env || pm2 start dist/main.js --name dashboard-api --time --update-env
+            pm2 save

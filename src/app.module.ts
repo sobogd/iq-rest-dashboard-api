@@ -10,6 +10,12 @@ import { TablesModule } from "./tables/tables.module";
 import { ReservationsModule } from "./reservations/reservations.module";
 import { OrdersModule } from "./orders/orders.module";
 import { OnboardingModule } from "./onboarding/onboarding.module";
+import { UploadModule } from "./upload/upload.module";
+import { TranslateModule } from "./translate/translate.module";
+import { SupportModule } from "./support/support.module";
+import { StripeModule } from "./stripe/stripe.module";
+import { GeoModule } from "./geo/geo.module";
+import { AnalyticsModule } from "./analytics/analytics.module";
 import { HealthController } from "./health/health.controller";
 
 @Module({
@@ -25,6 +31,12 @@ import { HealthController } from "./health/health.controller";
     ReservationsModule,
     OrdersModule,
     OnboardingModule,
+    UploadModule,
+    TranslateModule,
+    SupportModule,
+    StripeModule,
+    GeoModule,
+    AnalyticsModule,
   ],
   controllers: [HealthController],
 })

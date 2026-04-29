@@ -6,10 +6,21 @@ import helmet from "helmet";
 import { AppModule } from "./app.module";
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  // rawBody: true keeps a Buffer copy of every request body on req.rawBody,
+  // which Stripe webhook signature verification requires.
+  const app = await NestFactory.create(AppModule, {
+    bufferLogs: true,
+    rawBody: true,
+  });
   const config = app.get(ConfigService);
 
-  app.use(helmet());
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      strictTransportSecurity: false,
+      crossOriginResourcePolicy: false,
+    }),
+  );
   app.use(cookieParser());
 
   const corsOrigins = (config.get<string>("CORS_ORIGINS") || "")

@@ -59,12 +59,19 @@ export class AuthController {
   @Post("logout")
   @HttpCode(HttpStatus.OK)
   async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
-    const email = req.cookies?.[EMAIL_COOKIE];
-    await this.auth.logout(email);
+    const cookies = req.cookies as Record<string, string | undefined> | undefined;
+    const adminOrigEmail = cookies?.["iqr_admin_original_email"];
+    // If inside impersonation, log out the admin (real user); otherwise the
+    // user identified by iqr_email.
+    const emailToLogOut = adminOrigEmail || cookies?.[EMAIL_COOKIE];
+    await this.auth.logout(emailToLogOut);
     const domain = this.config.get<string>("COOKIE_DOMAIN") || undefined;
     const baseOpts = { path: "/", ...(domain ? { domain } : {}) };
     res.clearCookie(SESSION_COOKIE, baseOpts);
     res.clearCookie(EMAIL_COOKIE, baseOpts);
+    res.clearCookie("iqr_admin_original_session", baseOpts);
+    res.clearCookie("iqr_admin_original_email", baseOpts);
+    res.clearCookie("iqr_admin_original_user_id", baseOpts);
     return { ok: true };
   }
 

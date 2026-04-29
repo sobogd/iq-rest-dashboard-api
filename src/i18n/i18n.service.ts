@@ -1,6 +1,43 @@
 import { Injectable } from "@nestjs/common";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+
+// Locale bundles are imported eagerly so they ship inlined in the compiled
+// JS — no runtime fs reads, no dist/assets dependency, deploys can't be
+// half-broken if the build skips the JSON files.
+import en from "./en.json";
+import es from "./es.json";
+import de from "./de.json";
+import fr from "./fr.json";
+import it from "./it.json";
+import pt from "./pt.json";
+import nl from "./nl.json";
+import pl from "./pl.json";
+import ru from "./ru.json";
+import uk from "./uk.json";
+import sv from "./sv.json";
+import da from "./da.json";
+import no from "./no.json";
+import fi from "./fi.json";
+import cs from "./cs.json";
+import el from "./el.json";
+import tr from "./tr.json";
+import ro from "./ro.json";
+import hu from "./hu.json";
+import bg from "./bg.json";
+import hr from "./hr.json";
+import sk from "./sk.json";
+import sl from "./sl.json";
+import et from "./et.json";
+import lv from "./lv.json";
+import lt from "./lt.json";
+import sr from "./sr.json";
+import ca from "./ca.json";
+import ga from "./ga.json";
+import is from "./is.json";
+import fa from "./fa.json";
+import ar from "./ar.json";
+import ja from "./ja.json";
+import ko from "./ko.json";
+import zh from "./zh.json";
 
 interface Bundle {
   companyDefaultName: string;
@@ -8,52 +45,26 @@ interface Bundle {
   supportEmail: { subject: string; greeting: string; body: string; cta: string; signature: string };
 }
 
-const RTL_LOCALES = new Set(["ar", "fa"]);
+const BUNDLES: Record<string, Bundle> = {
+  en, es, de, fr, it, pt, nl, pl, ru, uk,
+  sv, da, no, fi, cs, el, tr, ro, hu, bg,
+  hr, sk, sl, et, lv, lt, sr, ca, ga, is,
+  fa, ar, ja, ko, zh,
+};
 
-const SUPPORTED = [
-  "en", "es", "de", "fr", "it", "pt", "nl", "pl", "ru", "uk",
-  "sv", "da", "no", "fi", "cs", "el", "tr", "ro", "hu", "bg",
-  "hr", "sk", "sl", "et", "lv", "lt", "sr", "ca", "ga", "is",
-  "fa", "ar", "ja", "ko", "zh",
-];
+const RTL_LOCALES = new Set(["ar", "fa"]);
 
 function normalize(locale: string | null | undefined): string {
   if (!locale) return "en";
   const short = locale.toLowerCase().split(/[-_]/)[0];
-  return SUPPORTED.includes(short) ? short : "en";
+  return short in BUNDLES ? short : "en";
 }
-
-function loadBundle(locale: string): Bundle {
-  // dist/i18n.service.js sits one level under dist/, JSON files live next to it.
-  // Try the compiled-runtime path first; fall back to source path for tests.
-  const candidates = [
-    resolve(__dirname, `${locale}.json`),
-    resolve(__dirname, "..", "..", "src", "i18n", `${locale}.json`),
-  ];
-  for (const p of candidates) {
-    try {
-      return JSON.parse(readFileSync(p, "utf8")) as Bundle;
-    } catch {
-      // keep trying
-    }
-  }
-  // English is bundled with the app — if that fails something is very wrong.
-  if (locale !== "en") return loadBundle("en");
-  throw new Error("English i18n bundle missing");
-}
-
-const cache = new Map<string, Bundle>();
 
 @Injectable()
 export class I18nService {
   bundle(locale: string | null | undefined): Bundle {
     const lng = normalize(locale);
-    let b = cache.get(lng);
-    if (!b) {
-      b = loadBundle(lng);
-      cache.set(lng, b);
-    }
-    return b;
+    return BUNDLES[lng] || BUNDLES.en;
   }
 
   isRtl(locale: string | null | undefined): boolean {

@@ -111,5 +111,5 @@ jobs:
             npm ci --omit=dev --legacy-peer-deps
             npx prisma generate
             npx prisma migrate deploy || true
-            pm2 restart dashboard-api --update-env || pm2 start dist/main.js --name dashboard-api --time --update-env
+            pm2 restart dashboard-api --update-env || pm2 start dist/src/main.js --name dashboard-api --time --update-env
             pm2 save

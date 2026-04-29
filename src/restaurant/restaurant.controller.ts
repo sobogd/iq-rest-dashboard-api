@@ -4,7 +4,7 @@ import { AuthGuard, type AuthedRequest } from "../auth/auth.guard";
 import { RestaurantService } from "./restaurant.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { callGeminiImage, uploadGeneratedImage } from "../common/gemini-image";
-import { consumeAiImageQuota, getAiImageUsage, incrementAiImageUsage } from "../common/ai-quota";
+import { consumeAiImageQuota, getAiImageUsage, refundAiImageUsage } from "../common/ai-quota";
 import { getRequestCurrency } from "../common/geo";
 
 @Controller("restaurant")
@@ -43,7 +43,7 @@ export class RestaurantController {
   @Post("generate-background")
   async generateBackground(@Req() req: Request, @Body() body: { prompt?: string }) {
     const { companyId } = (req as AuthedRequest).authUser;
-    const { restaurantId } = await consumeAiImageQuota(this.prisma, companyId);
+    const { restaurantId, isPaid } = await consumeAiImageQuota(this.prisma, companyId);
     const userPrompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
 
     let prompt: string;
@@ -80,16 +80,20 @@ export class RestaurantController {
       ].join("\n");
     }
 
-    const b64 = await callGeminiImage({ prompt, aspectRatio: "9:16", timeoutMs: 50_000 });
-    const url = await uploadGeneratedImage(b64, {
-      pathPrefix: "restaurants",
-      companyId,
-      filenamePrefix: "bg",
-      resize: { w: 1080, h: 1920, fit: "cover" },
-      quality: 85,
-    });
-    await incrementAiImageUsage(this.prisma, restaurantId);
-    return { url };
+    try {
+      const b64 = await callGeminiImage({ prompt, aspectRatio: "9:16", timeoutMs: 50_000 });
+      const url = await uploadGeneratedImage(b64, {
+        pathPrefix: "restaurants",
+        companyId,
+        filenamePrefix: "bg",
+        resize: { w: 1080, h: 1920, fit: "cover" },
+        quality: 85,
+      });
+      return { url };
+    } catch (err) {
+      if (!isPaid) await refundAiImageUsage(this.prisma, restaurantId);
+      throw err;
+    }
   }
 
   @Get("subscription")

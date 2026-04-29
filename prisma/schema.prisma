@@ -346,6 +346,7 @@ model Session {
   @@index([userId])
   @@index([companyId])
   @@index([createdAt])
+  @@index([lastSeenAt])
   @@map("sessions")
 }
 
@@ -360,6 +361,7 @@ model AnalyticsEvent {
 
   @@index([event, createdAt])
   @@index([sessionId])
+  @@index([sessionId, createdAt])
   @@index([createdAt])
   @@map("analytics_events")
 }

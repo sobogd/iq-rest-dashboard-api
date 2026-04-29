@@ -7,6 +7,10 @@ export function isPaidActive(company: { plan: string | null; subscriptionStatus:
   return company.subscriptionStatus === "ACTIVE" && !!company.plan && company.plan !== "FREE";
 }
 
+// Atomically reserve a free-quota slot before doing the expensive Gemini call.
+// Paid plans skip the reservation (no quota); free plans bump the counter
+// inside a conditional updateMany so two concurrent requests can't both pass
+// the limit check before either has incremented.
 export async function consumeAiImageQuota(
   prisma: PrismaService,
   companyId: string,
@@ -18,22 +22,81 @@ export async function consumeAiImageQuota(
     }),
     prisma.restaurant.findFirst({
       where: { companyId },
-      select: { id: true, imageGenerationsUsed: true },
+      select: { id: true },
     }),
   ]);
   if (!company || !restaurant) throw new ForbiddenException("Not found");
 
   const paid = isPaidActive(company);
-  if (!paid && restaurant.imageGenerationsUsed >= FREE_AI_IMAGE_QUOTA) {
+  if (paid) return { restaurantId: restaurant.id, isPaid: true };
+
+  const reserved = await prisma.restaurant.updateMany({
+    where: { id: restaurant.id, imageGenerationsUsed: { lt: FREE_AI_IMAGE_QUOTA } },
+    data: { imageGenerationsUsed: { increment: 1 } },
+  });
+  if (reserved.count === 0) {
     throw new ForbiddenException("ai_quota_exceeded");
   }
-  return { restaurantId: restaurant.id, isPaid: paid };
+  return { restaurantId: restaurant.id, isPaid: false };
 }
 
-export async function incrementAiImageUsage(prisma: PrismaService, restaurantId: string) {
-  await prisma.restaurant.update({
-    where: { id: restaurantId },
-    data: { imageGenerationsUsed: { increment: 1 } },
+// Counter already incremented atomically in consumeAiImageQuota. Kept as a
+// no-op to preserve call sites; if the downstream operation fails callers
+// should call refundAiImageUsage instead.
+export async function incrementAiImageUsage(_prisma: PrismaService, _restaurantId: string) {
+  // intentionally empty
+}
+
+export async function refundAiImageUsage(prisma: PrismaService, restaurantId: string) {
+  await prisma.restaurant.updateMany({
+    where: { id: restaurantId, imageGenerationsUsed: { gt: 0 } },
+    data: { imageGenerationsUsed: { decrement: 1 } },
+  });
+}
+
+// Atomically reserve a free translation for the company's restaurant.
+// Paid plans skip the check entirely. Free plans use the per-restaurant
+// freeTranslationsLeft counter (default 5) — decremented inside an
+// updateMany conditional on > 0 so concurrent calls can't overshoot.
+export async function consumeAiTranslationQuota(
+  prisma: PrismaService,
+  companyId: string,
+): Promise<{ restaurantId: string; isPaid: boolean }> {
+  const [company, restaurant] = await Promise.all([
+    prisma.company.findUnique({
+      where: { id: companyId },
+      select: { plan: true, subscriptionStatus: true },
+    }),
+    prisma.restaurant.findFirst({
+      where: { companyId },
+      select: { id: true },
+    }),
+  ]);
+  if (!company || !restaurant) throw new ForbiddenException("Not found");
+
+  const paid = isPaidActive(company);
+  if (paid) return { restaurantId: restaurant.id, isPaid: true };
+
+  const reserved = await prisma.restaurant.updateMany({
+    where: { id: restaurant.id, freeTranslationsLeft: { gt: 0 } },
+    data: {
+      freeTranslationsLeft: { decrement: 1 },
+      translationsUsed: { increment: 1 },
+    },
+  });
+  if (reserved.count === 0) {
+    throw new ForbiddenException("translation_quota_exceeded");
+  }
+  return { restaurantId: restaurant.id, isPaid: false };
+}
+
+export async function refundAiTranslationUsage(prisma: PrismaService, restaurantId: string) {
+  await prisma.restaurant.updateMany({
+    where: { id: restaurantId, translationsUsed: { gt: 0 } },
+    data: {
+      freeTranslationsLeft: { increment: 1 },
+      translationsUsed: { decrement: 1 },
+    },
   });
 }
 

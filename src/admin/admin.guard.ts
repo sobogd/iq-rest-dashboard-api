@@ -18,7 +18,9 @@ export class AdminGuard implements CanActivate {
     // POST /api/admin/impersonate/exit must work while impersonating —
     // the current user is the target (not admin). Skip the admin email
     // check; the endpoint itself validates admin_original_* cookies.
-    if (path.endsWith("/admin/impersonate/exit")) return true;
+    if (path === "/admin/impersonate/exit" || path === "/api/admin/impersonate/exit") {
+      return true;
+    }
 
     const ok = await this.authGuard.canActivate(ctx);
     if (!ok) return false;

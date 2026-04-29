@@ -17,7 +17,7 @@ import type { Request } from "express";
 import { AuthGuard, type AuthedRequest } from "../auth/auth.guard";
 import { ItemsService } from "./items.service";
 import { callGeminiImage, uploadGeneratedImage } from "../common/gemini-image";
-import { consumeAiImageQuota, incrementAiImageUsage } from "../common/ai-quota";
+import { consumeAiImageQuota, refundAiImageUsage } from "../common/ai-quota";
 import { PrismaService } from "../prisma/prisma.service";
 
 @Controller("items")
@@ -73,7 +73,7 @@ export class ItemsController {
     if (!userPrompt?.trim() && !name?.trim()) {
       throw new BadRequestException("Name or prompt is required");
     }
-    const { restaurantId } = await consumeAiImageQuota(this.prisma, companyId);
+    const { restaurantId, isPaid } = await consumeAiImageQuota(this.prisma, companyId);
     const categoryLine = categoryName?.trim() ? `Category: ${categoryName.trim()}.` : "";
     const descLine = description?.trim() ? `${description.trim()}.` : "";
 
@@ -122,15 +122,19 @@ export class ItemsController {
           ].filter(Boolean).join("\n");
     }
 
-    const b64 = await callGeminiImage({ prompt, aspectRatio: "1:1", sourceImageWebpB64: sourceB64 });
-    const url = await uploadGeneratedImage(b64, {
-      pathPrefix: "temp",
-      companyId,
-      filenamePrefix: "ai",
-      resize: { w: 1500, h: 1500, fit: "inside" },
-      quality: 90,
-    });
-    await incrementAiImageUsage(this.prisma, restaurantId);
-    return { url };
+    try {
+      const b64 = await callGeminiImage({ prompt, aspectRatio: "1:1", sourceImageWebpB64: sourceB64 });
+      const url = await uploadGeneratedImage(b64, {
+        pathPrefix: "temp",
+        companyId,
+        filenamePrefix: "ai",
+        resize: { w: 1500, h: 1500, fit: "inside" },
+        quality: 90,
+      });
+      return { url };
+    } catch (err) {
+      if (!isPaid) await refundAiImageUsage(this.prisma, restaurantId);
+      throw err;
+    }
   }
 }

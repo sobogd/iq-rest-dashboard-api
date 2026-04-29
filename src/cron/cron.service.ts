@@ -43,14 +43,22 @@ export class CronService {
       take: MAX_PER_RUN,
     });
 
-    // Session has companyId but no inverse relation, count separately.
-    const targets: typeof candidates = [];
-    for (const c of candidates) {
-      if (c._count.pageViews > 0) continue;
-      const sessionCount = await this.prisma.session.count({ where: { companyId: c.id } });
-      if (sessionCount > 0) continue;
-      targets.push(c);
+    // Session has companyId but no inverse relation. One groupBy avoids N+1.
+    const candidateIds = candidates.map((c) => c.id);
+    const sessionGroups = candidateIds.length
+      ? await this.prisma.session.groupBy({
+          by: ["companyId"],
+          where: { companyId: { in: candidateIds } },
+          _count: { _all: true },
+        })
+      : [];
+    const sessionCountByCompany = new Map<string, number>();
+    for (const g of sessionGroups) {
+      if (g.companyId) sessionCountByCompany.set(g.companyId, g._count._all);
     }
+    const targets = candidates.filter(
+      (c) => c._count.pageViews === 0 && (sessionCountByCompany.get(c.id) ?? 0) === 0,
+    );
 
     if (targets.length === 0) {
       this.logger.log(`[cleanup] no empty companies to delete`);

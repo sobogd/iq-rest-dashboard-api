@@ -16,12 +16,13 @@ import { s3Client, s3Bucket, s3Key, getPublicUrl } from "./s3";
 
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 const VIDEO_TYPES = ["video/mp4", "video/webm", "video/quicktime"];
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024; // 25 MB
 
 @Controller("upload")
 @UseGuards(AuthGuard)
 export class UploadController {
   @Post()
-  @UseInterceptors(FileInterceptor("file"))
+  @UseInterceptors(FileInterceptor("file", { limits: { fileSize: MAX_UPLOAD_BYTES } }))
   async upload(@Req() req: Request, @UploadedFile() file: Express.Multer.File) {
     if (!file) throw new BadRequestException("No file provided");
     if (![...IMAGE_TYPES, ...VIDEO_TYPES].includes(file.mimetype)) {

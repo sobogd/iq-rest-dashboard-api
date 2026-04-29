@@ -87,10 +87,11 @@ export class ItemsService {
     const siblings = await this.prisma.item.findMany({
       where: { companyId, categoryId: item.categoryId },
       orderBy: { sortOrder: "asc" },
+      select: { id: true, sortOrder: true },
     });
     const idx = siblings.findIndex((it) => it.id === itemId);
     const target = direction === "up" ? idx - 1 : idx + 1;
-    if (target < 0 || target >= siblings.length) return siblings;
+    if (target < 0 || target >= siblings.length) return { swapped: [] };
 
     const a = siblings[idx];
     const b = siblings[target];
@@ -98,6 +99,11 @@ export class ItemsService {
       this.prisma.item.update({ where: { id: a.id }, data: { sortOrder: b.sortOrder } }),
       this.prisma.item.update({ where: { id: b.id }, data: { sortOrder: a.sortOrder } }),
     ]);
-    return this.prisma.item.findMany({ where: { companyId }, orderBy: { sortOrder: "asc" } });
+    return {
+      swapped: [
+        { id: a.id, sortOrder: b.sortOrder },
+        { id: b.id, sortOrder: a.sortOrder },
+      ],
+    };
   }
 }

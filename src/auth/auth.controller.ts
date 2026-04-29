@@ -39,6 +39,23 @@ export class AuthController {
     return { ok: true, onboardingStep, isNewUser };
   }
 
+  @Post("google")
+  @HttpCode(HttpStatus.OK)
+  async google(@Body() body: { credential?: string }, @Res({ passthrough: true }) res: Response) {
+    const result = await this.auth.verifyGoogleCredential(body.credential || "");
+    const domain = this.config.get<string>("COOKIE_DOMAIN") || undefined;
+    const opts = authCookieOptions(domain);
+    res.cookie(SESSION_COOKIE, result.token, opts);
+    res.cookie(EMAIL_COOKIE, result.email, { ...opts, httpOnly: false });
+    return {
+      ok: true,
+      email: result.email,
+      userId: result.userId,
+      onboardingStep: result.onboardingStep,
+      isNewUser: result.isNewUser,
+    };
+  }
+
   @Post("logout")
   @HttpCode(HttpStatus.OK)
   async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {

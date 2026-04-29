@@ -184,4 +184,70 @@ export class AuthService {
       data: { sessionToken: null },
     }).catch(() => {});
   }
+
+  async verifyGoogleCredential(credential: string): Promise<{
+    token: string;
+    userId: string;
+    email: string;
+    onboardingStep: number;
+    isNewUser: boolean;
+  }> {
+    if (!credential) throw new BadRequestException("Missing credential");
+    const clientId = this.config.get<string>("GOOGLE_CLIENT_ID");
+    if (!clientId) throw new HttpException("Google auth not configured", HttpStatus.INTERNAL_SERVER_ERROR);
+
+    const { OAuth2Client } = await import("google-auth-library");
+    const oauth = new OAuth2Client(clientId);
+    let payload: { email?: string; name?: string } | undefined;
+    try {
+      const ticket = await oauth.verifyIdToken({ idToken: credential, audience: clientId });
+      payload = ticket.getPayload() as { email?: string; name?: string } | undefined;
+    } catch {
+      throw new BadRequestException("Invalid Google token");
+    }
+    if (!payload?.email) throw new BadRequestException("Invalid Google token");
+
+    const email = payload.email.trim().toLowerCase();
+    const displayName = payload.name || email.split("@")[0];
+
+    let user = await this.prisma.user.findUnique({
+      where: { email },
+      include: { companies: { take: 1, include: { company: { select: { id: true, onboardingStep: true } } } } },
+    });
+    let isNewUser = false;
+
+    if (!user) {
+      isNewUser = true;
+      const created = await this.prisma.$transaction(async (tx) => {
+        const newUser = await tx.user.create({ data: { email } });
+        const company = await tx.company.create({
+          data: {
+            name: displayName,
+            onboardingStep: 0,
+            trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+          },
+        });
+        await tx.userCompany.create({
+          data: { userId: newUser.id, companyId: company.id, role: "owner" },
+        });
+        return newUser;
+      });
+      user = await this.prisma.user.findUnique({
+        where: { id: created.id },
+        include: { companies: { take: 1, include: { company: { select: { id: true, onboardingStep: true } } } } },
+      });
+    }
+
+    if (!user) throw new HttpException("Failed to load user", HttpStatus.INTERNAL_SERVER_ERROR);
+
+    const token = generateSessionToken();
+    const tokenHash = hashSessionToken(token);
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { sessionToken: tokenHash },
+    });
+
+    const onboardingStep = user.companies[0]?.company?.onboardingStep ?? 0;
+    return { token, userId: user.id, email, onboardingStep, isNewUser };
+  }
 }

@@ -15,6 +15,7 @@ export class CronService {
   async cleanupEmptyCompanies() {
     const dryRun = process.env.CRON_CLEANUP_DRY_RUN === "true";
     const cutoff = new Date(Date.now() - GRACE_PERIOD_MS);
+    this.logger.log(`[cleanup] tick — dryRun=${dryRun} cutoff=${cutoff.toISOString()}`);
 
     // Multiple safety filters — must satisfy ALL to qualify for deletion:
     //   1. Created more than 24h ago (grace period for fresh signups).
@@ -26,6 +27,9 @@ export class CronService {
     //   7. Zero support messages.
     //   8. Zero analytics sessions referencing the company.
     //   9. Zero page views.
+    //  10. At least one user linked, AND every linked user has
+    //      sessionToken = null (i.e. OTP was sent but never verified —
+    //      so nobody ever actually entered the dashboard).
     const candidates = await this.prisma.company.findMany({
       where: {
         createdAt: { lt: cutoff },
@@ -35,9 +39,13 @@ export class CronService {
         categories: { none: {} },
         items: { none: {} },
         supportMessages: { none: {} },
+        users: {
+          some: {},
+          every: { user: { sessionToken: null } },
+        },
       },
       include: {
-        users: { include: { user: { select: { id: true, email: true } } } },
+        users: { include: { user: { select: { id: true, email: true, sessionToken: true } } } },
         _count: { select: { pageViews: true } },
       },
       take: MAX_PER_RUN,

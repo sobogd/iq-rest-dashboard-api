@@ -1,0 +1,16 @@
+{
+  "companyDefaultName": "Můj podnik",
+  "otpEmail": {
+    "subject": "Váš kód: {code}",
+    "greeting": "Dobrý den,",
+    "intro": "Tento kód použijte k přihlášení do IQ Rest.",
+    "expiry": "Platnost vyprší za 5 minut."
+  },
+  "supportEmail": {
+    "subject": "Máte novou zprávu od podpory IQ Rest",
+    "greeting": "Dobrý den!",
+    "body": "Máte novou zprávu od našeho týmu podpory. Pro zobrazení si prosím zkontrolujte svůj ovládací panel.",
+    "cta": "Otevřít chat s podporou",
+    "signature": "S pozdravem,<br>Tým IQ Rest"
+  }
+}

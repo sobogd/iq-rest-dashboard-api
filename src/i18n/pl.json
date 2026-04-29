@@ -1,0 +1,16 @@
+{
+  "companyDefaultName": "Moja Restauracja",
+  "otpEmail": {
+    "subject": "Twój kod: {code}",
+    "greeting": "Cześć,",
+    "intro": "Użyj tego kodu, aby zalogować się do IQ Rest.",
+    "expiry": "Wygasa za 5 minut."
+  },
+  "supportEmail": {
+    "subject": "Masz nową wiadomość od wsparcia IQ Rest",
+    "greeting": "Cześć!",
+    "body": "Masz nową wiadomość od naszego zespołu wsparcia. Sprawdź swój panel, aby ją zobaczyć.",
+    "cta": "Otwórz czat wsparcia",
+    "signature": "Pozdrawiamy,<br>Zespół IQ Rest"
+  }
+}

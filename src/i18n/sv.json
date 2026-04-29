@@ -1,0 +1,16 @@
+{
+  "companyDefaultName": "Mitt Företag",
+  "otpEmail": {
+    "subject": "Din kod: {code}",
+    "greeting": "Hej,",
+    "intro": "Använd den här koden för att logga in på IQ Rest.",
+    "expiry": "Går ut om 5 minuter."
+  },
+  "supportEmail": {
+    "subject": "Du har ett nytt meddelande från IQ Rest Support",
+    "greeting": "Hej!",
+    "body": "Du har ett nytt meddelande från vårt supportteam. Vänligen kontrollera din kontrollpanel för att se det.",
+    "cta": "Öppna supportchatten",
+    "signature": "Med vänliga hälsningar,<br>IQ Rest-teamet"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "companyDefaultName": "マイレストラン",
+  "otpEmail": {
+    "subject": "認証コード: {code}",
+    "greeting": "こんにちは、",
+    "intro": "このコードを使用してIQ Restにサインインしてください。",
+    "expiry": "5分後に有効期限が切れます。"
+  },
+  "supportEmail": {
+    "subject": "IQ Restサポートから新しいメッセージが届きました",
+    "greeting": "こんにちは！",
+    "body": "サポートチームから新しいメッセージが届いています。ダッシュボードでご確認ください。",
+    "cta": "サポートチャットを開く",
+    "signature": "よろしくお願いいたします。<br>IQ Restチーム"
+  }
+}

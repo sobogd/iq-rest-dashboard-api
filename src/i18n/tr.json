@@ -1,0 +1,16 @@
+{
+  "companyDefaultName": "Restoranım",
+  "otpEmail": {
+    "subject": "Kodunuz: {code}",
+    "greeting": "Merhaba,",
+    "intro": "IQ Rest'e giriş yapmak için bu kodu kullanın.",
+    "expiry": "5 dakika içinde süresi dolar."
+  },
+  "supportEmail": {
+    "subject": "IQ Rest Destek ekibinden yeni bir mesajınız var",
+    "greeting": "Merhaba!",
+    "body": "Destek ekibimizden yeni bir mesajınız var. Görüntülemek için lütfen kontrol panelinizi kontrol edin.",
+    "cta": "Destek Sohbetini Aç",
+    "signature": "Sevgiler,<br>IQ Rest Ekibi"
+  }
+}

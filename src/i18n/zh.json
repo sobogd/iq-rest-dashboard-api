@@ -1,0 +1,16 @@
+{
+  "companyDefaultName": "我的餐厅",
+  "otpEmail": {
+    "subject": "您的验证码：{code}",
+    "greeting": "您好，",
+    "intro": "请使用此代码登录 IQ Rest。",
+    "expiry": "验证码将在5分钟后失效。"
+  },
+  "supportEmail": {
+    "subject": "您有一条来自 IQ Rest 支持团队的新消息",
+    "greeting": "您好！",
+    "body": "您收到了我们支持团队的新消息。请登录您的控制面板查看。",
+    "cta": "打开支持聊天",
+    "signature": "祝好，<br>IQ Rest 团队"
+  }
+}

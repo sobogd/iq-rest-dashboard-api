@@ -1,0 +1,16 @@
+{
+  "companyDefaultName": "Minu Ettevõte",
+  "otpEmail": {
+    "subject": "Teie kood: {code}",
+    "greeting": "Tere,",
+    "intro": "Kasutage seda koodi IQ Resti sisselogimiseks.",
+    "expiry": "Aegub 5 minuti pärast."
+  },
+  "supportEmail": {
+    "subject": "Teil on uus sõnum IQ Resti klienditoelt",
+    "greeting": "Hei!",
+    "body": "Meie klienditoe meeskonnalt on teile uus sõnum. Palun vaadake seda oma juhtpaneelilt.",
+    "cta": "Ava klienditoe vestlus",
+    "signature": "Parimate soovidega,<br>IQ Resti meeskond"
+  }
+}

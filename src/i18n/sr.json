@@ -1,0 +1,16 @@
+{
+  "companyDefaultName": "Moj restoran",
+  "otpEmail": {
+    "subject": "Vaš kôd: {code}",
+    "greeting": "Zdravo,",
+    "intro": "Iskoristite ovaj kôd da se prijavite na IQ Rest.",
+    "expiry": "Ističe za 5 minuta."
+  },
+  "supportEmail": {
+    "subject": "Imate novu poruku od IQ Rest podrške",
+    "greeting": "Zdravo!",
+    "body": "Imate novu poruku od našeg tima za podršku. Molimo vas da proverite svoju kontrolnu tablu da biste je videli.",
+    "cta": "Otvori čet podrške",
+    "signature": "Srdačan pozdrav,<br>IQ Rest tim"
+  }
+}

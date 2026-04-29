@@ -1,0 +1,16 @@
+{
+  "companyDefaultName": "Min Restaurant",
+  "otpEmail": {
+    "subject": "Din kode: {code}",
+    "greeting": "Hej,",
+    "intro": "Brug denne kode til at logge ind på IQ Rest.",
+    "expiry": "Udløber om 5 minutter."
+  },
+  "supportEmail": {
+    "subject": "Du har en ny besked fra IQ Rest Support",
+    "greeting": "Hej!",
+    "body": "Du har en ny besked fra vores supportteam. Tjek venligst dit dashboard for at se den.",
+    "cta": "Åbn supportchat",
+    "signature": "Med venlig hilsen,<br>IQ Rest-teamet"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "companyDefaultName": "우리 가게",
+  "otpEmail": {
+    "subject": "인증 코드: {code}",
+    "greeting": "안녕하세요,",
+    "intro": "IQ Rest에 로그인하려면 이 코드를 사용하세요.",
+    "expiry": "5분 후에 만료됩니다."
+  },
+  "supportEmail": {
+    "subject": "IQ Rest 지원팀에서 새 메시지가 도착했습니다",
+    "greeting": "안녕하세요!",
+    "body": "지원팀에서 새 메시지를 보냈습니다. 대시보드에서 확인해주세요.",
+    "cta": "지원 채팅 열기",
+    "signature": "감사합니다,<br>IQ Rest 팀 드림"
+  }
+}

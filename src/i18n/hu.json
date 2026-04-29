@@ -1,0 +1,16 @@
+{
+  "companyDefaultName": "Éttermem",
+  "otpEmail": {
+    "subject": "A kódod: {code}",
+    "greeting": "Szia!",
+    "intro": "Ezzel a kóddal tudsz bejelentkezni az IQ Rest rendszerbe.",
+    "expiry": "5 perc múlva lejár."
+  },
+  "supportEmail": {
+    "subject": "Új üzeneted érkezett az IQ Rest ügyfélszolgálatától",
+    "greeting": "Szia!",
+    "body": "Új üzeneted érkezett az ügyfélszolgálati csapatunktól. Kérjük, ellenőrizd a vezérlőpultodat a megtekintéshez.",
+    "cta": "Ügyfélszolgálati csevegés megnyitása",
+    "signature": "Üdvözlettel,<br>Az IQ Rest csapata"
+  }
+}

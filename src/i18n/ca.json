@@ -1,0 +1,16 @@
+{
+  "companyDefaultName": "El meu restaurant",
+  "otpEmail": {
+    "subject": "El teu codi: {code}",
+    "greeting": "Hola,",
+    "intro": "Fes servir aquest codi per iniciar sessió a IQ Rest.",
+    "expiry": "Caduca en 5 minuts."
+  },
+  "supportEmail": {
+    "subject": "Tens un missatge nou del suport d'IQ Rest",
+    "greeting": "Hola!",
+    "body": "Tens un missatge nou del nostre equip de suport. Si us plau, consulta el teu tauler de control per veure'l.",
+    "cta": "Obre el xat de suport",
+    "signature": "Salutacions,<br>L'equip d'IQ Rest"
+  }
+}

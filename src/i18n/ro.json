@@ -1,0 +1,16 @@
+{
+  "companyDefaultName": "Restaurantul Meu",
+  "otpEmail": {
+    "subject": "Codul tău: {code}",
+    "greeting": "Salut,",
+    "intro": "Folosește acest cod pentru a te conecta la IQ Rest.",
+    "expiry": "Expiră în 5 minute."
+  },
+  "supportEmail": {
+    "subject": "Ai un mesaj nou de la Suport IQ Rest",
+    "greeting": "Salut!",
+    "body": "Ai un mesaj nou de la echipa noastră de suport. Te rugăm să verifici panoul de control pentru a-l vizualiza.",
+    "cta": "Deschide chatul de suport",
+    "signature": "Cu bine,<br>Echipa IQ Rest"
+  }
+}

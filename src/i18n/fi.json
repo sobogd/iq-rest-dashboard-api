@@ -1,0 +1,16 @@
+{
+  "companyDefaultName": "Oma Yritys",
+  "otpEmail": {
+    "subject": "Koodisi: {code}",
+    "greeting": "Hei,",
+    "intro": "Käytä tätä koodia kirjautuaksesi IQ Rest -palveluun.",
+    "expiry": "Vanhenee 5 minuutin kuluttua."
+  },
+  "supportEmail": {
+    "subject": "Sinulla on uusi viesti IQ Rest -tuesta",
+    "greeting": "Hei!",
+    "body": "Tukitiimiltämme on uusi viesti sinulle. Tarkista viesti hallintapaneelistasi.",
+    "cta": "Avaa tukikeskustelu",
+    "signature": "Terveisin,<br>IQ Rest -tiimi"
+  }
+}

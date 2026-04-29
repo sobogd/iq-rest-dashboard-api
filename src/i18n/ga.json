@@ -1,0 +1,16 @@
+{
+  "companyDefaultName": "Mo Chuideachta",
+  "otpEmail": {
+    "subject": "Do chód: {code}",
+    "greeting": "Haigh,",
+    "intro": "Bain úsáid as an gcód seo chun síniú isteach in IQ Rest.",
+    "expiry": "In éag i gceann 5 nóiméad."
+  },
+  "supportEmail": {
+    "subject": "Tá teachtaireacht nua agat ó Thacaíocht IQ Rest",
+    "greeting": "Haigh!",
+    "body": "Tá teachtaireacht nua agat ónár bhfoireann tacaíochta. Seiceáil do dheaischlár le do thoil chun í a fheiceáil.",
+    "cta": "Oscail Comhrá Tacaíochta",
+    "signature": "Le dea-ghuí,<br>Foireann IQ Rest"
+  }
+}

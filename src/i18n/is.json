@@ -1,0 +1,16 @@
+{
+  "companyDefaultName": "Fyrirtækið mitt",
+  "otpEmail": {
+    "subject": "Kóðinn þinn: {code}",
+    "greeting": "Hæ,",
+    "intro": "Notaðu þennan kóða til að skrá þig inn á IQ Rest.",
+    "expiry": "Rennur út eftir 5 mínútur."
+  },
+  "supportEmail": {
+    "subject": "Þú hefur fengið ný skilaboð frá þjónustuveri IQ Rest",
+    "greeting": "Hæ!",
+    "body": "Þú hefur fengið ný skilaboð frá þjónustuteyminu okkar. Vinsamlegast athugaðu mælaborðið þitt til að skoða þau.",
+    "cta": "Opna þjónustuspjall",
+    "signature": "Bestu kveðjur,<br>Teymi IQ Rest"
+  }
+}

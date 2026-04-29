@@ -25,17 +25,14 @@ const SEND_LIMIT_MAX = 5;
 const VERIFY_LIMIT_WINDOW = 15 * 60 * 1000;
 const VERIFY_LIMIT_MAX = 10;
 
-// Companies created before LEGACY_DASHBOARD_CUTOFF (ISO date) keep using
-// the old monolith dashboard at iq-rest.com/<locale>/dashboard. The new
-// SPA detects the flag after login and redirects them. If the env var is
-// not set, no company is treated as legacy.
+// Companies created before this cutoff keep using the old monolith
+// dashboard at iq-rest.com/<locale>/dashboard. Hardcoded to the new SPA
+// launch date.
+const LEGACY_DASHBOARD_CUTOFF = new Date("2026-04-29T00:00:00.000Z");
+
 function isLegacyCompany(createdAt: Date | null | undefined): boolean {
   if (!createdAt) return false;
-  const cutoffRaw = process.env.LEGACY_DASHBOARD_CUTOFF;
-  if (!cutoffRaw) return false;
-  const cutoff = new Date(cutoffRaw);
-  if (isNaN(cutoff.getTime())) return false;
-  return createdAt < cutoff;
+  return createdAt < LEGACY_DASHBOARD_CUTOFF;
 }
 
 @Injectable()

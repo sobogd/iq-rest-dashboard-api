@@ -11,7 +11,7 @@ export class CronService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  @Cron(CronExpression.EVERY_HOUR)
+  @Cron(CronExpression.EVERY_5_MINUTES)
   async cleanupEmptyCompanies() {
     const dryRun = process.env.CRON_CLEANUP_DRY_RUN === "true";
     const cutoff = new Date(Date.now() - GRACE_PERIOD_MS);

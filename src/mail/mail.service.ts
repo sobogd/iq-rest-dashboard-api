@@ -60,4 +60,68 @@ export class MailService {
       text: `${greeting}\n\n${intro}\n\n${code}\n\n${expiry}`,
     });
   }
+
+  async sendSupportReplyNotification(toEmail: string, locale = "en"): Promise<void> {
+    const host = this.config.get<string>("SMTP_HOST");
+    const port = Number(this.config.get<string>("SMTP_PORT") || 587);
+    const user = this.config.get<string>("SMTP_USER");
+    const pass = this.config.get<string>("SMTP_PASS");
+    const from = this.config.get<string>("FROM_EMAIL") || user;
+    if (!host || !user || !pass || !from) {
+      this.logger.warn(`SMTP not configured — skip support notification for ${toEmail}`);
+      return;
+    }
+
+    const t = SUPPORT_EMAIL[locale] || SUPPORT_EMAIL.en;
+    const ctaUrl = (process.env.APP_URL || "https://dashboard.iq-rest.com").replace(/\/$/, "") +
+      `/${locale === "es" ? "es" : "en"}/dashboard/settings/support`;
+
+    const nodemailer = (await import("nodemailer")).default;
+    const transporter = nodemailer.createTransport({
+      host,
+      port,
+      secure: port === 465,
+      auth: { user, pass },
+    });
+
+    await transporter.sendMail({
+      from,
+      to: toEmail,
+      subject: t.subject,
+      html: `
+        <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:520px;margin:0 auto;padding:32px 20px;color:#1a1a1a">
+          <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${t.greeting}</p>
+          <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${t.body}</p>
+          <p style="font-size:17px;line-height:1.7;margin:0 0 20px">
+            <a href="${ctaUrl}" style="color:#0066cc">${t.cta}</a>
+          </p>
+          <p style="font-size:15px;margin:20px 0 0;color:#1a1a1a">${t.signature}</p>
+        </div>
+      `,
+      text: `${t.greeting}\n\n${t.body}\n\n${t.cta}: ${ctaUrl}\n\n${t.signature.replace(/<br\s*\/?>/g, "\n")}`,
+    });
+  }
 }
+
+const SUPPORT_EMAIL: Record<string, {
+  subject: string;
+  greeting: string;
+  body: string;
+  cta: string;
+  signature: string;
+}> = {
+  en: {
+    subject: "You have a new message from IQ Rest Support",
+    greeting: "Hey!",
+    body: "You have a new message from our support team. Please check your dashboard to view it.",
+    cta: "Open Support Chat",
+    signature: "Cheers,<br>The IQ Rest Team",
+  },
+  es: {
+    subject: "Tienes un nuevo mensaje del soporte de IQ Rest",
+    greeting: "¡Hola!",
+    body: "Tienes un nuevo mensaje de nuestro equipo de soporte. Por favor, revísalo en tu panel de control.",
+    cta: "Abrir chat de soporte",
+    signature: "Saludos,<br>El equipo de IQ Rest",
+  },
+};

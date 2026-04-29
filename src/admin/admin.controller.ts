@@ -20,6 +20,7 @@ import { ConfigService } from "@nestjs/config";
 import { PrismaService } from "../prisma/prisma.service";
 import { AdminGuard } from "./admin.guard";
 import { AuthService } from "../auth/auth.service";
+import { MailService } from "../mail/mail.service";
 import { authCookieOptions, generateSessionToken, hashSessionToken } from "../common/session-utils";
 import type { AuthedRequest } from "../auth/auth.guard";
 
@@ -41,6 +42,7 @@ export class AdminController {
     private readonly prisma: PrismaService,
     private readonly auth: AuthService,
     private readonly config: ConfigService,
+    private readonly mail: MailService,
   ) {}
 
   // ────────────────── COMPANIES ──────────────────
@@ -242,7 +244,7 @@ export class AdminController {
     const adminUser = await this.prisma.user.findUnique({ where: { email: adminEmail } });
     if (!adminUser) throw new NotFoundException("Admin user not found");
 
-    return this.prisma.supportMessage.create({
+    const created = await this.prisma.supportMessage.create({
       data: { message: text, companyId, userId: adminUser.id, isAdmin: true },
       select: {
         id: true,
@@ -252,6 +254,27 @@ export class AdminController {
         user: { select: { email: true } },
       },
     });
+
+    // Notify the company owner by email (best-effort).
+    const companyForEmail = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      select: {
+        users: {
+          take: 1,
+          include: { user: { select: { email: true } } },
+        },
+        restaurants: { take: 1, select: { defaultLanguage: true } },
+      },
+    });
+    const clientEmail = companyForEmail?.users[0]?.user?.email;
+    const locale = companyForEmail?.restaurants[0]?.defaultLanguage || "en";
+    if (clientEmail) {
+      this.mail
+        .sendSupportReplyNotification(clientEmail, locale)
+        .catch((err) => console.error("support email failed:", err));
+    }
+
+    return created;
   }
 
   // ────────────────── IMPERSONATE ──────────────────

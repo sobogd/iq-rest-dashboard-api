@@ -1,0 +1,16 @@
+{
+  "companyDefaultName": "My Company",
+  "otpEmail": {
+    "subject": "Your code: {code}",
+    "greeting": "Hi,",
+    "intro": "Use this code to sign in to IQ Rest.",
+    "expiry": "Expires in 5 minutes."
+  },
+  "supportEmail": {
+    "subject": "You have a new message from IQ Rest Support",
+    "greeting": "Hey!",
+    "body": "You have a new message from our support team. Please check your dashboard to view it.",
+    "cta": "Open Support Chat",
+    "signature": "Cheers,<br>The IQ Rest Team"
+  }
+}

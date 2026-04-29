@@ -9,6 +9,7 @@ import { ConfigService } from "@nestjs/config";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { MailService } from "../mail/mail.service";
+import { I18nService } from "../i18n/i18n.service";
 import {
   generateOTP,
   generateSessionToken,
@@ -44,6 +45,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly mail: MailService,
     private readonly config: ConfigService,
+    private readonly i18n: I18nService,
   ) {}
 
   private rateLimit(map: Map<string, { count: number; resetAt: number }>, key: string, max: number, window: number): boolean {
@@ -79,7 +81,7 @@ export class AuthService {
       });
     } else {
       isNewUser = true;
-      const companyName = locale === "es" ? "Mi Empresa" : "My Company";
+      const companyName = this.i18n.bundle(locale).companyDefaultName;
       const company = await this.prisma.company.create({
         data: {
           name: companyName,

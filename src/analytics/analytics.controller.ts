@@ -222,6 +222,18 @@ export class AnalyticsController {
         },
       });
       await this.prisma.session.delete({ where: { id: sessionId } });
+      // Repoint the apex cookie to the merged session id, otherwise the
+      // very next /event request would reach ensureSessionCookie with the
+      // stale (now-deleted) sid in the cookie and recreate a fresh
+      // Session row, undoing the merge.
+      res.cookie(COOKIE_NAME, existingSession.id, {
+        domain: getApexDomain(),
+        path: "/",
+        maxAge: COOKIE_MAX_AGE_MS,
+        sameSite: "lax",
+        secure: process.env.COOKIE_SECURE === "true" || process.env.NODE_ENV === "production",
+        httpOnly: false,
+      });
       return { sessionId: existingSession.id };
     }
 

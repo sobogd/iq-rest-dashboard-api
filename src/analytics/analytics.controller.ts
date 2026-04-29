@@ -32,10 +32,12 @@ interface EventBody {
   meta?: Record<string, unknown>;
 }
 
+// Apex-domain cookie so the landing site (iq-rest.com), the new SPA
+// dashboard (dashboard.iq-rest.com), and the API itself
+// (dashboard-api.iq-rest.com) all read the same analytics_sid value
+// and merge into one Session row. ENV override kept for staging.
 function getApexDomain(): string | undefined {
-  const explicit = process.env.ANALYTICS_COOKIE_DOMAIN;
-  if (explicit) return explicit;
-  return undefined;
+  return process.env.ANALYTICS_COOKIE_DOMAIN || ".iq-rest.com";
 }
 
 function readCookie(req: Request, name: string): string | undefined {

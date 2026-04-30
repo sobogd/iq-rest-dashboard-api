@@ -428,7 +428,7 @@ export class AdminController {
         where: { id: sessionId },
         include: {
           events: {
-            orderBy: { occurredAt: "asc" },
+            orderBy: { occurredAt: "desc" },
             skip: eventOffset,
             take: eventLimit,
             select: { id: true, event: true, occurredAt: true, createdAt: true },

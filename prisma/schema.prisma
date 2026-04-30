@@ -12,14 +12,15 @@ datasource db {
 }
 
 model User {
-  id           String    @id @default(cuid())
-  email        String    @unique
-  otp          String?
-  otpExpiresAt DateTime?
-  otpAttempts  Int       @default(0) // failed OTP verification attempts
-  sessionToken String?   // hashed session token for validation
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  id              String    @id @default(cuid())
+  email           String    @unique
+  otp             String?
+  otpExpiresAt    DateTime?
+  otpAttempts     Int       @default(0) // failed OTP verification attempts
+  sessionToken    String?   // hashed session token for validation
+  preferredLocale String?   // last locale the user actively used in the dashboard; drives email language
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   companies       UserCompany[]
   supportMessages SupportMessage[]

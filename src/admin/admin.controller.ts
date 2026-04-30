@@ -249,19 +249,24 @@ export class AdminController {
       },
     });
 
-    // Notify the company owner by email (best-effort).
+    // Notify the company owner by email (best-effort). Prefer the user's last
+    // dashboard locale; fall back to the restaurant's menu language, then en.
     const companyForEmail = await this.prisma.company.findUnique({
       where: { id: companyId },
       select: {
         users: {
           take: 1,
-          include: { user: { select: { email: true } } },
+          include: { user: { select: { email: true, preferredLocale: true } } },
         },
         restaurants: { take: 1, select: { defaultLanguage: true } },
       },
     });
-    const clientEmail = companyForEmail?.users[0]?.user?.email;
-    const locale = companyForEmail?.restaurants[0]?.defaultLanguage || "en";
+    const owner = companyForEmail?.users[0]?.user;
+    const clientEmail = owner?.email;
+    const locale =
+      owner?.preferredLocale ||
+      companyForEmail?.restaurants[0]?.defaultLanguage ||
+      "en";
     if (clientEmail) {
       this.mail
         .sendSupportReplyNotification(clientEmail, locale)

@@ -3,6 +3,7 @@ import {
   HttpException,
   HttpStatus,
   Injectable,
+  OnModuleDestroy,
   UnauthorizedException,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
@@ -37,16 +38,35 @@ function isLegacyCompany(createdAt: Date | null | undefined): boolean {
 }
 
 @Injectable()
-export class AuthService {
+export class AuthService implements OnModuleDestroy {
   private sendAttempts = new Map<string, { count: number; resetAt: number }>();
   private verifyAttempts = new Map<string, { count: number; resetAt: number }>();
+  // Drop expired rate-limit entries periodically so the Maps don't grow forever
+  // under abuse (each unique email leaves a record otherwise).
+  private readonly rateLimitSweep = setInterval(() => this.sweepRateLimits(), 10 * 60 * 1000);
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly mail: MailService,
     private readonly config: ConfigService,
     private readonly i18n: I18nService,
-  ) {}
+  ) {
+    // Don't keep the Node process alive for the cleanup timer alone.
+    this.rateLimitSweep.unref?.();
+  }
+
+  onModuleDestroy(): void {
+    clearInterval(this.rateLimitSweep);
+  }
+
+  private sweepRateLimits(): void {
+    const now = Date.now();
+    for (const map of [this.sendAttempts, this.verifyAttempts]) {
+      for (const [key, entry] of map) {
+        if (now > entry.resetAt) map.delete(key);
+      }
+    }
+  }
 
   private rateLimit(map: Map<string, { count: number; resetAt: number }>, key: string, max: number, window: number): boolean {
     const now = Date.now();
@@ -70,38 +90,47 @@ export class AuthService {
     const code = generateOTP();
     const otpHash = hashOTP(code);
     const otpExpiresAt = new Date(Date.now() + OTP_EXPIRY_MS);
+    const normalizedLocale = this.i18n.urlLocale(locale);
 
-    let user = await this.prisma.user.findUnique({ where: { email } });
+    const existing = await this.prisma.user.findUnique({ where: { email }, select: { id: true } });
     let isNewUser = false;
 
-    if (user) {
+    if (existing) {
       await this.prisma.user.update({
         where: { email },
-        data: { otp: otpHash, otpExpiresAt, otpAttempts: 0 },
+        data: { otp: otpHash, otpExpiresAt, otpAttempts: 0, preferredLocale: normalizedLocale },
       });
     } else {
       isNewUser = true;
-      const companyName = this.i18n.bundle(locale).companyDefaultName;
-      const company = await this.prisma.company.create({
-        data: {
-          name: companyName,
-          onboardingStep: 0,
-          trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
-        },
-      });
       try {
-        user = await this.prisma.user.create({
-          data: { email, otp: otpHash, otpExpiresAt, otpAttempts: 0 },
-        });
-        await this.prisma.userCompany.create({
-          data: { userId: user.id, companyId: company.id, role: "owner" },
+        await this.prisma.$transaction(async (tx) => {
+          const user = await tx.user.create({
+            data: {
+              email,
+              otp: otpHash,
+              otpExpiresAt,
+              otpAttempts: 0,
+              preferredLocale: normalizedLocale,
+            },
+          });
+          const company = await tx.company.create({
+            data: {
+              name: this.i18n.bundle(locale).companyDefaultName,
+              onboardingStep: 0,
+              trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+            },
+          });
+          await tx.userCompany.create({
+            data: { userId: user.id, companyId: company.id, role: "owner" },
+          });
         });
       } catch (e) {
         if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
           // Race: another request created the user. Update OTP on existing.
+          // No company is leaked because the transaction rolled the create back.
           await this.prisma.user.update({
             where: { email },
-            data: { otp: otpHash, otpExpiresAt, otpAttempts: 0 },
+            data: { otp: otpHash, otpExpiresAt, otpAttempts: 0, preferredLocale: normalizedLocale },
           });
           isNewUser = false;
         } else {

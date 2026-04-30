@@ -128,11 +128,26 @@ export class AnalyticsController {
     const city = decodeCity(headerStr(req, "cf-ipcity"));
     const gclid = body.gclid && GCLID_REGEX.test(body.gclid) ? body.gclid : null;
 
-    await this.prisma.session.upsert({
+    // Read existing row to know which first-touch fields are still NULL — we
+    // backfill those on update without overwriting fields already populated.
+    const existing = await this.prisma.session.findUnique({
       where: { id: sessionId },
-      create: { id: sessionId, ip, userAgent: ua, country, city, gclid },
-      update: {},
+      select: { country: true, city: true, gclid: true },
     });
+
+    if (existing) {
+      const patch: { country?: string; city?: string; gclid?: string } = {};
+      if (!existing.country && country) patch.country = country;
+      if (!existing.city && city) patch.city = city;
+      if (!existing.gclid && gclid) patch.gclid = gclid;
+      if (Object.keys(patch).length) {
+        await this.prisma.session.update({ where: { id: sessionId }, data: patch });
+      }
+    } else {
+      await this.prisma.session.create({
+        data: { id: sessionId, ip, userAgent: ua, country, city, gclid },
+      });
+    }
 
     await this.prisma.analyticsEvent.create({
       data: { sessionId, event: body.event, occurredAt },

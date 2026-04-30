@@ -27,7 +27,10 @@ const SID_REGEX = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 interface EventBody {
   event?: string;
   occurredAt?: string;
+  gclid?: string;
 }
+
+const GCLID_REGEX = /^[A-Za-z0-9_-]{1,256}$/;
 
 function getApexDomain(): string | undefined {
   return process.env.ANALYTICS_COOKIE_DOMAIN || undefined;
@@ -68,6 +71,21 @@ function extractIp(req: Request): string | null {
   return req.ip ?? null;
 }
 
+function headerStr(req: Request, name: string): string | null {
+  const v = req.headers[name];
+  if (typeof v === "string" && v.length) return v;
+  return null;
+}
+
+function decodeCity(raw: string | null): string | null {
+  if (!raw) return null;
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
 function parseOccurredAt(raw: string | undefined): Date {
   if (!raw) throw new BadRequestException("occurredAt required");
   const d = new Date(raw);
@@ -106,10 +124,13 @@ export class AnalyticsController {
     const sessionId = ensureSessionCookie(req, res);
     const ip = extractIp(req);
     const ua = req.headers["user-agent"] || null;
+    const country = headerStr(req, "cf-ipcountry");
+    const city = decodeCity(headerStr(req, "cf-ipcity"));
+    const gclid = body.gclid && GCLID_REGEX.test(body.gclid) ? body.gclid : null;
 
     await this.prisma.session.upsert({
       where: { id: sessionId },
-      create: { id: sessionId, ip, userAgent: ua },
+      create: { id: sessionId, ip, userAgent: ua, country, city, gclid },
       update: {},
     });
 

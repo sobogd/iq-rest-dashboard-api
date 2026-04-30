@@ -307,6 +307,9 @@ model Session {
   companyId String?
   ip        String?
   userAgent String?
+  country   String?
+  city      String?
+  gclid     String?
   createdAt DateTime @default(now())
 
   events AnalyticsEvent[]

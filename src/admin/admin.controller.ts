@@ -378,7 +378,7 @@ export class AdminController {
     const sessionRows = sessionIds.length
       ? await this.prisma.session.findMany({
           where: { id: { in: sessionIds } },
-          select: { id: true, userId: true, createdAt: true },
+          select: { id: true, userId: true, createdAt: true, country: true, gclid: true },
         })
       : [];
     const sessionById = new Map(sessionRows.map((s) => [s.id, s]));
@@ -404,6 +404,8 @@ export class AdminController {
         eventCount: Number(a.count),
         userId: s?.userId ?? null,
         email: s?.userId ? emailById.get(s.userId) ?? null : null,
+        country: s?.country ?? null,
+        source: s?.gclid ? "Ads" : "Direct",
       };
     });
 
@@ -460,6 +462,9 @@ export class AdminController {
               restaurantName,
               ip: session.ip,
               userAgent: session.userAgent,
+              country: session.country,
+              city: session.city,
+              gclid: session.gclid,
               createdAt: session.createdAt,
             }
           : null,

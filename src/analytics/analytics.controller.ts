@@ -16,10 +16,17 @@ import { AuthGuard, type AuthedRequest } from "../auth/auth.guard";
 import { PrismaService } from "../prisma/prisma.service";
 
 const COOKIE_NAME = "analytics_sid";
+const DISABLED_COOKIE = "analytics_disabled";
 const COOKIE_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000;
 const EVENT_REGEX = /^[a-z0-9_]{1,64}$/;
 const FUTURE_TOLERANCE_MS = 5 * 60 * 1000;
 const PAST_TOLERANCE_MS = 24 * 60 * 60 * 1000;
+
+function isAdminEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  const domain = (process.env.ADMIN_EMAIL_DOMAIN || "iq-rest.com").toLowerCase();
+  return email.toLowerCase().endsWith("@" + domain);
+}
 // Accept UUID v4 from this controller and cuid from prior IDs (admin reuse).
 // cuid: starts with "c", 25 chars total, [a-z0-9]. UUID: standard form.
 const SID_REGEX = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|c[a-z0-9]{24})$/i;
@@ -120,6 +127,11 @@ export class AnalyticsController {
     if (!body.event || !EVENT_REGEX.test(body.event)) {
       throw new BadRequestException("event invalid");
     }
+    // Admin browsers carry analytics_disabled=1 set on /identify. Skip writes
+    // entirely so admin activity never pollutes session/event aggregates.
+    if (readCookie(req, DISABLED_COOKIE) === "1") {
+      return { ok: true, disabled: true };
+    }
     const occurredAt = parseOccurredAt(body.occurredAt);
     const sessionId = ensureSessionCookie(req, res);
     const ip = extractIp(req);
@@ -160,8 +172,21 @@ export class AnalyticsController {
   @HttpCode(HttpStatus.OK)
   @UseGuards(AuthGuard)
   async identify(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
-    const { userId, companyId } = (req as AuthedRequest).authUser;
+    const { userId, companyId, email } = (req as AuthedRequest).authUser;
     const currentId = ensureSessionCookie(req, res);
+
+    if (isAdminEmail(email)) {
+      // Wipe whatever this browser produced so far + any other sessions
+      // attached to this admin user, then plant analytics_disabled=1 on the
+      // apex cookie so subsequent /event calls return without writes.
+      await this.prisma.$transaction([
+        this.prisma.analyticsEvent.deleteMany({ where: { sessionId: currentId } }),
+        this.prisma.session.deleteMany({ where: { OR: [{ id: currentId }, { userId }] } }),
+      ]);
+      res.cookie(DISABLED_COOKIE, "1", cookieOptions());
+      res.clearCookie(COOKIE_NAME, { domain: getApexDomain(), path: "/" });
+      return { disabled: true };
+    }
 
     const previous = await this.prisma.session.findFirst({
       where: { userId, NOT: { id: currentId } },

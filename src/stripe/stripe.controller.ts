@@ -231,12 +231,6 @@ export class StripeController {
               where: { id: companyId },
               data: { subscriptionStatus: "ACTIVE", paymentProcessing: false },
             });
-            await this.prisma.session
-              .updateMany({
-                where: { companyId, paidSubscription: false },
-                data: { paidSubscription: true },
-              })
-              .catch(() => undefined);
           }
         }
         break;

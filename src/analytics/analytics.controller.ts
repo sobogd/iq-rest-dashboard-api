@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   HttpCode,
@@ -8,56 +9,54 @@ import {
   Res,
   UseGuards,
 } from "@nestjs/common";
+import { Throttle, seconds, minutes } from "@nestjs/throttler";
 import type { Request, Response } from "express";
 import { randomUUID } from "node:crypto";
-import { UAParser } from "ua-parser-js";
 import { AuthGuard, type AuthedRequest } from "../auth/auth.guard";
 import { PrismaService } from "../prisma/prisma.service";
-import { getRequestCountry } from "../common/geo";
 
 const COOKIE_NAME = "analytics_sid";
 const COOKIE_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000;
-const BOT_PATTERN = /bot|crawl|spider|scraper|headless|phantom|selenium|puppeteer|lighthouse/i;
-
-const CONVERSION_FLAGS: Record<string, string> = {
-  auth_signup: "wasRegistered",
-  clicked_onboarding_continue: "namedRestaurant",
-};
+const EVENT_REGEX = /^[a-z0-9_]{1,64}$/;
+const FUTURE_TOLERANCE_MS = 5 * 60 * 1000;
+const PAST_TOLERANCE_MS = 24 * 60 * 60 * 1000;
+// Accept UUID v4 from this controller and cuid from prior IDs (admin reuse).
+// cuid: starts with "c", 25 chars total, [a-z0-9]. UUID: standard form.
+const SID_REGEX = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|c[a-z0-9]{24})$/i;
 
 interface EventBody {
   event?: string;
-  sessionId?: string;
-  gclid?: string;
-  keyword?: string;
-  meta?: Record<string, unknown>;
+  occurredAt?: string;
 }
 
-// Apex-domain cookie so the landing site (iq-rest.com), the new SPA
-// dashboard (dashboard.iq-rest.com), and the API itself
-// (dashboard-api.iq-rest.com) all read the same analytics_sid value
-// and merge into one Session row. ENV override kept for staging.
 function getApexDomain(): string | undefined {
-  return process.env.ANALYTICS_COOKIE_DOMAIN || ".iq-rest.com";
+  return process.env.ANALYTICS_COOKIE_DOMAIN || undefined;
+}
+
+function cookieOptions() {
+  return {
+    domain: getApexDomain(),
+    path: "/",
+    maxAge: COOKIE_MAX_AGE_MS,
+    sameSite: "lax" as const,
+    secure: process.env.COOKIE_SECURE === "true" || process.env.NODE_ENV === "production",
+    httpOnly: false,
+  };
 }
 
 function readCookie(req: Request, name: string): string | undefined {
+  const fromParser = (req.cookies as Record<string, string | undefined> | undefined)?.[name];
+  if (fromParser) return fromParser;
   const raw = req.headers.cookie || "";
   const m = raw.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
   return m ? decodeURIComponent(m[1]) : undefined;
 }
 
-function ensureSessionCookie(req: Request, res: Response, hint?: string | null): string {
+function ensureSessionCookie(req: Request, res: Response): string {
   const existing = readCookie(req, COOKIE_NAME);
-  if (existing) return existing;
-  const sessionId = hint && /^[0-9a-f-]{16,}$/i.test(hint) ? hint : randomUUID();
-  res.cookie(COOKIE_NAME, sessionId, {
-    domain: getApexDomain(),
-    path: "/",
-    maxAge: COOKIE_MAX_AGE_MS,
-    sameSite: "lax",
-    secure: process.env.COOKIE_SECURE === "true" || process.env.NODE_ENV === "production",
-    httpOnly: false,
-  });
+  if (existing && SID_REGEX.test(existing)) return existing;
+  const sessionId = randomUUID();
+  res.cookie(COOKIE_NAME, sessionId, cookieOptions());
   return sessionId;
 }
 
@@ -69,10 +68,30 @@ function extractIp(req: Request): string | null {
   return req.ip ?? null;
 }
 
+function parseOccurredAt(raw: string | undefined): Date {
+  if (!raw) throw new BadRequestException("occurredAt required");
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) throw new BadRequestException("occurredAt invalid");
+  const now = Date.now();
+  if (d.getTime() > now + FUTURE_TOLERANCE_MS) {
+    throw new BadRequestException("occurredAt too far in future");
+  }
+  if (d.getTime() < now - PAST_TOLERANCE_MS) {
+    throw new BadRequestException("occurredAt too far in past");
+  }
+  return d;
+}
+
 @Controller("analytics")
 export class AnalyticsController {
   constructor(private readonly prisma: PrismaService) {}
 
+  // 30 events/sec burst (covers 10-20 events/sec sustained per active user)
+  // and 1500/min sustained per IP. Anonymous endpoint, no auth.
+  @Throttle({
+    burst: { ttl: seconds(1), limit: 30 },
+    sustained: { ttl: minutes(1), limit: 1500 },
+  })
   @Post("event")
   @HttpCode(HttpStatus.OK)
   async event(
@@ -80,194 +99,61 @@ export class AnalyticsController {
     @Res({ passthrough: true }) res: Response,
     @Body() body: EventBody,
   ) {
-    if (!body.event) return { ok: false, error: "event required" };
-    const sessionId = ensureSessionCookie(req, res, body.sessionId);
-    // Race-safety: if the client posted a different sessionId hint than the
-    // cookie carries (e.g. one tab generated a UUID while another's
-    // Set-Cookie was still in flight), reattach any rows under that hint to
-    // the canonical cookie session and drop the stray row. Without this we
-    // end up with two Session rows for the same visit.
-    if (body.sessionId && body.sessionId !== sessionId) {
-      const stray = await this.prisma.session.findUnique({
-        where: { id: body.sessionId },
-        select: { id: true },
-      });
-      if (stray) {
-        await this.prisma.analyticsEvent.updateMany({
-          where: { sessionId: stray.id },
-          data: { sessionId },
-        });
-        await this.prisma.session
-          .delete({ where: { id: stray.id } })
-          .catch(() => undefined);
-      }
+    if (!body.event || !EVENT_REGEX.test(body.event)) {
+      throw new BadRequestException("event invalid");
     }
-
-    const ua = req.headers["user-agent"] || null;
+    const occurredAt = parseOccurredAt(body.occurredAt);
+    const sessionId = ensureSessionCookie(req, res);
     const ip = extractIp(req);
-    // Prefer Cloudflare/Vercel geo headers over the legacy geo_* cookies
-    // (the dashboard SPA never sets them, but `cf-ipcountry` reaches us in prod).
-    const cfCity = req.headers["cf-ipcity"];
-    const country = getRequestCountry(req) || readCookie(req, "geo_country") || null;
-    const city =
-      (typeof cfCity === "string" && cfCity ? decodeURIComponent(cfCity) : null) ||
-      readCookie(req, "geo_city") ||
-      null;
-    const landingPage = (body.meta?.page as string) || null;
+    const ua = req.headers["user-agent"] || null;
 
-    let browser: string | null = null;
-    let device: string | null = null;
-    if (ua) {
-      const r = UAParser(ua);
-      browser = r.browser.name || null;
-      device = r.device.type || "desktop";
-    }
-    const isBot = ua ? BOT_PATTERN.test(ua) : false;
-
-    const existing = await this.prisma.session.findUnique({
+    await this.prisma.session.upsert({
       where: { id: sessionId },
-      select: { id: true, country: true, city: true, landingPage: true, gclid: true, keyword: true },
+      create: { id: sessionId, ip, userAgent: ua },
+      update: {},
     });
-
-    if (existing) {
-      await this.prisma.session.update({
-        where: { id: sessionId },
-        data: {
-          userAgent: ua,
-          browser,
-          device,
-          ip,
-          isBot,
-          ...(existing.country === null && country ? { country } : {}),
-          ...(existing.city === null && city ? { city } : {}),
-          ...(existing.landingPage === null && landingPage ? { landingPage } : {}),
-          ...(existing.gclid === null && body.gclid ? { gclid: body.gclid } : {}),
-          ...(existing.keyword === null && body.keyword ? { keyword: body.keyword } : {}),
-        },
-      });
-    } else {
-      try {
-        await this.prisma.session.create({
-          data: {
-            id: sessionId,
-            country,
-            city,
-            landingPage,
-            gclid: body.gclid || null,
-            keyword: body.keyword || null,
-            userAgent: ua,
-            browser,
-            device,
-            ip,
-            isBot,
-          },
-        });
-      } catch (e) {
-        if (e && typeof e === "object" && "code" in e && (e as { code?: string }).code === "P2002") {
-          await this.prisma.session.update({
-            where: { id: sessionId },
-            data: { userAgent: ua, browser, device, ip, isBot },
-          });
-        } else {
-          throw e;
-        }
-      }
-    }
-
-    const flagField = CONVERSION_FLAGS[body.event];
-    if (flagField) {
-      await this.prisma.session
-        .update({ where: { id: sessionId }, data: { [flagField]: true } })
-        .catch(() => undefined);
-    }
 
     await this.prisma.analyticsEvent.create({
-      data: { event: body.event, sessionId, ...(body.meta ? { meta: body.meta as never } : {}) },
+      data: { sessionId, event: body.event, occurredAt },
     });
 
-    return { success: true, sessionId };
-  }
-
-  @Post("heartbeat")
-  @HttpCode(HttpStatus.OK)
-  async heartbeat(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Body() body: { sessionId?: string }) {
-    const sessionId = ensureSessionCookie(req, res, body.sessionId);
-    await this.prisma.session
-      .update({ where: { id: sessionId }, data: { lastSeenAt: new Date() } })
-      .catch(() => undefined);
     return { ok: true };
   }
 
-  @Post("link-session")
+  @Post("identify")
   @HttpCode(HttpStatus.OK)
   @UseGuards(AuthGuard)
-  async linkSession(
-    @Req() req: Request,
-    @Res({ passthrough: true }) res: Response,
-    @Body() body: { sessionId?: string },
-  ) {
+  async identify(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const { userId, companyId } = (req as AuthedRequest).authUser;
-    const sessionId = ensureSessionCookie(req, res, body.sessionId);
+    const currentId = ensureSessionCookie(req, res);
 
-    const anonSession = await this.prisma.session.findUnique({ where: { id: sessionId } });
-    const existingSession = await this.prisma.session.findFirst({
-      where: { userId },
+    const previous = await this.prisma.session.findFirst({
+      where: { userId, NOT: { id: currentId } },
       orderBy: { createdAt: "asc" },
+      select: { id: true, companyId: true },
     });
 
-    if (existingSession && anonSession && existingSession.id !== sessionId) {
-      await this.prisma.analyticsEvent.updateMany({
-        where: { sessionId },
-        data: { sessionId: existingSession.id },
-      });
-      await this.prisma.session.update({
-        where: { id: existingSession.id },
-        data: {
-          country: existingSession.country ?? anonSession.country,
-          gclid: existingSession.gclid ?? anonSession.gclid,
-          keyword: existingSession.keyword ?? anonSession.keyword,
-          userAgent: anonSession.userAgent ?? existingSession.userAgent,
-          browser: anonSession.browser ?? existingSession.browser,
-          device: anonSession.device ?? existingSession.device,
-          ip: anonSession.ip ?? existingSession.ip,
-          companyId: existingSession.companyId ?? companyId,
-          wasRegistered: existingSession.wasRegistered || anonSession.wasRegistered || true,
-          namedRestaurant: existingSession.namedRestaurant || anonSession.namedRestaurant,
-          selectedType: existingSession.selectedType || anonSession.selectedType,
-          modifiedMenu: existingSession.modifiedMenu || anonSession.modifiedMenu,
-          modifiedContacts: existingSession.modifiedContacts || anonSession.modifiedContacts,
-          modifiedDesign: existingSession.modifiedDesign || anonSession.modifiedDesign,
-          reached50Views: existingSession.reached50Views || anonSession.reached50Views,
-          paidSubscription: existingSession.paidSubscription || anonSession.paidSubscription,
-        },
-      });
-      await this.prisma.session.delete({ where: { id: sessionId } });
-      // Repoint the apex cookie to the merged session id, otherwise the
-      // very next /event request would reach ensureSessionCookie with the
-      // stale (now-deleted) sid in the cookie and recreate a fresh
-      // Session row, undoing the merge.
-      res.cookie(COOKIE_NAME, existingSession.id, {
-        domain: getApexDomain(),
-        path: "/",
-        maxAge: COOKIE_MAX_AGE_MS,
-        sameSite: "lax",
-        secure: process.env.COOKIE_SECURE === "true" || process.env.NODE_ENV === "production",
-        httpOnly: false,
-      });
-      return { sessionId: existingSession.id };
+    if (previous) {
+      await this.prisma.$transaction([
+        this.prisma.analyticsEvent.updateMany({
+          where: { sessionId: currentId },
+          data: { sessionId: previous.id },
+        }),
+        this.prisma.session.deleteMany({ where: { id: currentId } }),
+        this.prisma.session.update({
+          where: { id: previous.id },
+          data: { companyId: previous.companyId ?? companyId },
+        }),
+      ]);
+      res.cookie(COOKIE_NAME, previous.id, cookieOptions());
+      return { sessionId: previous.id };
     }
 
-    if (anonSession) {
-      await this.prisma.session.update({
-        where: { id: sessionId },
-        data: { userId, companyId, wasRegistered: true },
-      });
-      return { sessionId };
-    }
-
-    await this.prisma.session.create({
-      data: { id: sessionId, userId, companyId, wasRegistered: true },
+    await this.prisma.session.upsert({
+      where: { id: currentId },
+      create: { id: currentId, userId, companyId },
+      update: { userId, companyId },
     });
-    return { sessionId };
+    return { sessionId: currentId };
   }
 }

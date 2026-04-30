@@ -303,67 +303,31 @@ model SupportMessage {
 
 model Session {
   id        String   @id @default(cuid())
-
-  // Attribution (first-touch — written once, never overwritten)
-  country     String?
-  city        String?
-  landingPage String?
-  gclid       String?   // Google Click ID
-  keyword     String?   // Google Ads keyword
-
-  // Technical (last-touch — always updated to latest value)
-  userAgent String?
-  browser   String?
-  device    String?
-  ip        String?
-
-  // User binding (set on registration/login)
   userId    String?
   companyId String?
-
-  // Bot detection
-  isBot Boolean @default(false)
-
-  // Conversion flags (set once to true, never reset)
-  wasRegistered    Boolean @default(false)
-  namedRestaurant  Boolean @default(false)
-  selectedType     Boolean @default(false)
-  modifiedMenu     Boolean @default(false)
-  modifiedContacts Boolean @default(false)
-  modifiedDesign   Boolean @default(false)
-  reached50Views   Boolean @default(false)
-  paidSubscription Boolean @default(false)
-  conversionSent               Boolean @default(false)
-  conversionViewsSent          Boolean @default(false)
-  conversionSubscriptionSent   Boolean @default(false)
-
-  lastSeenAt DateTime?
-
+  ip        String?
+  userAgent String?
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
 
   events AnalyticsEvent[]
 
-  @@index([userId])
-  @@index([companyId])
+  @@index([userId, createdAt])
+  @@index([companyId, createdAt])
   @@index([createdAt])
-  @@index([lastSeenAt])
   @@map("sessions")
 }
 
 model AnalyticsEvent {
-  id        String   @id @default(cuid())
-  event     String
-  sessionId String
-  meta      Json?
-  createdAt DateTime @default(now())
+  id         String   @id @default(cuid())
+  sessionId  String
+  event      String
+  occurredAt DateTime
+  createdAt  DateTime @default(now())
 
   session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
-  @@index([event, createdAt])
-  @@index([sessionId])
-  @@index([sessionId, createdAt])
-  @@index([createdAt])
+  @@index([sessionId, occurredAt])
+  @@index([event, occurredAt])
   @@map("analytics_events")
 }
 

@@ -84,14 +84,11 @@ export class AdminController {
             GROUP BY "companyId"
           `,
           this.prisma.$queryRaw<{ companyId: string; last: Date | null }[]>`
-            SELECT "companyId",
-              GREATEST(
-                COALESCE(MAX("lastSeenAt"), 'epoch'::timestamp),
-                COALESCE(MAX("updatedAt"), 'epoch'::timestamp)
-              ) AS last
-            FROM sessions
-            WHERE "companyId" = ANY(${ids}::text[])
-            GROUP BY "companyId"
+            SELECT s."companyId", MAX(e."occurredAt") AS last
+            FROM sessions s
+            LEFT JOIN analytics_events e ON e."sessionId" = s."id"
+            WHERE s."companyId" = ANY(${ids}::text[])
+            GROUP BY s."companyId"
           `,
         ])
       : [[], []];
@@ -138,7 +135,7 @@ export class AdminController {
       this.prisma.pageView.count({ where: { companyId: id, createdAt: { gte: startOfMonth } } }),
       this.prisma.session.findFirst({
         where: { companyId: id },
-        orderBy: { updatedAt: "desc" },
+        orderBy: { createdAt: "desc" },
         select: { id: true },
       }),
     ]);
@@ -346,83 +343,99 @@ export class AdminController {
     @Query("period") period = "today",
     @Query("tz") tz = "UTC",
     @Query("offset") offsetRaw = "0",
-    @Query("limit") limitRaw = "5",
+    @Query("limit") limitRaw = "100",
   ) {
     const { dateFrom, dateTo } = computeDateRange(period, tz);
     const dateFilter = dateTo ? { gte: dateFrom, lt: dateTo } : { gte: dateFrom };
     const offset = Math.max(0, parseInt(offsetRaw, 10) || 0);
-    const limit = Math.min(2000, Math.max(1, parseInt(limitRaw, 10) || 1000));
+    const limit = Math.min(500, Math.max(1, parseInt(limitRaw, 10) || 100));
 
-    const where = { events: { some: { createdAt: dateFilter } } };
-    const total = await this.prisma.session.count({ where });
+    const dateLte = dateTo ?? new Date();
+    const total = await this.prisma.$queryRaw<{ count: bigint }[]>`
+      SELECT COUNT(DISTINCT "sessionId") AS count
+      FROM analytics_events
+      WHERE "occurredAt" >= ${dateFrom} AND "occurredAt" < ${dateLte}
+    `;
+    const totalCount = Number(total[0]?.count ?? 0);
 
-    const sessionsList = await this.prisma.session.findMany({
-      where,
-      orderBy: { updatedAt: "desc" },
-      skip: offset,
-      take: limit,
-      select: {
-        id: true,
-        country: true,
-        gclid: true,
-        userId: true,
-        lastSeenAt: true,
-        createdAt: true,
-        _count: { select: { events: true } },
-        events: { orderBy: { createdAt: "asc" }, select: { createdAt: true } },
-      },
-    });
+    // One pass: aggregate first/last/count per session within the window.
+    const aggregates = await this.prisma.$queryRaw<
+      { sessionId: string; first: Date; last: Date; count: bigint }[]
+    >`
+      SELECT "sessionId",
+             MIN("occurredAt") AS first,
+             MAX("occurredAt") AS last,
+             COUNT(*) AS count
+      FROM analytics_events
+      WHERE "occurredAt" >= ${dateFrom} AND "occurredAt" < ${dateLte}
+      GROUP BY "sessionId"
+      ORDER BY MAX("occurredAt") DESC
+      OFFSET ${offset}
+      LIMIT ${limit}
+    `;
 
-    const MAX_GAP_MS = 10 * 60 * 1000;
+    const sessionIds = aggregates.map((a) => a.sessionId);
+    const sessionRows = sessionIds.length
+      ? await this.prisma.session.findMany({
+          where: { id: { in: sessionIds } },
+          select: { id: true, userId: true, createdAt: true },
+        })
+      : [];
+    const sessionById = new Map(sessionRows.map((s) => [s.id, s]));
 
-    const sessions = sessionsList.map((s) => {
-      const lastEvent = s.events[s.events.length - 1]?.createdAt ?? s.createdAt;
-      let active = 0;
-      for (let i = 1; i < s.events.length; i++) {
-        const gap = s.events[i].createdAt.getTime() - s.events[i - 1].createdAt.getTime();
-        active += Math.min(gap, MAX_GAP_MS);
-      }
+    const userIds = Array.from(
+      new Set(sessionRows.map((s) => s.userId).filter((v): v is string => !!v)),
+    );
+    const users = userIds.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: userIds } },
+          select: { id: true, email: true },
+        })
+      : [];
+    const emailById = new Map(users.map((u) => [u.id, u.email]));
+
+    const sessions = aggregates.map((a) => {
+      const s = sessionById.get(a.sessionId);
+      const duration = Math.max(0, Math.round((a.last.getTime() - a.first.getTime()) / 1000));
       return {
-        sessionId: s.id,
-        lastEvent: lastEvent.toISOString(),
-        duration: Math.round(active / 1000),
-        eventCount: s._count.events,
-        country: s.country,
-        source: s.gclid ? "Ads" : "Direct",
-        hasUser: !!s.userId,
-        lastSeenAt: s.lastSeenAt?.toISOString() ?? null,
+        sessionId: a.sessionId,
+        lastEvent: a.last.toISOString(),
+        duration,
+        eventCount: Number(a.count),
+        userId: s?.userId ?? null,
+        email: s?.userId ? emailById.get(s.userId) ?? null : null,
       };
     });
 
-    return { sessions, total, hasMore: offset + sessions.length < total };
+    return { sessions, total: totalCount, hasMore: offset + sessions.length < totalCount };
   }
 
   @Get("analytics/sessions")
   async sessions(
-    @Query("event") event?: string,
     @Query("sessionId") sessionId?: string,
+    @Query("event") event?: string,
     @Query("from") from?: string,
     @Query("to") to?: string,
-    @Query("country") country?: string,
     @Query("eventOffset") eventOffsetRaw = "0",
-    @Query("eventLimit") eventLimitRaw = "15",
+    @Query("eventLimit") eventLimitRaw = "200",
   ) {
     if (sessionId) {
       const eventOffset = Math.max(0, parseInt(eventOffsetRaw, 10) || 0);
-      const eventLimit = Math.min(200, Math.max(1, parseInt(eventLimitRaw, 10) || 15));
+      const eventLimit = Math.min(1000, Math.max(1, parseInt(eventLimitRaw, 10) || 200));
       const session = await this.prisma.session.findUnique({
         where: { id: sessionId },
         include: {
           events: {
-            orderBy: { createdAt: "desc" },
+            orderBy: { occurredAt: "asc" },
             skip: eventOffset,
             take: eventLimit,
-            select: { id: true, event: true, sessionId: true, meta: true, createdAt: true },
+            select: { id: true, event: true, occurredAt: true, createdAt: true },
           },
           _count: { select: { events: true } },
         },
       });
       let restaurantName: string | null = null;
+      let email: string | null = null;
       if (session?.companyId) {
         const r = await this.prisma.restaurant.findFirst({
           where: { companyId: session.companyId },
@@ -430,38 +443,27 @@ export class AdminController {
         });
         restaurantName = r?.title ?? null;
       }
+      if (session?.userId) {
+        const u = await this.prisma.user.findUnique({
+          where: { id: session.userId },
+          select: { email: true },
+        });
+        email = u?.email ?? null;
+      }
       return {
         session: session
           ? {
               id: session.id,
+              userId: session.userId,
+              email,
               companyId: session.companyId,
-              country: session.country,
-              city: session.city,
-              landingPage: session.landingPage,
-              gclid: session.gclid,
-              keyword: session.keyword,
-              userAgent: session.userAgent,
-              browser: session.browser,
-              device: session.device,
-              ip: session.ip,
               restaurantName,
-              wasRegistered: session.wasRegistered,
-              namedRestaurant: session.namedRestaurant,
-              selectedType: session.selectedType,
-              modifiedMenu: session.modifiedMenu,
-              modifiedContacts: session.modifiedContacts,
-              modifiedDesign: session.modifiedDesign,
-              reached50Views: session.reached50Views,
-              paidSubscription: session.paidSubscription,
-              conversionSent: session.conversionSent,
-              conversionViewsSent: session.conversionViewsSent,
-              conversionSubscriptionSent: session.conversionSubscriptionSent,
-              lastSeenAt: session.lastSeenAt,
+              ip: session.ip,
+              userAgent: session.userAgent,
               createdAt: session.createdAt,
-              updatedAt: session.updatedAt,
             }
           : null,
-        events: (session?.events || []).slice().reverse(),
+        events: session?.events ?? [],
         eventsTotal: session?._count?.events ?? 0,
         hasMore: session
           ? eventOffset + session.events.length < (session._count?.events ?? 0)
@@ -471,76 +473,39 @@ export class AdminController {
 
     const dateFrom = from ? new Date(from) : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const dateTo = to ? new Date(to) : new Date();
-    const where: Record<string, unknown> = { createdAt: { gte: dateFrom, lte: dateTo } };
-    if (country) where.country = country;
+    const where: Record<string, unknown> = {
+      events: { some: { occurredAt: { gte: dateFrom, lte: dateTo } } },
+    };
 
-    let sessionIdFilter: string[] | undefined;
     if (event) {
       const matching = await this.prisma.analyticsEvent.findMany({
-        where: { event, createdAt: { gte: dateFrom, lte: dateTo } },
+        where: { event, occurredAt: { gte: dateFrom, lte: dateTo } },
         distinct: ["sessionId"],
         select: { sessionId: true },
-        take: 100,
+        take: 200,
       });
-      sessionIdFilter = matching.map((m) => m.sessionId);
-      if (sessionIdFilter.length === 0) return { sessions: [] };
-      where.id = { in: sessionIdFilter };
+      const ids = matching.map((m) => m.sessionId);
+      if (ids.length === 0) return { sessions: [] };
+      where.id = { in: ids };
     }
 
     const sessions = await this.prisma.session.findMany({
       where,
-      orderBy: { updatedAt: "desc" },
+      orderBy: { createdAt: "desc" },
       take: 100,
       select: {
         id: true,
         userId: true,
-        country: true,
-        gclid: true,
-        browser: true,
-        device: true,
-        ip: true,
         createdAt: true,
         _count: { select: { events: true } },
-        events: { orderBy: { createdAt: "desc" }, take: 1, select: { createdAt: true } },
       },
     });
-
-    sessions.sort((a, b) => {
-      const aLast = a.events[0]?.createdAt ?? a.createdAt;
-      const bLast = b.events[0]?.createdAt ?? b.createdAt;
-      return new Date(bLast).getTime() - new Date(aLast).getTime();
-    });
-
-    const sessionIds = sessions.map((s) => s.id);
-    const eventTypes = await this.prisma.analyticsEvent.findMany({
-      where: { sessionId: { in: sessionIds } },
-      select: { sessionId: true, event: true },
-    });
-    const typeMap = new Map<string, "signup" | "dashboard" | null>();
-    for (const evt of eventTypes) {
-      const cur = typeMap.get(evt.sessionId);
-      if (evt.event === "auth_signup") typeMap.set(evt.sessionId, "signup");
-      else if (
-        evt.event.startsWith("showed_") &&
-        evt.event !== "showed_login" &&
-        evt.event !== "showed_otp" &&
-        evt.event !== "showed_onboarding_name" &&
-        cur !== "signup"
-      ) {
-        typeMap.set(evt.sessionId, "dashboard");
-      }
-    }
 
     return {
       sessions: sessions.map((s) => ({
         sessionId: s.id,
         userId: s.userId,
         createdAt: s.createdAt,
-        lastEventAt: s.events[0]?.createdAt ?? s.createdAt,
-        meta: s.country ? { geo: { country: s.country } } : null,
-        source: s.gclid ? "Ads" : "Direct",
-        adValues: undefined,
-        sessionType: typeMap.get(s.id) || null,
         eventCount: s._count.events,
       })),
     };
@@ -550,19 +515,10 @@ export class AdminController {
   @HttpCode(HttpStatus.OK)
   async deleteSession(@Body() body: { sessionId?: string }) {
     if (!body.sessionId) throw new BadRequestException("sessionId required");
-    await this.prisma.session
-      .delete({ where: { id: body.sessionId } })
-      .catch(() => this.prisma.analyticsEvent.deleteMany({ where: { sessionId: body.sessionId } }));
+    await this.prisma.session.delete({ where: { id: body.sessionId } });
     return { success: true };
   }
-
-  @Post("analytics/send-conversion")
-  async sendConversion() {
-    // Stub — Google Ads upload not configured in this deployment.
-    return { success: false, error: "Google Ads conversion upload not configured" };
-  }
 }
-
 // ────────────────── helpers ──────────────────
 
 function startOfDayInTz(tz: string): Date {

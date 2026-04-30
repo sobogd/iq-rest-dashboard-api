@@ -1,5 +1,7 @@
 import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
+import { ThrottlerModule, ThrottlerGuard } from "@nestjs/throttler";
+import { APP_GUARD } from "@nestjs/core";
 import { I18nModule } from "./i18n/i18n.module";
 import { PrismaModule } from "./prisma/prisma.module";
 import { AuthModule } from "./auth/auth.module";
@@ -23,6 +25,10 @@ import { HealthController } from "./health/health.controller";
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    ThrottlerModule.forRoot([
+      // Default global limit. Per-route overrides via @Throttle.
+      { name: "default", ttl: 60_000, limit: 600 },
+    ]),
     I18nModule,
     PrismaModule,
     MailModule,
@@ -43,5 +49,6 @@ import { HealthController } from "./health/health.controller";
     AdminModule,
   ],
   controllers: [HealthController],
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}

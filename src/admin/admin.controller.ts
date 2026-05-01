@@ -378,7 +378,7 @@ export class AdminController {
     const sessionRows = sessionIds.length
       ? await this.prisma.session.findMany({
           where: { id: { in: sessionIds } },
-          select: { id: true, userId: true, createdAt: true, country: true, gclid: true },
+          select: { id: true, userId: true, createdAt: true, country: true, gclid: true, userAgent: true },
         })
       : [];
     const sessionById = new Map(sessionRows.map((s) => [s.id, s]));
@@ -405,6 +405,7 @@ export class AdminController {
         userId: s?.userId ?? null,
         email: s?.userId ? emailById.get(s.userId) ?? null : null,
         country: s?.country ?? null,
+        device: detectDevice(s?.userAgent ?? null),
         source: s?.gclid ? "Ads" : "Direct",
       };
     });
@@ -462,6 +463,7 @@ export class AdminController {
               restaurantName,
               ip: session.ip,
               userAgent: session.userAgent,
+              device: detectDevice(session.userAgent),
               country: session.country,
               city: session.city,
               gclid: session.gclid,
@@ -525,6 +527,18 @@ export class AdminController {
   }
 }
 // ────────────────── helpers ──────────────────
+
+/** Coarse device classification from a User-Agent string. Order matters — tablet check
+ *  precedes mobile because iPad UAs may match both signatures. Returns "unknown" when the
+ *  UA is missing or unrecognized. */
+type Device = "mobile" | "tablet" | "desktop" | "unknown";
+function detectDevice(ua: string | null | undefined): Device {
+  if (!ua) return "unknown";
+  // iPad on iPadOS 13+ identifies as "Macintosh" — also catch via touch-points hint when present.
+  if (/ipad|tablet|playbook|silk|kindle|nexus 7|nexus 9|nexus 10/i.test(ua)) return "tablet";
+  if (/mobile|android|iphone|ipod|blackberry|windows phone|opera mini|iemobile/i.test(ua)) return "mobile";
+  return "desktop";
+}
 
 function startOfDayInTz(tz: string): Date {
   const now = new Date();

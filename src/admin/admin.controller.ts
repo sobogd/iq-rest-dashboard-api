@@ -589,7 +589,7 @@ export class AdminController {
       },
       orderBy: { at: "desc" },
       take: limit,
-      select: { at: true, event: true, country: true, region: true },
+      select: { at: true, event: true, country: true, region: true, gclid: true },
     });
     return {
       events: rows.map((r) => ({
@@ -597,6 +597,7 @@ export class AdminController {
         event: r.event,
         country: r.country,
         region: r.region,
+        gclid: r.gclid,
       })),
     };
   }

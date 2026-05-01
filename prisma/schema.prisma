@@ -352,9 +352,11 @@ model PulseEvent {
   event   String
   country String   @default("XX")
   region  String   @default("")
+  gclid   String?  // Google Click ID — captured server-side from landing URL
 
   @@index([at])
   @@index([event, at])
+  @@index([gclid])
   @@map("pulse_events")
 }
 

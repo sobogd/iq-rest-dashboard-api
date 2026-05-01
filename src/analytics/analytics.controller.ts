@@ -180,15 +180,24 @@ export class AnalyticsController {
   })
   @Post("pulse")
   @HttpCode(HttpStatus.NO_CONTENT)
-  async pulse(@Req() req: Request, @Body() body: { event?: string }) {
+  async pulse(
+    @Req() req: Request,
+    @Body() body: { event?: string; gclid?: string; country?: string; region?: string },
+  ) {
     if (!body.event || !EVENT_REGEX.test(body.event)) {
       throw new BadRequestException("event invalid");
     }
     if (readCookie(req, DISABLED_COOKIE) === "1") return;
-    const country = headerStr(req, "cf-ipcountry") || "XX";
-    const region = decodeCity(headerStr(req, "cf-region")) || "";
+    // Allow body country/region override for server-to-server calls (Next.js SSR
+    // forwarding user's geo from middleware-set cookies, since intermediate nginx
+    // would otherwise clobber the cf-* headers with the proxy's own geo).
+    const bodyCountry = body.country && /^[A-Z]{2}$/.test(body.country) ? body.country : null;
+    const bodyRegion = body.region && body.region.length <= 100 ? body.region : null;
+    const country = bodyCountry || headerStr(req, "cf-ipcountry") || "XX";
+    const region = bodyRegion || decodeCity(headerStr(req, "cf-region")) || "";
+    const gclid = body.gclid && GCLID_REGEX.test(body.gclid) ? body.gclid : null;
     await this.prisma.pulseEvent.create({
-      data: { event: body.event, country, region },
+      data: { event: body.event, country, region, gclid },
     });
   }
 

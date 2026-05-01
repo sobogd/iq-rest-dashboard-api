@@ -187,15 +187,8 @@ export class AnalyticsController {
     if (readCookie(req, DISABLED_COOKIE) === "1") return;
     const country = headerStr(req, "cf-ipcountry") || "XX";
     const region = decodeCity(headerStr(req, "cf-region")) || "";
-    const now = new Date();
-    const hour = new Date(Date.UTC(
-      now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(),
-      now.getUTCHours(), 0, 0, 0,
-    ));
-    await this.prisma.pulseHourly.upsert({
-      where: { hour_event_country_region: { hour, event: body.event, country, region } },
-      create: { hour, event: body.event, country, region, hits: 1 },
-      update: { hits: { increment: 1 } },
+    await this.prisma.pulseEvent.create({
+      data: { event: body.event, country, region },
     });
   }
 

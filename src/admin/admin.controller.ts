@@ -542,21 +542,7 @@ export class AdminController {
     return { success: true };
   }
 
-  // ────────────────── PULSE (cookieless aggregate) ──────────────────
-
-  /** Returns the distinct event names recorded in pulse_hourly within the given range,
-   *  for populating the multi-select filter on the admin Pulse page. */
-  @Get("pulse/events")
-  async pulseEvents(@Query("from") from?: string, @Query("to") to?: string) {
-    const range = parsePulseRange(from, to);
-    const rows = await this.prisma.pulseHourly.findMany({
-      where: { hour: { gte: range.from, lte: range.to } },
-      distinct: ["event"],
-      select: { event: true },
-      orderBy: { event: "asc" },
-    });
-    return { events: rows.map((r) => r.event) };
-  }
+  // ────────────────── PULSE (cookieless raw event log) ──────────────────
 
   @Get("pulse/top")
   async pulseTop(
@@ -568,63 +554,49 @@ export class AdminController {
   ) {
     const range = parsePulseRange(from, to);
     const limit = Math.min(100, Math.max(1, parseInt(limitRaw, 10) || 20));
-    const rows = await this.prisma.pulseHourly.groupBy({
+    const rows = await this.prisma.pulseEvent.groupBy({
       by: ["event"],
       where: {
-        hour: { gte: range.from, lte: range.to },
+        at: { gte: range.from, lte: range.to },
         ...(country ? { country } : {}),
         ...(region ? { region } : {}),
       },
-      _sum: { hits: true },
-      orderBy: { _sum: { hits: "desc" } },
+      _count: { _all: true },
+      orderBy: { _count: { event: "desc" } },
       take: limit,
     });
     return {
-      events: rows.map((r) => ({ event: r.event, hits: Number(r._sum.hits ?? 0) })),
+      events: rows.map((r) => ({ event: r.event, hits: Number(r._count?._all ?? 0) })),
     };
   }
 
+  /** Raw event log, newest first. No bucketing — each row is a single track() call. */
   @Get("pulse/timeline")
   async pulseTimeline(
     @Query("from") from?: string,
     @Query("to") to?: string,
-    @Query("bucket") bucketRaw = "hour",
-    @Query("events") eventsRaw?: string,
     @Query("country") country?: string,
     @Query("region") region?: string,
+    @Query("limit") limitRaw = "1000",
   ) {
     const range = parsePulseRange(from, to);
-    const bucket = bucketRaw === "day" ? "day" : "hour";
-    const events = (eventsRaw || "").split(",").map((s) => s.trim()).filter(Boolean);
-
-    // Aggregate by bucket × event × country. Country/region filters narrow the data.
-    const rows = await this.prisma.$queryRawUnsafe<
-      { bucket: Date; event: string; country: string; hits: bigint }[]
-    >(
-      `SELECT date_trunc($1, "hour") AS bucket, "event", "country", SUM("hits") AS hits
-       FROM pulse_hourly
-       WHERE "hour" >= $2 AND "hour" <= $3
-         ${events.length ? `AND "event" = ANY($4::text[])` : ""}
-         ${country ? `AND "country" = $${events.length ? 5 : 4}` : ""}
-         ${region ? `AND "region" = $${(events.length ? 5 : 4) + (country ? 1 : 0)}` : ""}
-       GROUP BY bucket, "event", "country"
-       ORDER BY bucket DESC`,
-      ...[
-        bucket,
-        range.from,
-        range.to,
-        ...(events.length ? [events] : []),
-        ...(country ? [country] : []),
-        ...(region ? [region] : []),
-      ],
-    );
+    const limit = Math.min(5000, Math.max(1, parseInt(limitRaw, 10) || 1000));
+    const rows = await this.prisma.pulseEvent.findMany({
+      where: {
+        at: { gte: range.from, lte: range.to },
+        ...(country ? { country } : {}),
+        ...(region ? { region } : {}),
+      },
+      orderBy: { at: "desc" },
+      take: limit,
+      select: { at: true, event: true, country: true, region: true },
+    });
     return {
-      bucket,
-      buckets: rows.map((r) => ({
-        bucket: r.bucket.toISOString(),
+      events: rows.map((r) => ({
+        at: r.at.toISOString(),
         event: r.event,
         country: r.country,
-        hits: Number(r.hits),
+        region: r.region,
       })),
     };
   }

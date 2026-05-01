@@ -344,19 +344,18 @@ model AnalyticsEvent {
   @@map("analytics_events")
 }
 
-/// Cookieless aggregate counters. No sid/IP/UA — just event×hour×country×region.
+/// Cookieless raw event log. No sid/IP/UA — just timestamp + event + country/region.
 /// Lawful without consent (truly anonymous, outside ePrivacy + GDPR scope).
-model PulseHourly {
-  hour    DateTime
+model PulseEvent {
+  id      String   @id @default(cuid())
+  at      DateTime @default(now())
   event   String
   country String   @default("XX")
   region  String   @default("")
-  hits    Int      @default(0)
 
-  @@id([hour, event, country, region])
-  @@index([event, hour])
-  @@index([hour])
-  @@map("pulse_hourly")
+  @@index([at])
+  @@index([event, at])
+  @@map("pulse_events")
 }
 
 model Order {

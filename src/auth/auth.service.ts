@@ -7,6 +7,7 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { createHash } from "crypto";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { MailService } from "../mail/mail.service";
@@ -31,14 +32,25 @@ const SEND_LIMIT_MAX = 5;
 const VERIFY_LIMIT_WINDOW = 15 * 60 * 1000;
 const VERIFY_LIMIT_MAX = 10;
 
-// Companies created before this cutoff keep using the old monolith
-// dashboard at iq-rest.com/<locale>/dashboard. Hardcoded to the new SPA
-// launch date.
-const LEGACY_DASHBOARD_CUTOFF = new Date("2026-04-28T00:00:00.000Z");
+// Specific accounts that stay on the legacy monolith dashboard at iq-rest.com/<locale>/dashboard.
+// Stored as salted SHA-256 hashes so the addresses are not visible in the repo. Bump LEGACY_SALT
+// to invalidate every entry at once (e.g. after rotating who's on legacy).
+const LEGACY_SALT = "iqr-legacy-v1";
+const LEGACY_EMAIL_HASHES = new Set<string>([
+  "4308dbfd8111b3a6cfc8655dc23c843d2ffbd3541831315f2ffe240421ab7169",
+  "7f9765f0ff8e32b88b54a14b4ba773a5b782e653b139dd47d3c78e9188aad5eb",
+  "8f9e4fafa7606a6757c532ad0b0d66e882dd6d53deda494b3af481244c65aa5d",
+]);
 
-function isLegacyCompany(createdAt: Date | null | undefined): boolean {
-  if (!createdAt) return false;
-  return createdAt < LEGACY_DASHBOARD_CUTOFF;
+function hashLegacyEmail(email: string): string {
+  return createHash("sha256")
+    .update(LEGACY_SALT + ":" + email.trim().toLowerCase())
+    .digest("hex");
+}
+
+function isLegacyEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  return LEGACY_EMAIL_HASHES.has(hashLegacyEmail(email));
 }
 
 @Injectable()
@@ -329,7 +341,7 @@ export class AuthService implements OnModuleDestroy {
     const companyEdge = user.companies[0];
     // Seeder flips company.onboardingStep to 3 on success — derive locally to avoid a re-query.
     const finalStep = seeded ? 3 : companyEdge?.company?.onboardingStep ?? 0;
-    const legacyDashboard = isLegacyCompany(companyEdge?.company?.createdAt);
+    const legacyDashboard = isLegacyEmail(email);
     return {
       token,
       userId: user.id,
@@ -387,7 +399,7 @@ export class AuthService implements OnModuleDestroy {
       companyId: company.id,
       email: user.email,
       onboardingStep: company.onboardingStep,
-      legacyDashboard: isLegacyCompany(company.createdAt),
+      legacyDashboard: isLegacyEmail(user.email),
     };
   }
 
@@ -479,7 +491,7 @@ export class AuthService implements OnModuleDestroy {
 
     const seeded = await this.applyPendingAndMaybeSeed(user.id, locale ?? null);
     const finalStep = seeded ? 3 : user.companies[0]?.company?.onboardingStep ?? 0;
-    const legacyDashboard = isLegacyCompany(user.companies[0]?.company?.createdAt);
+    const legacyDashboard = isLegacyEmail(email);
     return { token, userId: user.id, email, onboardingStep: finalStep, isNewUser, legacyDashboard };
   }
 }

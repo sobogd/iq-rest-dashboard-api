@@ -597,18 +597,18 @@ export class AdminController {
     const bucket = bucketRaw === "day" ? "day" : "hour";
     const events = (eventsRaw || "").split(",").map((s) => s.trim()).filter(Boolean);
 
-    // Aggregate by bucket × event. Country/region filters narrow the data.
+    // Aggregate by bucket × event × country. Country/region filters narrow the data.
     const rows = await this.prisma.$queryRawUnsafe<
-      { bucket: Date; event: string; hits: bigint }[]
+      { bucket: Date; event: string; country: string; hits: bigint }[]
     >(
-      `SELECT date_trunc($1, "hour") AS bucket, "event", SUM("hits") AS hits
+      `SELECT date_trunc($1, "hour") AS bucket, "event", "country", SUM("hits") AS hits
        FROM pulse_hourly
        WHERE "hour" >= $2 AND "hour" <= $3
          ${events.length ? `AND "event" = ANY($4::text[])` : ""}
          ${country ? `AND "country" = $${events.length ? 5 : 4}` : ""}
          ${region ? `AND "region" = $${(events.length ? 5 : 4) + (country ? 1 : 0)}` : ""}
-       GROUP BY bucket, "event"
-       ORDER BY bucket ASC`,
+       GROUP BY bucket, "event", "country"
+       ORDER BY bucket DESC`,
       ...[
         bucket,
         range.from,
@@ -623,6 +623,7 @@ export class AdminController {
       buckets: rows.map((r) => ({
         bucket: r.bucket.toISOString(),
         event: r.event,
+        country: r.country,
         hits: Number(r.hits),
       })),
     };

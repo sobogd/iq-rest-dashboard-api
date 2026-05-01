@@ -1,0 +1,3137 @@
+{
+  "de": {
+    "subtitles": {
+      "pizza": "Authentische italienische Pizzeria",
+      "sushi": "Frische japanische Küche",
+      "asian": "Pan-asiatische Küche",
+      "burger": "Handgemachte Burger",
+      "coffee": "Spezialitätenkaffee & Gebäck",
+      "bar": "Cocktails & Craft Beer",
+      "bakery": "Tägliche frische Bäckerei",
+      "restaurant": "Moderne europäische Küche"
+    },
+    "categories": {
+      "pizza": ["Pizzen", "Pasta", "Getränke"],
+      "sushi": ["Rolls", "Nigiri", "Getränke"],
+      "asian": ["Nudeln", "Reis", "Getränke"],
+      "burger": ["Burger", "Beilagen", "Getränke"],
+      "coffee": ["Kaffee", "Gebäck", "Sandwiches"],
+      "bar": ["Cocktails", "Bier", "Snacks"],
+      "bakery": ["Brote", "Gebäck", "Kuchen"],
+      "restaurant": ["Vorspeisen", "Hauptgerichte", "Desserts"]
+    },
+    "items": {
+      "pizza": [
+        {"name": "Margherita", "description": "Tomate, Mozzarella, Basilikum"},
+        {"name": "Pepperoni"},
+        {"name": "Vier Käse"},
+        {"name": "Spaghetti Carbonara"},
+        {"name": "Tagliatelle Bolognese"},
+        {"name": "Stilles Wasser 0,5 L"},
+        {"name": "Hauswein, Glas"}
+      ],
+      "sushi": [
+        {"name": "California Roll", "description": "Krabbe, Avocado, Gurke"},
+        {"name": "Philadelphia Roll"},
+        {"name": "Spicy Tuna Roll"},
+        {"name": "Lachs-Nigiri (2 Stück)"},
+        {"name": "Thunfisch-Nigiri (2 Stück)"},
+        {"name": "Grüner Tee"},
+        {"name": "Asahi Bier"}
+      ],
+      "asian": [
+        {"name": "Pad Thai", "description": "Reisnudeln, Garnelen, Erdnüsse, Limette"},
+        {"name": "Hühner-Ramen"},
+        {"name": "Gebratener Reis mit Hähnchen"},
+        {"name": "Bibimbap"},
+        {"name": "Jasmintee"},
+        {"name": "Singha Bier"}
+      ],
+      "burger": [
+        {"name": "Klassischer Cheeseburger", "description": "Rinderpatty, Cheddar, Salat, Tomate, Gurken"},
+        {"name": "Bacon-Burger"},
+        {"name": "Vegetarischer Burger"},
+        {"name": "Pommes Frites"},
+        {"name": "Zwiebelringe"},
+        {"name": "Coca-Cola 0,4 L"},
+        {"name": "Vanille-Milchshake"}
+      ],
+      "coffee": [
+        {"name": "Espresso"},
+        {"name": "Cappuccino"},
+        {"name": "Latte"},
+        {"name": "Butter-Croissant"},
+        {"name": "Heidelbeermuffin"},
+        {"name": "Schinken & Käse"},
+        {"name": "Avocado-Toast"}
+      ],
+      "bar": [
+        {"name": "Mojito"},
+        {"name": "Aperol Spritz"},
+        {"name": "Negroni"},
+        {"name": "Lager vom Fass"},
+        {"name": "IPA"},
+        {"name": "Nachos mit Käse"},
+        {"name": "Marinierte Oliven"}
+      ],
+      "bakery": [
+        {"name": "Sauerteigbrot"},
+        {"name": "Baguette"},
+        {"name": "Butter-Croissant"},
+        {"name": "Pain au Chocolat"},
+        {"name": "Zimtschnecke"},
+        {"name": "Käsekuchenstück"},
+        {"name": "Tiramisu"}
+      ],
+      "restaurant": [
+        {"name": "Caesar-Salat"},
+        {"name": "Bruschetta (3 Stück)"},
+        {"name": "Gegrilltes Ribeye-Steak", "description": "300 g, serviert mit Bratkartoffeln"},
+        {"name": "Lachsfilet"},
+        {"name": "Pilzrisotto"},
+        {"name": "Tiramisu"},
+        {"name": "Crème Brûlée"}
+      ]
+    }
+  },
+  "fr": {
+    "subtitles": {
+      "pizza": "Pizzeria italienne authentique",
+      "sushi": "Cuisine japonaise fraîche",
+      "asian": "Cuisine pan-asiatique",
+      "burger": "Burgers artisanaux",
+      "coffee": "Café de spécialité & viennoiseries",
+      "bar": "Cocktails & bières artisanales",
+      "bakery": "Boulangerie fraîche chaque jour",
+      "restaurant": "Cuisine européenne moderne"
+    },
+    "categories": {
+      "pizza": ["Pizzas", "Pâtes", "Boissons"],
+      "sushi": ["Rolls", "Nigiri", "Boissons"],
+      "asian": ["Nouilles", "Riz", "Boissons"],
+      "burger": ["Burgers", "Accompagnements", "Boissons"],
+      "coffee": ["Café", "Viennoiseries", "Sandwichs"],
+      "bar": ["Cocktails", "Bières", "À grignoter"],
+      "bakery": ["Pains", "Viennoiseries", "Gâteaux"],
+      "restaurant": ["Entrées", "Plats principaux", "Desserts"]
+    },
+    "items": {
+      "pizza": [
+        {"name": "Margherita", "description": "Tomate, mozzarella, basilic"},
+        {"name": "Pepperoni"},
+        {"name": "Quatre fromages"},
+        {"name": "Spaghetti carbonara"},
+        {"name": "Tagliatelles bolognaise"},
+        {"name": "Eau plate 0,5 L"},
+        {"name": "Vin de la maison, verre"}
+      ],
+      "sushi": [
+        {"name": "California Roll", "description": "Crabe, avocat, concombre"},
+        {"name": "Philadelphia Roll"},
+        {"name": "Spicy Tuna Roll"},
+        {"name": "Nigiri saumon (2 pcs)"},
+        {"name": "Nigiri thon (2 pcs)"},
+        {"name": "Thé vert"},
+        {"name": "Bière Asahi"}
+      ],
+      "asian": [
+        {"name": "Pad Thaï", "description": "Nouilles de riz, crevettes, cacahuètes, citron vert"},
+        {"name": "Ramen au poulet"},
+        {"name": "Riz frit au poulet"},
+        {"name": "Bibimbap"},
+        {"name": "Thé au jasmin"},
+        {"name": "Bière Singha"}
+      ],
+      "burger": [
+        {"name": "Cheeseburger classique", "description": "Steak haché, cheddar, salade, tomate, cornichons"},
+        {"name": "Burger au bacon"},
+        {"name": "Burger végétarien"},
+        {"name": "Frites"},
+        {"name": "Rondelles d'oignon"},
+        {"name": "Coca-Cola 0,4 L"},
+        {"name": "Milkshake vanille"}
+      ],
+      "coffee": [
+        {"name": "Espresso"},
+        {"name": "Cappuccino"},
+        {"name": "Latte"},
+        {"name": "Croissant au beurre"},
+        {"name": "Muffin myrtille"},
+        {"name": "Jambon-fromage"},
+        {"name": "Tartine d'avocat"}
+      ],
+      "bar": [
+        {"name": "Mojito"},
+        {"name": "Aperol Spritz"},
+        {"name": "Negroni"},
+        {"name": "Bière blonde, pression"},
+        {"name": "IPA"},
+        {"name": "Nachos au fromage"},
+        {"name": "Olives marinées"}
+      ],
+      "bakery": [
+        {"name": "Pain au levain"},
+        {"name": "Baguette"},
+        {"name": "Croissant au beurre"},
+        {"name": "Pain au chocolat"},
+        {"name": "Roulé à la cannelle"},
+        {"name": "Part de cheesecake"},
+        {"name": "Tiramisu"}
+      ],
+      "restaurant": [
+        {"name": "Salade César"},
+        {"name": "Bruschetta (3 pcs)"},
+        {"name": "Entrecôte grillée", "description": "300 g, servie avec pommes de terre rôties"},
+        {"name": "Filet de saumon"},
+        {"name": "Risotto aux champignons"},
+        {"name": "Tiramisu"},
+        {"name": "Crème brûlée"}
+      ]
+    }
+  },
+  "it": {
+    "subtitles": {
+      "pizza": "Pizzeria italiana autentica",
+      "sushi": "Cucina giapponese fresca",
+      "asian": "Cucina pan-asiatica",
+      "burger": "Burger artigianali",
+      "coffee": "Caffè specialty e pasticceria",
+      "bar": "Cocktail & birra artigianale",
+      "bakery": "Panetteria fresca tutti i giorni",
+      "restaurant": "Cucina europea moderna"
+    },
+    "categories": {
+      "pizza": ["Pizze", "Pasta", "Bevande"],
+      "sushi": ["Roll", "Nigiri", "Bevande"],
+      "asian": ["Noodle", "Riso", "Bevande"],
+      "burger": ["Burger", "Contorni", "Bevande"],
+      "coffee": ["Caffè", "Pasticceria", "Panini"],
+      "bar": ["Cocktail", "Birra", "Snack"],
+      "bakery": ["Pane", "Pasticceria", "Torte"],
+      "restaurant": ["Antipasti", "Secondi", "Dolci"]
+    },
+    "items": {
+      "pizza": [
+        {"name": "Margherita", "description": "Pomodoro, mozzarella, basilico"},
+        {"name": "Pepperoni"},
+        {"name": "Quattro formaggi"},
+        {"name": "Spaghetti alla carbonara"},
+        {"name": "Tagliatelle alla bolognese"},
+        {"name": "Acqua naturale 0,5 L"},
+        {"name": "Vino della casa, calice"}
+      ],
+      "sushi": [
+        {"name": "California Roll", "description": "Granchio, avocado, cetriolo"},
+        {"name": "Philadelphia Roll"},
+        {"name": "Spicy Tuna Roll"},
+        {"name": "Nigiri di salmone (2 pz)"},
+        {"name": "Nigiri di tonno (2 pz)"},
+        {"name": "Tè verde"},
+        {"name": "Birra Asahi"}
+      ],
+      "asian": [
+        {"name": "Pad Thai", "description": "Noodle di riso, gamberi, arachidi, lime"},
+        {"name": "Ramen di pollo"},
+        {"name": "Riso saltato con pollo"},
+        {"name": "Bibimbap"},
+        {"name": "Tè al gelsomino"},
+        {"name": "Birra Singha"}
+      ],
+      "burger": [
+        {"name": "Cheeseburger classico", "description": "Hamburger di manzo, cheddar, lattuga, pomodoro, cetriolini"},
+        {"name": "Burger con bacon"},
+        {"name": "Burger vegetariano"},
+        {"name": "Patatine fritte"},
+        {"name": "Anelli di cipolla"},
+        {"name": "Coca-Cola 0,4 L"},
+        {"name": "Frappè alla vaniglia"}
+      ],
+      "coffee": [
+        {"name": "Espresso"},
+        {"name": "Cappuccino"},
+        {"name": "Latte"},
+        {"name": "Croissant al burro"},
+        {"name": "Muffin ai mirtilli"},
+        {"name": "Prosciutto e formaggio"},
+        {"name": "Toast con avocado"}
+      ],
+      "bar": [
+        {"name": "Mojito"},
+        {"name": "Aperol Spritz"},
+        {"name": "Negroni"},
+        {"name": "Birra chiara alla spina"},
+        {"name": "IPA"},
+        {"name": "Nachos con formaggio"},
+        {"name": "Olive marinate"}
+      ],
+      "bakery": [
+        {"name": "Pane a lievitazione naturale"},
+        {"name": "Baguette"},
+        {"name": "Croissant al burro"},
+        {"name": "Pain au chocolat"},
+        {"name": "Girella alla cannella"},
+        {"name": "Fetta di cheesecake"},
+        {"name": "Tiramisù"}
+      ],
+      "restaurant": [
+        {"name": "Insalata Caesar"},
+        {"name": "Bruschetta (3 pz)"},
+        {"name": "Costata alla griglia", "description": "300 g, servita con patate al forno"},
+        {"name": "Filetto di salmone"},
+        {"name": "Risotto ai funghi"},
+        {"name": "Tiramisù"},
+        {"name": "Crème brûlée"}
+      ]
+    }
+  },
+  "pt": {
+    "subtitles": {
+      "pizza": "Pizzaria italiana autêntica",
+      "sushi": "Cozinha japonesa fresca",
+      "asian": "Cozinha pan-asiática",
+      "burger": "Hambúrgueres artesanais",
+      "coffee": "Café especial e pastelaria",
+      "bar": "Cocktails e cerveja artesanal",
+      "bakery": "Padaria fresca diariamente",
+      "restaurant": "Cozinha europeia moderna"
+    },
+    "categories": {
+      "pizza": ["Pizzas", "Massas", "Bebidas"],
+      "sushi": ["Rolls", "Nigiri", "Bebidas"],
+      "asian": ["Macarrão", "Arroz", "Bebidas"],
+      "burger": ["Hambúrgueres", "Acompanhamentos", "Bebidas"],
+      "coffee": ["Café", "Pastelaria", "Sanduíches"],
+      "bar": ["Cocktails", "Cerveja", "Petiscos"],
+      "bakery": ["Pães", "Pastelaria", "Bolos"],
+      "restaurant": ["Entradas", "Pratos principais", "Sobremesas"]
+    },
+    "items": {
+      "pizza": [
+        {"name": "Margherita", "description": "Tomate, mozzarella, manjericão"},
+        {"name": "Pepperoni"},
+        {"name": "Quatro queijos"},
+        {"name": "Esparguete à carbonara"},
+        {"name": "Tagliatelle à bolonhesa"},
+        {"name": "Água sem gás 0,5 L"},
+        {"name": "Vinho da casa, copo"}
+      ],
+      "sushi": [
+        {"name": "California Roll", "description": "Caranguejo, abacate, pepino"},
+        {"name": "Philadelphia Roll"},
+        {"name": "Spicy Tuna Roll"},
+        {"name": "Nigiri de salmão (2 unid.)"},
+        {"name": "Nigiri de atum (2 unid.)"},
+        {"name": "Chá verde"},
+        {"name": "Cerveja Asahi"}
+      ],
+      "asian": [
+        {"name": "Pad Thai", "description": "Macarrão de arroz, camarão, amendoim, lima"},
+        {"name": "Ramen de frango"},
+        {"name": "Arroz frito com frango"},
+        {"name": "Bibimbap"},
+        {"name": "Chá de jasmim"},
+        {"name": "Cerveja Singha"}
+      ],
+      "burger": [
+        {"name": "Cheeseburger clássico", "description": "Carne de vaca, cheddar, alface, tomate, pickles"},
+        {"name": "Hambúrguer com bacon"},
+        {"name": "Hambúrguer vegetariano"},
+        {"name": "Batatas fritas"},
+        {"name": "Anéis de cebola"},
+        {"name": "Coca-Cola 0,4 L"},
+        {"name": "Batido de baunilha"}
+      ],
+      "coffee": [
+        {"name": "Espresso"},
+        {"name": "Cappuccino"},
+        {"name": "Latte"},
+        {"name": "Croissant de manteiga"},
+        {"name": "Muffin de mirtilo"},
+        {"name": "Fiambre e queijo"},
+        {"name": "Tosta de abacate"}
+      ],
+      "bar": [
+        {"name": "Mojito"},
+        {"name": "Aperol Spritz"},
+        {"name": "Negroni"},
+        {"name": "Cerveja imperial"},
+        {"name": "IPA"},
+        {"name": "Nachos com queijo"},
+        {"name": "Azeitonas marinadas"}
+      ],
+      "bakery": [
+        {"name": "Pão de fermentação natural"},
+        {"name": "Baguette"},
+        {"name": "Croissant de manteiga"},
+        {"name": "Pain au chocolat"},
+        {"name": "Rolinho de canela"},
+        {"name": "Fatia de cheesecake"},
+        {"name": "Tiramisù"}
+      ],
+      "restaurant": [
+        {"name": "Salada Caesar"},
+        {"name": "Bruschetta (3 unid.)"},
+        {"name": "Bife do lombo grelhado", "description": "300 g, servido com batatas assadas"},
+        {"name": "Filete de salmão"},
+        {"name": "Risoto de cogumelos"},
+        {"name": "Tiramisù"},
+        {"name": "Crème brûlée"}
+      ]
+    }
+  },
+  "nl": {
+    "subtitles": {
+      "pizza": "Authentieke Italiaanse pizzeria",
+      "sushi": "Verse Japanse keuken",
+      "asian": "Pan-Aziatische keuken",
+      "burger": "Ambachtelijke burgers",
+      "coffee": "Specialty koffie & gebak",
+      "bar": "Cocktails & craftbier",
+      "bakery": "Dagverse bakkerij",
+      "restaurant": "Moderne Europese keuken"
+    },
+    "categories": {
+      "pizza": ["Pizza's", "Pasta", "Dranken"],
+      "sushi": ["Rolls", "Nigiri", "Dranken"],
+      "asian": ["Noodles", "Rijst", "Dranken"],
+      "burger": ["Burgers", "Bijgerechten", "Dranken"],
+      "coffee": ["Koffie", "Gebak", "Sandwiches"],
+      "bar": ["Cocktails", "Bier", "Snacks"],
+      "bakery": ["Broden", "Gebak", "Taarten"],
+      "restaurant": ["Voorgerechten", "Hoofdgerechten", "Desserts"]
+    },
+    "items": {
+      "pizza": [
+        {"name": "Margherita", "description": "Tomaat, mozzarella, basilicum"},
+        {"name": "Pepperoni"},
+        {"name": "Vier kazen"},
+        {"name": "Spaghetti carbonara"},
+        {"name": "Tagliatelle bolognese"},
+        {"name": "Water plat 0,5 L"},
+        {"name": "Huiswijn, glas"}
+      ],
+      "sushi": [
+        {"name": "California Roll", "description": "Krab, avocado, komkommer"},
+        {"name": "Philadelphia Roll"},
+        {"name": "Spicy Tuna Roll"},
+        {"name": "Zalm nigiri (2 st)"},
+        {"name": "Tonijn nigiri (2 st)"},
+        {"name": "Groene thee"},
+        {"name": "Asahi bier"}
+      ],
+      "asian": [
+        {"name": "Pad Thai", "description": "Rijstnoedels, garnalen, pinda's, limoen"},
+        {"name": "Kip ramen"},
+        {"name": "Gebakken rijst met kip"},
+        {"name": "Bibimbap"},
+        {"name": "Jasmijnthee"},
+        {"name": "Singha bier"}
+      ],
+      "burger": [
+        {"name": "Klassieke cheeseburger", "description": "Rundvleesburger, cheddar, sla, tomaat, augurken"},
+        {"name": "Bacon burger"},
+        {"name": "Vegetarische burger"},
+        {"name": "Friet"},
+        {"name": "Uienringen"},
+        {"name": "Coca-Cola 0,4 L"},
+        {"name": "Vanille milkshake"}
+      ],
+      "coffee": [
+        {"name": "Espresso"},
+        {"name": "Cappuccino"},
+        {"name": "Latte"},
+        {"name": "Botercroissant"},
+        {"name": "Bosbessenmuffin"},
+        {"name": "Ham & kaas"},
+        {"name": "Avocado toast"}
+      ],
+      "bar": [
+        {"name": "Mojito"},
+        {"name": "Aperol Spritz"},
+        {"name": "Negroni"},
+        {"name": "Pils van de tap"},
+        {"name": "IPA"},
+        {"name": "Nacho's met kaas"},
+        {"name": "Gemarineerde olijven"}
+      ],
+      "bakery": [
+        {"name": "Zuurdesembrood"},
+        {"name": "Stokbrood"},
+        {"name": "Botercroissant"},
+        {"name": "Pain au chocolat"},
+        {"name": "Kaneelbroodje"},
+        {"name": "Cheesecake punt"},
+        {"name": "Tiramisu"}
+      ],
+      "restaurant": [
+        {"name": "Caesar salade"},
+        {"name": "Bruschetta (3 st)"},
+        {"name": "Gegrilde ribeye steak", "description": "300 g, geserveerd met geroosterde aardappelen"},
+        {"name": "Zalmfilet"},
+        {"name": "Paddenstoelenrisotto"},
+        {"name": "Tiramisu"},
+        {"name": "Crème brûlée"}
+      ]
+    }
+  },
+  "pl": {
+    "subtitles": {
+      "pizza": "Autentyczna włoska pizzeria",
+      "sushi": "Świeża kuchnia japońska",
+      "asian": "Kuchnia panazjatycka",
+      "burger": "Burgery z najlepszych składników",
+      "coffee": "Kawa specialty i wypieki",
+      "bar": "Koktajle i piwo rzemieślnicze",
+      "bakery": "Świeża piekarnia codziennie",
+      "restaurant": "Nowoczesna kuchnia europejska"
+    },
+    "categories": {
+      "pizza": ["Pizze", "Makaron", "Napoje"],
+      "sushi": ["Rolki", "Nigiri", "Napoje"],
+      "asian": ["Makarony", "Ryż", "Napoje"],
+      "burger": ["Burgery", "Dodatki", "Napoje"],
+      "coffee": ["Kawa", "Wypieki", "Kanapki"],
+      "bar": ["Koktajle", "Piwo", "Przekąski"],
+      "bakery": ["Chleby", "Wypieki", "Ciasta"],
+      "restaurant": ["Przystawki", "Dania główne", "Desery"]
+    },
+    "items": {
+      "pizza": [
+        {"name": "Margherita", "description": "Pomidor, mozzarella, bazylia"},
+        {"name": "Pepperoni"},
+        {"name": "Cztery sery"},
+        {"name": "Spaghetti carbonara"},
+        {"name": "Tagliatelle bolognese"},
+        {"name": "Woda niegazowana 0,5 L"},
+        {"name": "Wino domowe, lampka"}
+      ],
+      "sushi": [
+        {"name": "California Roll", "description": "Krab, awokado, ogórek"},
+        {"name": "Philadelphia Roll"},
+        {"name": "Spicy Tuna Roll"},
+        {"name": "Nigiri z łososiem (2 szt)"},
+        {"name": "Nigiri z tuńczykiem (2 szt)"},
+        {"name": "Zielona herbata"},
+        {"name": "Piwo Asahi"}
+      ],
+      "asian": [
+        {"name": "Pad Thai", "description": "Makaron ryżowy, krewetki, orzeszki ziemne, limonka"},
+        {"name": "Ramen z kurczakiem"},
+        {"name": "Smażony ryż z kurczakiem"},
+        {"name": "Bibimbap"},
+        {"name": "Herbata jaśminowa"},
+        {"name": "Piwo Singha"}
+      ],
+      "burger": [
+        {"name": "Klasyczny cheeseburger", "description": "Wołowina, cheddar, sałata, pomidor, ogórki konserwowe"},
+        {"name": "Burger z boczkiem"},
+        {"name": "Burger wegetariański"},
+        {"name": "Frytki"},
+        {"name": "Krążki cebulowe"},
+        {"name": "Coca-Cola 0,4 L"},
+        {"name": "Shake waniliowy"}
+      ],
+      "coffee": [
+        {"name": "Espresso"},
+        {"name": "Cappuccino"},
+        {"name": "Latte"},
+        {"name": "Croissant maślany"},
+        {"name": "Muffin z jagodami"},
+        {"name": "Szynka i ser"},
+        {"name": "Tost z awokado"}
+      ],
+      "bar": [
+        {"name": "Mojito"},
+        {"name": "Aperol Spritz"},
+        {"name": "Negroni"},
+        {"name": "Lager z beczki"},
+        {"name": "IPA"},
+        {"name": "Nachos z serem"},
+        {"name": "Marynowane oliwki"}
+      ],
+      "bakery": [
+        {"name": "Chleb na zakwasie"},
+        {"name": "Bagietka"},
+        {"name": "Croissant maślany"},
+        {"name": "Pain au chocolat"},
+        {"name": "Bułka cynamonowa"},
+        {"name": "Kawałek sernika"},
+        {"name": "Tiramisu"}
+      ],
+      "restaurant": [
+        {"name": "Sałatka Cezar"},
+        {"name": "Bruschetta (3 szt)"},
+        {"name": "Grillowany stek ribeye", "description": "300 g, podany z pieczonymi ziemniakami"},
+        {"name": "Filet z łososia"},
+        {"name": "Risotto z grzybami"},
+        {"name": "Tiramisu"},
+        {"name": "Crème brûlée"}
+      ]
+    }
+  },
+  "ru": {
+    "subtitles": {
+      "pizza": "Аутентичная итальянская пиццерия",
+      "sushi": "Свежая японская кухня",
+      "asian": "Паназиатская кухня",
+      "burger": "Бургеры ручной работы",
+      "coffee": "Спешелти кофе и выпечка",
+      "bar": "Коктейли и крафтовое пиво",
+      "bakery": "Свежая выпечка каждый день",
+      "restaurant": "Современная европейская кухня"
+    },
+    "categories": {
+      "pizza": ["Пиццы", "Паста", "Напитки"],
+      "sushi": ["Роллы", "Нигири", "Напитки"],
+      "asian": ["Лапша", "Рис", "Напитки"],
+      "burger": ["Бургеры", "Гарниры", "Напитки"],
+      "coffee": ["Кофе", "Выпечка", "Сэндвичи"],
+      "bar": ["Коктейли", "Пиво", "Закуски"],
+      "bakery": ["Хлеб", "Выпечка", "Торты"],
+      "restaurant": ["Закуски", "Основные блюда", "Десерты"]
+    },
+    "items": {
+      "pizza": [
+        {"name": "Маргарита", "description": "Томат, моцарелла, базилик"},
+        {"name": "Пепперони"},
+        {"name": "Четыре сыра"},
+        {"name": "Спагетти карбонара"},
+        {"name": "Тальятелле болоньезе"},
+        {"name": "Вода без газа 0,5 л"},
+        {"name": "Домашнее вино, бокал"}
+      ],
+      "sushi": [
+        {"name": "Калифорния ролл", "description": "Краб, авокадо, огурец"},
+        {"name": "Филадельфия ролл"},
+        {"name": "Острый тунец ролл"},
+        {"name": "Нигири с лососем (2 шт)"},
+        {"name": "Нигири с тунцом (2 шт)"},
+        {"name": "Зелёный чай"},
+        {"name": "Пиво Asahi"}
+      ],
+      "asian": [
+        {"name": "Пад тай", "description": "Рисовая лапша, креветки, арахис, лайм"},
+        {"name": "Рамен с курицей"},
+        {"name": "Жареный рис с курицей"},
+        {"name": "Пибимпап"},
+        {"name": "Жасминовый чай"},
+        {"name": "Пиво Singha"}
+      ],
+      "burger": [
+        {"name": "Классический чизбургер", "description": "Говяжья котлета, чеддер, салат, томат, корнишоны"},
+        {"name": "Бургер с беконом"},
+        {"name": "Вегетарианский бургер"},
+        {"name": "Картофель фри"},
+        {"name": "Луковые кольца"},
+        {"name": "Кока-Кола 0,4 л"},
+        {"name": "Ванильный молочный коктейль"}
+      ],
+      "coffee": [
+        {"name": "Эспрессо"},
+        {"name": "Капучино"},
+        {"name": "Латте"},
+        {"name": "Сливочный круассан"},
+        {"name": "Маффин с черникой"},
+        {"name": "Ветчина и сыр"},
+        {"name": "Тост с авокадо"}
+      ],
+      "bar": [
+        {"name": "Мохито"},
+        {"name": "Апероль Шприц"},
+        {"name": "Негрони"},
+        {"name": "Лагер разливной"},
+        {"name": "IPA"},
+        {"name": "Начос с сыром"},
+        {"name": "Маринованные оливки"}
+      ],
+      "bakery": [
+        {"name": "Хлеб на закваске"},
+        {"name": "Багет"},
+        {"name": "Сливочный круассан"},
+        {"name": "Пэн-о-шоколя"},
+        {"name": "Булочка с корицей"},
+        {"name": "Кусок чизкейка"},
+        {"name": "Тирамису"}
+      ],
+      "restaurant": [
+        {"name": "Салат Цезарь"},
+        {"name": "Брускетта (3 шт)"},
+        {"name": "Стейк рибай на гриле", "description": "300 г, подаётся с запечённым картофелем"},
+        {"name": "Филе лосося"},
+        {"name": "Ризотто с грибами"},
+        {"name": "Тирамису"},
+        {"name": "Крем-брюле"}
+      ]
+    }
+  },
+  "uk": {
+    "subtitles": {
+      "pizza": "Автентична італійська піцерія",
+      "sushi": "Свіжа японська кухня",
+      "asian": "Паназійська кухня",
+      "burger": "Бургери ручної роботи",
+      "coffee": "Спешелті кава та випічка",
+      "bar": "Коктейлі та крафтове пиво",
+      "bakery": "Свіжа випічка щодня",
+      "restaurant": "Сучасна європейська кухня"
+    },
+    "categories": {
+      "pizza": ["Піци", "Паста", "Напої"],
+      "sushi": ["Роли", "Нігірі", "Напої"],
+      "asian": ["Локшина", "Рис", "Напої"],
+      "burger": ["Бургери", "Гарніри", "Напої"],
+      "coffee": ["Кава", "Випічка", "Сендвічі"],
+      "bar": ["Коктейлі", "Пиво", "Закуски"],
+      "bakery": ["Хліб", "Випічка", "Торти"],
+      "restaurant": ["Закуски", "Основні страви", "Десерти"]
+    },
+    "items": {
+      "pizza": [
+        {"name": "Маргарита", "description": "Томат, моцарела, базилік"},
+        {"name": "Пепероні"},
+        {"name": "Чотири сири"},
+        {"name": "Спагеті карбонара"},
+        {"name": "Тальятеле болоньєзе"},
+        {"name": "Вода без газу 0,5 л"},
+        {"name": "Домашнє вино, келих"}
+      ],
+      "sushi": [
+        {"name": "Каліфорнія рол", "description": "Краб, авокадо, огірок"},
+        {"name": "Філадельфія рол"},
+        {"name": "Гострий тунець рол"},
+        {"name": "Нігірі з лососем (2 шт)"},
+        {"name": "Нігірі з тунцем (2 шт)"},
+        {"name": "Зелений чай"},
+        {"name": "Пиво Asahi"}
+      ],
+      "asian": [
+        {"name": "Пад тай", "description": "Рисова локшина, креветки, арахіс, лайм"},
+        {"name": "Рамен з куркою"},
+        {"name": "Смажений рис з куркою"},
+        {"name": "Пібімпап"},
+        {"name": "Жасминовий чай"},
+        {"name": "Пиво Singha"}
+      ],
+      "burger": [
+        {"name": "Класичний чизбургер", "description": "Яловича котлета, чеддер, салат, томат, корнішони"},
+        {"name": "Бургер з беконом"},
+        {"name": "Вегетаріанський бургер"},
+        {"name": "Картопля фрі"},
+        {"name": "Цибулеві кільця"},
+        {"name": "Coca-Cola 0,4 л"},
+        {"name": "Ванільний милкшейк"}
+      ],
+      "coffee": [
+        {"name": "Еспресо"},
+        {"name": "Капучино"},
+        {"name": "Лате"},
+        {"name": "Вершковий круасан"},
+        {"name": "Мафін з чорницею"},
+        {"name": "Шинка та сир"},
+        {"name": "Тост з авокадо"}
+      ],
+      "bar": [
+        {"name": "Мохіто"},
+        {"name": "Апероль Шприц"},
+        {"name": "Негроні"},
+        {"name": "Лагер розливний"},
+        {"name": "IPA"},
+        {"name": "Начос із сиром"},
+        {"name": "Мариновані оливки"}
+      ],
+      "bakery": [
+        {"name": "Хліб на заквасці"},
+        {"name": "Багет"},
+        {"name": "Вершковий круасан"},
+        {"name": "Пен-о-шоколя"},
+        {"name": "Булочка з корицею"},
+        {"name": "Шматок чизкейка"},
+        {"name": "Тірамісу"}
+      ],
+      "restaurant": [
+        {"name": "Салат Цезар"},
+        {"name": "Брускета (3 шт)"},
+        {"name": "Стейк рибай на грилі", "description": "300 г, подається із запеченою картоплею"},
+        {"name": "Філе лосося"},
+        {"name": "Різотто з грибами"},
+        {"name": "Тірамісу"},
+        {"name": "Крем-брюле"}
+      ]
+    }
+  },
+  "sv": {
+    "subtitles": {
+      "pizza": "Autentisk italiensk pizzeria",
+      "sushi": "Färskt japanskt kök",
+      "asian": "Pan-asiatiskt kök",
+      "burger": "Hantverksmässiga burgare",
+      "coffee": "Specialty-kaffe & bakverk",
+      "bar": "Cocktails & hantverksöl",
+      "bakery": "Dagligt färskt bageri",
+      "restaurant": "Modernt europeiskt kök"
+    },
+    "categories": {
+      "pizza": ["Pizzor", "Pasta", "Drycker"],
+      "sushi": ["Rolls", "Nigiri", "Drycker"],
+      "asian": ["Nudlar", "Ris", "Drycker"],
+      "burger": ["Burgare", "Tillbehör", "Drycker"],
+      "coffee": ["Kaffe", "Bakverk", "Smörgåsar"],
+      "bar": ["Cocktails", "Öl", "Tilltugg"],
+      "bakery": ["Bröd", "Bakverk", "Tårtor"],
+      "restaurant": ["Förrätter", "Huvudrätter", "Efterrätter"]
+    },
+    "items": {
+      "pizza": [
+        {"name": "Margherita", "description": "Tomat, mozzarella, basilika"},
+        {"name": "Pepperoni"},
+        {"name": "Fyra ostar"},
+        {"name": "Spaghetti carbonara"},
+        {"name": "Tagliatelle bolognese"},
+        {"name": "Stilla vatten 0,5 L"},
+        {"name": "Husets vin, glas"}
+      ],
+      "sushi": [
+        {"name": "California Roll", "description": "Krabba, avokado, gurka"},
+        {"name": "Philadelphia Roll"},
+        {"name": "Spicy Tuna Roll"},
+        {"name": "Lax-nigiri (2 st)"},
+        {"name": "Tonfisk-nigiri (2 st)"},
+        {"name": "Grönt te"},
+        {"name": "Asahi öl"}
+      ],
+      "asian": [
+        {"name": "Pad Thai", "description": "Risnudlar, räkor, jordnötter, lime"},
+        {"name": "Kycklingramen"},
+        {"name": "Stekt ris med kyckling"},
+        {"name": "Bibimbap"},
+        {"name": "Jasminte"},
+        {"name": "Singha öl"}
+      ],
+      "burger": [
+        {"name": "Klassisk cheeseburger", "description": "Nötbiff, cheddar, sallad, tomat, picklesgurka"},
+        {"name": "Baconburgare"},
+        {"name": "Vegetarisk burgare"},
+        {"name": "Pommes frites"},
+        {"name": "Lökringar"},
+        {"name": "Coca-Cola 0,4 L"},
+        {"name": "Vaniljmilkshake"}
+      ],
+      "coffee": [
+        {"name": "Espresso"},
+        {"name": "Cappuccino"},
+        {"name": "Latte"},
+        {"name": "Smörcroissant"},
+        {"name": "Blåbärsmuffin"},
+        {"name": "Skinka & ost"},
+        {"name": "Avokadotoast"}
+      ],
+      "bar": [
+        {"name": "Mojito"},
+        {"name": "Aperol Spritz"},
+        {"name": "Negroni"},
+        {"name": "Lager från fat"},
+        {"name": "IPA"},
+        {"name": "Nachos med ost"},
+        {"name": "Marinerade oliver"}
+      ],
+      "bakery": [
+        {"name": "Surdegsbröd"},
+        {"name": "Baguette"},
+        {"name": "Smörcroissant"},
+        {"name": "Pain au chocolat"},
+        {"name": "Kanelbulle"},
+        {"name": "Cheesecake-bit"},
+        {"name": "Tiramisu"}
+      ],
+      "restaurant": [
+        {"name": "Caesarsallad"},
+        {"name": "Bruschetta (3 st)"},
+        {"name": "Grillad entrecôte", "description": "300 g, serveras med ugnsbakad potatis"},
+        {"name": "Laxfilé"},
+        {"name": "Svamprisotto"},
+        {"name": "Tiramisu"},
+        {"name": "Crème brûlée"}
+      ]
+    }
+  },
+  "da": {
+    "subtitles": {
+      "pizza": "Autentisk italiensk pizzeria",
+      "sushi": "Frisk japansk køkken",
+      "asian": "Pan-asiatisk køkken",
+      "burger": "Håndlavede burgere",
+      "coffee": "Specialty kaffe & bagværk",
+      "bar": "Cocktails & håndværksøl",
+      "bakery": "Dagligt friskt bageri",
+      "restaurant": "Moderne europæisk køkken"
+    },
+    "categories": {
+      "pizza": ["Pizzaer", "Pasta", "Drikkevarer"],
+      "sushi": ["Rolls", "Nigiri", "Drikkevarer"],
+      "asian": ["Nudler", "Ris", "Drikkevarer"],
+      "burger": ["Burgere", "Tilbehør", "Drikkevarer"],
+      "coffee": ["Kaffe", "Bagværk", "Sandwiches"],
+      "bar": ["Cocktails", "Øl", "Snacks"],
+      "bakery": ["Brød", "Bagværk", "Kager"],
+      "restaurant": ["Forretter", "Hovedretter", "Desserter"]
+    },
+    "items": {
+      "pizza": [
+        {"name": "Margherita", "description": "Tomat, mozzarella, basilikum"},
+        {"name": "Pepperoni"},
+        {"name": "Fire oste"},
+        {"name": "Spaghetti carbonara"},
+        {"name": "Tagliatelle bolognese"},
+        {"name": "Vand uden brus 0,5 L"},
+        {"name": "Husets vin, glas"}
+      ],
+      "sushi": [
+        {"name": "California Roll", "description": "Krabbe, avocado, agurk"},
+        {"name": "Philadelphia Roll"},
+        {"name": "Spicy Tuna Roll"},
+        {"name": "Laks nigiri (2 stk)"},
+        {"name": "Tun nigiri (2 stk)"},
+        {"name": "Grøn te"},
+        {"name": "Asahi øl"}
+      ],
+      "asian": [
+        {"name": "Pad Thai", "description": "Risnudler, rejer, jordnødder, lime"},
+        {"name": "Kylling ramen"},
+        {"name": "Stegt ris med kylling"},
+        {"name": "Bibimbap"},
+        {"name": "Jasminte"},
+        {"name": "Singha øl"}
+      ],
+      "burger": [
+        {"name": "Klassisk cheeseburger", "description": "Bøfpatty, cheddar, salat, tomat, syltede agurker"},
+        {"name": "Baconburger"},
+        {"name": "Vegetarburger"},
+        {"name": "Pommes frites"},
+        {"name": "Løgringe"},
+        {"name": "Coca-Cola 0,4 L"},
+        {"name": "Vaniljemilkshake"}
+      ],
+      "coffee": [
+        {"name": "Espresso"},
+        {"name": "Cappuccino"},
+        {"name": "Latte"},
+        {"name": "Smørcroissant"},
+        {"name": "Blåbærmuffin"},
+        {"name": "Skinke & ost"},
+        {"name": "Avocado toast"}
+      ],
+      "bar": [
+        {"name": "Mojito"},
+        {"name": "Aperol Spritz"},
+        {"name": "Negroni"},
+        {"name": "Lager fra fad"},
+        {"name": "IPA"},
+        {"name": "Nachos med ost"},
+        {"name": "Marinerede oliven"}
+      ],
+      "bakery": [
+        {"name": "Surdejsbrød"},
+        {"name": "Baguette"},
+        {"name": "Smørcroissant"},
+        {"name": "Pain au chocolat"},
+        {"name": "Kanelsnegl"},
+        {"name": "Cheesecake stykke"},
+        {"name": "Tiramisu"}
+      ],
+      "restaurant": [
+        {"name": "Caesarsalat"},
+        {"name": "Bruschetta (3 stk)"},
+        {"name": "Grillet ribeye", "description": "300 g, serveret med bagte kartofler"},
+        {"name": "Laksefilet"},
+        {"name": "Svamperisotto"},
+        {"name": "Tiramisu"},
+        {"name": "Crème brûlée"}
+      ]
+    }
+  },
+  "no": {
+    "subtitles": {
+      "pizza": "Autentisk italiensk pizzeria",
+      "sushi": "Ferskt japansk kjøkken",
+      "asian": "Pan-asiatisk kjøkken",
+      "burger": "Håndlagde burgere",
+      "coffee": "Specialty kaffe og bakverk",
+      "bar": "Cocktails og håndverksøl",
+      "bakery": "Daglig ferskt bakeri",
+      "restaurant": "Moderne europeisk kjøkken"
+    },
+    "categories": {
+      "pizza": ["Pizzaer", "Pasta", "Drikke"],
+      "sushi": ["Rolls", "Nigiri", "Drikke"],
+      "asian": ["Nudler", "Ris", "Drikke"],
+      "burger": ["Burgere", "Tilbehør", "Drikke"],
+      "coffee": ["Kaffe", "Bakverk", "Sandwicher"],
+      "bar": ["Cocktails", "Øl", "Snacks"],
+      "bakery": ["Brød", "Bakverk", "Kaker"],
+      "restaurant": ["Forretter", "Hovedretter", "Desserter"]
+    },
+    "items": {
+      "pizza": [
+        {"name": "Margherita", "description": "Tomat, mozzarella, basilikum"},
+        {"name": "Pepperoni"},
+        {"name": "Fire oster"},
+        {"name": "Spaghetti carbonara"},
+        {"name": "Tagliatelle bolognese"},
+        {"name": "Vann uten kullsyre 0,5 L"},
+        {"name": "Husets vin, glass"}
+      ],
+      "sushi": [
+        {"name": "California Roll", "description": "Krabbe, avokado, agurk"},
+        {"name": "Philadelphia Roll"},
+        {"name": "Spicy Tuna Roll"},
+        {"name": "Laks nigiri (2 stk)"},
+        {"name": "Tunfisk nigiri (2 stk)"},
+        {"name": "Grønn te"},
+        {"name": "Asahi øl"}
+      ],
+      "asian": [
+        {"name": "Pad Thai", "description": "Risnudler, reker, peanøtter, lime"},
+        {"name": "Kyllingramen"},
+        {"name": "Stekt ris med kylling"},
+        {"name": "Bibimbap"},
+        {"name": "Jasminte"},
+        {"name": "Singha øl"}
+      ],
+      "burger": [
+        {"name": "Klassisk cheeseburger", "description": "Storfekarbonade, cheddar, salat, tomat, sylteagurk"},
+        {"name": "Baconburger"},
+        {"name": "Vegetarburger"},
+        {"name": "Pommes frites"},
+        {"name": "Løkringer"},
+        {"name": "Coca-Cola 0,4 L"},
+        {"name": "Vaniljemilkshake"}
+      ],
+      "coffee": [
+        {"name": "Espresso"},
+        {"name": "Cappuccino"},
+        {"name": "Latte"},
+        {"name": "Smørcroissant"},
+        {"name": "Blåbærmuffin"},
+        {"name": "Skinke og ost"},
+        {"name": "Avokado toast"}
+      ],
+      "bar": [
+        {"name": "Mojito"},
+        {"name": "Aperol Spritz"},
+        {"name": "Negroni"},
+        {"name": "Lager fra tapp"},
+        {"name": "IPA"},
+        {"name": "Nachos med ost"},
+        {"name": "Marinerte oliven"}
+      ],
+      "bakery": [
+        {"name": "Surdeigsbrød"},
+        {"name": "Baguette"},
+        {"name": "Smørcroissant"},
+        {"name": "Pain au chocolat"},
+        {"name": "Kanelbolle"},
+        {"name": "Cheesecake-stykke"},
+        {"name": "Tiramisu"}
+      ],
+      "restaurant": [
+        {"name": "Caesarsalat"},
+        {"name": "Bruschetta (3 stk)"},
+        {"name": "Grillet ribeye", "description": "300 g, servert med bakte poteter"},
+        {"name": "Laksefilet"},
+        {"name": "Sopprisotto"},
+        {"name": "Tiramisu"},
+        {"name": "Crème brûlée"}
+      ]
+    }
+  },
+  "fi": {
+    "subtitles": {
+      "pizza": "Aito italialainen pizzeria",
+      "sushi": "Tuore japanilainen keittiö",
+      "asian": "Pan-aasialainen keittiö",
+      "burger": "Käsintehdyt burgerit",
+      "coffee": "Specialty-kahvi ja leivonnaiset",
+      "bar": "Cocktailit ja käsityöoluet",
+      "bakery": "Päivittäin tuore leipomo",
+      "restaurant": "Moderni eurooppalainen keittiö"
+    },
+    "categories": {
+      "pizza": ["Pizzat", "Pasta", "Juomat"],
+      "sushi": ["Rollit", "Nigiri", "Juomat"],
+      "asian": ["Nuudelit", "Riisi", "Juomat"],
+      "burger": ["Burgerit", "Lisukkeet", "Juomat"],
+      "coffee": ["Kahvi", "Leivonnaiset", "Voileivät"],
+      "bar": ["Cocktailit", "Olut", "Naposteltavat"],
+      "bakery": ["Leivät", "Leivonnaiset", "Kakut"],
+      "restaurant": ["Alkuruoat", "Pääruoat", "Jälkiruoat"]
+    },
+    "items": {
+      "pizza": [
+        {"name": "Margherita", "description": "Tomaatti, mozzarella, basilika"},
+        {"name": "Pepperoni"},
+        {"name": "Neljä juustoa"},
+        {"name": "Spaghetti carbonara"},
+        {"name": "Tagliatelle bolognese"},
+        {"name": "Hiilihapoton vesi 0,5 L"},
+        {"name": "Talon viini, lasi"}
+      ],
+      "sushi": [
+        {"name": "California Roll", "description": "Rapu, avokado, kurkku"},
+        {"name": "Philadelphia Roll"},
+        {"name": "Spicy Tuna Roll"},
+        {"name": "Lohi-nigiri (2 kpl)"},
+        {"name": "Tonnikala-nigiri (2 kpl)"},
+        {"name": "Vihreä tee"},
+        {"name": "Asahi-olut"}
+      ],
+      "asian": [
+        {"name": "Pad Thai", "description": "Riisinuudelit, katkaravut, maapähkinät, lime"},
+        {"name": "Kanaramen"},
+        {"name": "Paistettu riisi kanan kanssa"},
+        {"name": "Bibimbap"},
+        {"name": "Jasmiinitee"},
+        {"name": "Singha-olut"}
+      ],
+      "burger": [
+        {"name": "Klassinen juustohampurilainen", "description": "Naudanlihapihvi, cheddar, salaatti, tomaatti, etikkakurkut"},
+        {"name": "Pekonihampurilainen"},
+        {"name": "Kasvishampurilainen"},
+        {"name": "Ranskanperunat"},
+        {"name": "Sipulirenkaat"},
+        {"name": "Coca-Cola 0,4 L"},
+        {"name": "Vaniljapirtelö"}
+      ],
+      "coffee": [
+        {"name": "Espresso"},
+        {"name": "Cappuccino"},
+        {"name": "Latte"},
+        {"name": "Voicroissant"},
+        {"name": "Mustikkamuffinssi"},
+        {"name": "Kinkku ja juusto"},
+        {"name": "Avokadopaahtoleipä"}
+      ],
+      "bar": [
+        {"name": "Mojito"},
+        {"name": "Aperol Spritz"},
+        {"name": "Negroni"},
+        {"name": "Lager hanasta"},
+        {"name": "IPA"},
+        {"name": "Nachot juuston kera"},
+        {"name": "Marinoidut oliivit"}
+      ],
+      "bakery": [
+        {"name": "Hapanjuurileipä"},
+        {"name": "Patonki"},
+        {"name": "Voicroissant"},
+        {"name": "Pain au chocolat"},
+        {"name": "Korvapuusti"},
+        {"name": "Juustokakkupala"},
+        {"name": "Tiramisu"}
+      ],
+      "restaurant": [
+        {"name": "Caesar-salaatti"},
+        {"name": "Bruschetta (3 kpl)"},
+        {"name": "Grillattu ribeye-pihvi", "description": "300 g, tarjoillaan paahdettujen perunoiden kanssa"},
+        {"name": "Lohifile"},
+        {"name": "Sienirisotto"},
+        {"name": "Tiramisu"},
+        {"name": "Crème brûlée"}
+      ]
+    }
+  },
+  "cs": {
+    "subtitles": {
+      "pizza": "Autentická italská pizzerie",
+      "sushi": "Čerstvá japonská kuchyně",
+      "asian": "Pan-asijská kuchyně",
+      "burger": "Ručně dělané burgery",
+      "coffee": "Specialty káva a pečivo",
+      "bar": "Koktejly a řemeslné pivo",
+      "bakery": "Denně čerstvá pekárna",
+      "restaurant": "Moderní evropská kuchyně"
+    },
+    "categories": {
+      "pizza": ["Pizzy", "Těstoviny", "Nápoje"],
+      "sushi": ["Rolky", "Nigiri", "Nápoje"],
+      "asian": ["Nudle", "Rýže", "Nápoje"],
+      "burger": ["Burgery", "Přílohy", "Nápoje"],
+      "coffee": ["Káva", "Pečivo", "Sendviče"],
+      "bar": ["Koktejly", "Pivo", "Pochutiny"],
+      "bakery": ["Chleby", "Pečivo", "Dorty"],
+      "restaurant": ["Předkrmy", "Hlavní jídla", "Dezerty"]
+    },
+    "items": {
+      "pizza": [
+        {"name": "Margherita", "description": "Rajče, mozzarella, bazalka"},
+        {"name": "Pepperoni"},
+        {"name": "Čtyři sýry"},
+        {"name": "Špagety carbonara"},
+        {"name": "Tagliatelle bolognese"},
+        {"name": "Neperlivá voda 0,5 l"},
+        {"name": "Domácí víno, sklenka"}
+      ],
+      "sushi": [
+        {"name": "California Roll", "description": "Krab, avokádo, okurka"},
+        {"name": "Philadelphia Roll"},
+        {"name": "Spicy Tuna Roll"},
+        {"name": "Lososové nigiri (2 ks)"},
+        {"name": "Tuňákové nigiri (2 ks)"},
+        {"name": "Zelený čaj"},
+        {"name": "Pivo Asahi"}
+      ],
+      "asian": [
+        {"name": "Pad Thai", "description": "Rýžové nudle, krevety, arašídy, limetka"},
+        {"name": "Kuřecí ramen"},
+        {"name": "Smažená rýže s kuřecím"},
+        {"name": "Bibimbap"},
+        {"name": "Jasmínový čaj"},
+        {"name": "Pivo Singha"}
+      ],
+      "burger": [
+        {"name": "Klasický cheeseburger", "description": "Hovězí placička, čedar, salát, rajče, okurky"},
+        {"name": "Slaninový burger"},
+        {"name": "Vegetariánský burger"},
+        {"name": "Hranolky"},
+        {"name": "Cibulové kroužky"},
+        {"name": "Coca-Cola 0,4 l"},
+        {"name": "Vanilkový koktejl"}
+      ],
+      "coffee": [
+        {"name": "Espresso"},
+        {"name": "Cappuccino"},
+        {"name": "Latte"},
+        {"name": "Máslový croissant"},
+        {"name": "Borůvkový muffin"},
+        {"name": "Šunka a sýr"},
+        {"name": "Avokádový toast"}
+      ],
+      "bar": [
+        {"name": "Mojito"},
+        {"name": "Aperol Spritz"},
+        {"name": "Negroni"},
+        {"name": "Točený ležák"},
+        {"name": "IPA"},
+        {"name": "Nachos se sýrem"},
+        {"name": "Marinované olivy"}
+      ],
+      "bakery": [
+        {"name": "Kváskový chléb"},
+        {"name": "Bageta"},
+        {"name": "Máslový croissant"},
+        {"name": "Pain au chocolat"},
+        {"name": "Skořicový šnek"},
+        {"name": "Kousek cheesecaku"},
+        {"name": "Tiramisu"}
+      ],
+      "restaurant": [
+        {"name": "Caesarův salát"},
+        {"name": "Bruschetta (3 ks)"},
+        {"name": "Grilovaný ribeye steak", "description": "300 g, podávaný s pečenými brambory"},
+        {"name": "Lososový filet"},
+        {"name": "Houbové rizoto"},
+        {"name": "Tiramisu"},
+        {"name": "Crème brûlée"}
+      ]
+    }
+  },
+  "el": {
+    "subtitles": {
+      "pizza": "Αυθεντική ιταλική πιτσαρία",
+      "sushi": "Φρέσκια ιαπωνική κουζίνα",
+      "asian": "Παν-ασιατική κουζίνα",
+      "burger": "Χειροποίητα μπέργκερ",
+      "coffee": "Specialty καφές & αρτοποιήματα",
+      "bar": "Κοκτέιλ & χειροποίητη μπύρα",
+      "bakery": "Φρέσκος φούρνος καθημερινά",
+      "restaurant": "Σύγχρονη ευρωπαϊκή κουζίνα"
+    },
+    "categories": {
+      "pizza": ["Πίτσες", "Ζυμαρικά", "Ποτά"],
+      "sushi": ["Ρολά", "Νιγκίρι", "Ποτά"],
+      "asian": ["Νουντλς", "Ρύζι", "Ποτά"],
+      "burger": ["Μπέργκερ", "Συνοδευτικά", "Ποτά"],
+      "coffee": ["Καφές", "Αρτοποιήματα", "Σάντουιτς"],
+      "bar": ["Κοκτέιλ", "Μπύρα", "Σνακ"],
+      "bakery": ["Ψωμιά", "Αρτοποιήματα", "Τούρτες"],
+      "restaurant": ["Ορεκτικά", "Κυρίως πιάτα", "Επιδόρπια"]
+    },
+    "items": {
+      "pizza": [
+        {"name": "Μαργαρίτα", "description": "Ντομάτα, μοτσαρέλα, βασιλικός"},
+        {"name": "Πεπερόνι"},
+        {"name": "Τέσσερα τυριά"},
+        {"name": "Σπαγγέτι καρμπονάρα"},
+        {"name": "Ταλιατέλες μπολονέζ"},
+        {"name": "Νερό 0,5 L"},
+        {"name": "Κρασί κανάτας, ποτήρι"}
+      ],
+      "sushi": [
+        {"name": "California Roll", "description": "Καβούρι, αβοκάντο, αγγούρι"},
+        {"name": "Philadelphia Roll"},
+        {"name": "Spicy Tuna Roll"},
+        {"name": "Νιγκίρι σολομού (2 τμχ)"},
+        {"name": "Νιγκίρι τόνου (2 τμχ)"},
+        {"name": "Πράσινο τσάι"},
+        {"name": "Μπύρα Asahi"}
+      ],
+      "asian": [
+        {"name": "Pad Thai", "description": "Νουντλς ρυζιού, γαρίδες, φιστίκια, λάιμ"},
+        {"name": "Κοτόπουλο ραμέν"},
+        {"name": "Τηγανητό ρύζι με κοτόπουλο"},
+        {"name": "Bibimbap"},
+        {"name": "Τσάι γιασεμί"},
+        {"name": "Μπύρα Singha"}
+      ],
+      "burger": [
+        {"name": "Κλασικό cheeseburger", "description": "Μπιφτέκι μοσχαρίσιο, τσένταρ, μαρούλι, ντομάτα, πίκλες"},
+        {"name": "Μπέργκερ με μπέικον"},
+        {"name": "Χορτοφαγικό μπέργκερ"},
+        {"name": "Τηγανητές πατάτες"},
+        {"name": "Δαχτυλίδια κρεμμυδιού"},
+        {"name": "Coca-Cola 0,4 L"},
+        {"name": "Μιλκσέικ βανίλια"}
+      ],
+      "coffee": [
+        {"name": "Εσπρέσο"},
+        {"name": "Καπουτσίνο"},
+        {"name": "Λάτε"},
+        {"name": "Κρουασάν με βούτυρο"},
+        {"name": "Μάφιν με βατόμουρα"},
+        {"name": "Ζαμπόν & τυρί"},
+        {"name": "Τοστ με αβοκάντο"}
+      ],
+      "bar": [
+        {"name": "Μοχίτο"},
+        {"name": "Aperol Spritz"},
+        {"name": "Negroni"},
+        {"name": "Λάγκερ από βαρέλι"},
+        {"name": "IPA"},
+        {"name": "Νάτσος με τυρί"},
+        {"name": "Ελιές μαριναρισμένες"}
+      ],
+      "bakery": [
+        {"name": "Ψωμί προζύμι"},
+        {"name": "Μπαγκέτα"},
+        {"name": "Κρουασάν με βούτυρο"},
+        {"name": "Pain au chocolat"},
+        {"name": "Ρολάκι κανέλας"},
+        {"name": "Κομμάτι cheesecake"},
+        {"name": "Τιραμισού"}
+      ],
+      "restaurant": [
+        {"name": "Σαλάτα Καίσαρα"},
+        {"name": "Μπρουσκέτα (3 τμχ)"},
+        {"name": "Ψητό ribeye", "description": "300 γρ., σερβίρεται με ψητές πατάτες"},
+        {"name": "Φιλέτο σολομού"},
+        {"name": "Ριζότο μανιτάρια"},
+        {"name": "Τιραμισού"},
+        {"name": "Κρεμ μπρουλέ"}
+      ]
+    }
+  },
+  "tr": {
+    "subtitles": {
+      "pizza": "Otantik İtalyan pizzacısı",
+      "sushi": "Taze Japon mutfağı",
+      "asian": "Pan-Asya mutfağı",
+      "burger": "El yapımı burgerler",
+      "coffee": "Özel kahve & hamur işleri",
+      "bar": "Kokteyller & el yapımı bira",
+      "bakery": "Her gün taze fırın",
+      "restaurant": "Modern Avrupa mutfağı"
+    },
+    "categories": {
+      "pizza": ["Pizzalar", "Makarnalar", "İçecekler"],
+      "sushi": ["Rulolar", "Nigiri", "İçecekler"],
+      "asian": ["Erişteler", "Pirinç", "İçecekler"],
+      "burger": ["Burgerler", "Yan ürünler", "İçecekler"],
+      "coffee": ["Kahve", "Hamur işleri", "Sandviçler"],
+      "bar": ["Kokteyller", "Bira", "Atıştırmalıklar"],
+      "bakery": ["Ekmekler", "Hamur işleri", "Pastalar"],
+      "restaurant": ["Başlangıçlar", "Ana yemekler", "Tatlılar"]
+    },
+    "items": {
+      "pizza": [
+        {"name": "Margherita", "description": "Domates, mozzarella, fesleğen"},
+        {"name": "Pepperoni"},
+        {"name": "Dört peynirli"},
+        {"name": "Spagetti karbonara"},
+        {"name": "Tagliatelle bolonez"},
+        {"name": "Sade su 0,5 L"},
+        {"name": "Ev şarabı, kadeh"}
+      ],
+      "sushi": [
+        {"name": "California Roll", "description": "Yengeç, avokado, salatalık"},
+        {"name": "Philadelphia Roll"},
+        {"name": "Acılı ton balıklı rulo"},
+        {"name": "Somon nigiri (2 adet)"},
+        {"name": "Ton balığı nigiri (2 adet)"},
+        {"name": "Yeşil çay"},
+        {"name": "Asahi birası"}
+      ],
+      "asian": [
+        {"name": "Pad Thai", "description": "Pirinç eriştesi, karides, fıstık, misket limonu"},
+        {"name": "Tavuk ramen"},
+        {"name": "Tavuklu kavrulmuş pirinç"},
+        {"name": "Bibimbap"},
+        {"name": "Yasemin çayı"},
+        {"name": "Singha birası"}
+      ],
+      "burger": [
+        {"name": "Klasik cheeseburger", "description": "Dana eti, çedar, marul, domates, turşu"},
+        {"name": "Beykınlı burger"},
+        {"name": "Vejetaryen burger"},
+        {"name": "Patates kızartması"},
+        {"name": "Soğan halkaları"},
+        {"name": "Coca-Cola 0,4 L"},
+        {"name": "Vanilyalı milkshake"}
+      ],
+      "coffee": [
+        {"name": "Espresso"},
+        {"name": "Cappuccino"},
+        {"name": "Latte"},
+        {"name": "Tereyağlı kruvasan"},
+        {"name": "Yaban mersinli muffin"},
+        {"name": "Jambon & peynir"},
+        {"name": "Avokadolu tost"}
+      ],
+      "bar": [
+        {"name": "Mojito"},
+        {"name": "Aperol Spritz"},
+        {"name": "Negroni"},
+        {"name": "Fıçı bira"},
+        {"name": "IPA"},
+        {"name": "Peynirli nachos"},
+        {"name": "Marine zeytin"}
+      ],
+      "bakery": [
+        {"name": "Ekşi maya ekmek"},
+        {"name": "Baget"},
+        {"name": "Tereyağlı kruvasan"},
+        {"name": "Pain au chocolat"},
+        {"name": "Tarçınlı rulo"},
+        {"name": "Cheesecake dilimi"},
+        {"name": "Tiramisu"}
+      ],
+      "restaurant": [
+        {"name": "Sezar salatası"},
+        {"name": "Bruschetta (3 adet)"},
+        {"name": "Izgara ribeye", "description": "300 g, fırın patates ile servis edilir"},
+        {"name": "Somon fileto"},
+        {"name": "Mantar risotto"},
+        {"name": "Tiramisu"},
+        {"name": "Crème brûlée"}
+      ]
+    }
+  },
+  "ro": {
+    "subtitles": {
+      "pizza": "Pizzerie italiană autentică",
+      "sushi": "Bucătărie japoneză proaspătă",
+      "asian": "Bucătărie pan-asiatică",
+      "burger": "Burgeri artizanali",
+      "coffee": "Cafea specialty și patiserie",
+      "bar": "Cocktailuri și bere artizanală",
+      "bakery": "Brutărie proaspătă zilnic",
+      "restaurant": "Bucătărie europeană modernă"
+    },
+    "categories": {
+      "pizza": ["Pizze", "Paste", "Băuturi"],
+      "sushi": ["Rulouri", "Nigiri", "Băuturi"],
+      "asian": ["Tăiței", "Orez", "Băuturi"],
+      "burger": ["Burgeri", "Garnituri", "Băuturi"],
+      "coffee": ["Cafea", "Patiserie", "Sandviciuri"],
+      "bar": ["Cocktailuri", "Bere", "Gustări"],
+      "bakery": ["Pâini", "Patiserie", "Prăjituri"],
+      "restaurant": ["Aperitive", "Felul principal", "Deserturi"]
+    },
+    "items": {
+      "pizza": [
+        {"name": "Margherita", "description": "Roșii, mozzarella, busuioc"},
+        {"name": "Pepperoni"},
+        {"name": "Patru brânzeturi"},
+        {"name": "Spaghetti carbonara"},
+        {"name": "Tagliatelle bolognese"},
+        {"name": "Apă plată 0,5 L"},
+        {"name": "Vinul casei, pahar"}
+      ],
+      "sushi": [
+        {"name": "California Roll", "description": "Crab, avocado, castravete"},
+        {"name": "Philadelphia Roll"},
+        {"name": "Spicy Tuna Roll"},
+        {"name": "Nigiri cu somon (2 buc)"},
+        {"name": "Nigiri cu ton (2 buc)"},
+        {"name": "Ceai verde"},
+        {"name": "Bere Asahi"}
+      ],
+      "asian": [
+        {"name": "Pad Thai", "description": "Tăiței de orez, creveți, arahide, lime"},
+        {"name": "Ramen cu pui"},
+        {"name": "Orez prăjit cu pui"},
+        {"name": "Bibimbap"},
+        {"name": "Ceai de iasomie"},
+        {"name": "Bere Singha"}
+      ],
+      "burger": [
+        {"name": "Cheeseburger clasic", "description": "Chiftea de vită, cheddar, salată, roșii, castraveți murați"},
+        {"name": "Burger cu bacon"},
+        {"name": "Burger vegetarian"},
+        {"name": "Cartofi prăjiți"},
+        {"name": "Inele de ceapă"},
+        {"name": "Coca-Cola 0,4 L"},
+        {"name": "Milkshake vanilie"}
+      ],
+      "coffee": [
+        {"name": "Espresso"},
+        {"name": "Cappuccino"},
+        {"name": "Latte"},
+        {"name": "Cornul cu unt"},
+        {"name": "Brioșă cu afine"},
+        {"name": "Șuncă și brânză"},
+        {"name": "Tost cu avocado"}
+      ],
+      "bar": [
+        {"name": "Mojito"},
+        {"name": "Aperol Spritz"},
+        {"name": "Negroni"},
+        {"name": "Bere blondă la halbă"},
+        {"name": "IPA"},
+        {"name": "Nachos cu brânză"},
+        {"name": "Măsline marinate"}
+      ],
+      "bakery": [
+        {"name": "Pâine cu maia"},
+        {"name": "Baghetă"},
+        {"name": "Cornul cu unt"},
+        {"name": "Pain au chocolat"},
+        {"name": "Rulou cu scorțișoară"},
+        {"name": "Felie de cheesecake"},
+        {"name": "Tiramisu"}
+      ],
+      "restaurant": [
+        {"name": "Salată Caesar"},
+        {"name": "Bruschetta (3 buc)"},
+        {"name": "Antricot la grătar", "description": "300 g, servit cu cartofi copți"},
+        {"name": "File de somon"},
+        {"name": "Risotto cu ciuperci"},
+        {"name": "Tiramisu"},
+        {"name": "Crème brûlée"}
+      ]
+    }
+  },
+  "hu": {
+    "subtitles": {
+      "pizza": "Autentikus olasz pizzéria",
+      "sushi": "Friss japán konyha",
+      "asian": "Pán-ázsiai konyha",
+      "burger": "Kézműves burgerek",
+      "coffee": "Specialty kávé és sütemények",
+      "bar": "Koktélok és kézműves sörök",
+      "bakery": "Naponta friss pékség",
+      "restaurant": "Modern európai konyha"
+    },
+    "categories": {
+      "pizza": ["Pizzák", "Tészták", "Italok"],
+      "sushi": ["Tekercsek", "Nigiri", "Italok"],
+      "asian": ["Tészták", "Rizs", "Italok"],
+      "burger": ["Burgerek", "Köretek", "Italok"],
+      "coffee": ["Kávé", "Sütemények", "Szendvicsek"],
+      "bar": ["Koktélok", "Sör", "Rágcsálnivalók"],
+      "bakery": ["Kenyerek", "Sütemények", "Torták"],
+      "restaurant": ["Előételek", "Főételek", "Desszertek"]
+    },
+    "items": {
+      "pizza": [
+        {"name": "Margherita", "description": "Paradicsom, mozzarella, bazsalikom"},
+        {"name": "Pepperoni"},
+        {"name": "Négy sajtos"},
+        {"name": "Spagetti carbonara"},
+        {"name": "Tagliatelle bolognese"},
+        {"name": "Szénsavmentes víz 0,5 L"},
+        {"name": "Házi bor, pohár"}
+      ],
+      "sushi": [
+        {"name": "California Roll", "description": "Rák, avokádó, uborka"},
+        {"name": "Philadelphia Roll"},
+        {"name": "Spicy Tuna Roll"},
+        {"name": "Lazac nigiri (2 db)"},
+        {"name": "Tonhal nigiri (2 db)"},
+        {"name": "Zöld tea"},
+        {"name": "Asahi sör"}
+      ],
+      "asian": [
+        {"name": "Pad Thai", "description": "Rizstészta, garnélarák, földimogyoró, lime"},
+        {"name": "Csirkés ramen"},
+        {"name": "Sült rizs csirkével"},
+        {"name": "Bibimbap"},
+        {"name": "Jázmintea"},
+        {"name": "Singha sör"}
+      ],
+      "burger": [
+        {"name": "Klasszikus sajtburger", "description": "Marhahúspogácsa, cheddar, saláta, paradicsom, savanyúság"},
+        {"name": "Bacon burger"},
+        {"name": "Vegetáriánus burger"},
+        {"name": "Sült krumpli"},
+        {"name": "Hagymakarikák"},
+        {"name": "Coca-Cola 0,4 L"},
+        {"name": "Vaníliás turmix"}
+      ],
+      "coffee": [
+        {"name": "Eszpresszó"},
+        {"name": "Cappuccino"},
+        {"name": "Latte"},
+        {"name": "Vajas croissant"},
+        {"name": "Áfonyás muffin"},
+        {"name": "Sonka és sajt"},
+        {"name": "Avokádós pirítós"}
+      ],
+      "bar": [
+        {"name": "Mojito"},
+        {"name": "Aperol Spritz"},
+        {"name": "Negroni"},
+        {"name": "Csapolt világos"},
+        {"name": "IPA"},
+        {"name": "Sajtos nachos"},
+        {"name": "Pácolt olajbogyó"}
+      ],
+      "bakery": [
+        {"name": "Kovászos kenyér"},
+        {"name": "Bagett"},
+        {"name": "Vajas croissant"},
+        {"name": "Pain au chocolat"},
+        {"name": "Fahéjas csiga"},
+        {"name": "Sajttorta szelet"},
+        {"name": "Tiramisu"}
+      ],
+      "restaurant": [
+        {"name": "Cézár saláta"},
+        {"name": "Bruschetta (3 db)"},
+        {"name": "Grillezett ribeye steak", "description": "300 g, sült krumplival tálalva"},
+        {"name": "Lazacfilé"},
+        {"name": "Gombás rizottó"},
+        {"name": "Tiramisu"},
+        {"name": "Crème brûlée"}
+      ]
+    }
+  },
+  "bg": {
+    "subtitles": {
+      "pizza": "Автентична италианска пицария",
+      "sushi": "Прясна японска кухня",
+      "asian": "Пан-азиатска кухня",
+      "burger": "Ръчно правени бургери",
+      "coffee": "Specialty кафе и сладкарски изделия",
+      "bar": "Коктейли и крафт бира",
+      "bakery": "Ежедневно прясна пекарна",
+      "restaurant": "Модерна европейска кухня"
+    },
+    "categories": {
+      "pizza": ["Пици", "Паста", "Напитки"],
+      "sushi": ["Ролца", "Нигири", "Напитки"],
+      "asian": ["Юфка", "Ориз", "Напитки"],
+      "burger": ["Бургери", "Гарнитури", "Напитки"],
+      "coffee": ["Кафе", "Сладкарство", "Сандвичи"],
+      "bar": ["Коктейли", "Бира", "Закуски"],
+      "bakery": ["Хлябове", "Сладкарство", "Торти"],
+      "restaurant": ["Предястия", "Основни", "Десерти"]
+    },
+    "items": {
+      "pizza": [
+        {"name": "Маргарита", "description": "Домат, моцарела, босилек"},
+        {"name": "Пеперони"},
+        {"name": "Четири сирена"},
+        {"name": "Спагети карбонара"},
+        {"name": "Талиатели болонезе"},
+        {"name": "Газирана вода 0,5 л"},
+        {"name": "Домашно вино, чаша"}
+      ],
+      "sushi": [
+        {"name": "California Roll", "description": "Рак, авокадо, краставица"},
+        {"name": "Philadelphia Roll"},
+        {"name": "Spicy Tuna Roll"},
+        {"name": "Нигири със сьомга (2 бр)"},
+        {"name": "Нигири с риба тон (2 бр)"},
+        {"name": "Зелен чай"},
+        {"name": "Бира Asahi"}
+      ],
+      "asian": [
+        {"name": "Пад тай", "description": "Оризова юфка, скариди, фъстъци, лайм"},
+        {"name": "Пилешки рамен"},
+        {"name": "Пържен ориз с пиле"},
+        {"name": "Бибимбап"},
+        {"name": "Жасминов чай"},
+        {"name": "Бира Singha"}
+      ],
+      "burger": [
+        {"name": "Класически чийзбургер", "description": "Телешко кюфте, чедър, маруля, домат, корнишони"},
+        {"name": "Бургер с бекон"},
+        {"name": "Вегетариански бургер"},
+        {"name": "Пържени картофи"},
+        {"name": "Лучени кръгчета"},
+        {"name": "Coca-Cola 0,4 л"},
+        {"name": "Ванилов милкшейк"}
+      ],
+      "coffee": [
+        {"name": "Еспресо"},
+        {"name": "Капучино"},
+        {"name": "Лате"},
+        {"name": "Маслен кроасан"},
+        {"name": "Мъфин с боровинки"},
+        {"name": "Шунка и сирене"},
+        {"name": "Тост с авокадо"}
+      ],
+      "bar": [
+        {"name": "Мохито"},
+        {"name": "Aperol Spritz"},
+        {"name": "Negroni"},
+        {"name": "Наливна светла бира"},
+        {"name": "IPA"},
+        {"name": "Начос със сирене"},
+        {"name": "Маринован маслини"}
+      ],
+      "bakery": [
+        {"name": "Хляб с квас"},
+        {"name": "Багет"},
+        {"name": "Маслен кроасан"},
+        {"name": "Pain au chocolat"},
+        {"name": "Канелена кифла"},
+        {"name": "Парче чийзкейк"},
+        {"name": "Тирамису"}
+      ],
+      "restaurant": [
+        {"name": "Салата Цезар"},
+        {"name": "Брускета (3 бр)"},
+        {"name": "Грил рибай стек", "description": "300 г, сервиран с печени картофи"},
+        {"name": "Филе от сьомга"},
+        {"name": "Гъбено ризото"},
+        {"name": "Тирамису"},
+        {"name": "Крем брюле"}
+      ]
+    }
+  },
+  "hr": {
+    "subtitles": {
+      "pizza": "Autentična talijanska pizzeria",
+      "sushi": "Svježa japanska kuhinja",
+      "asian": "Pan-azijska kuhinja",
+      "burger": "Ručno rađeni burgeri",
+      "coffee": "Specialty kava i pekarski proizvodi",
+      "bar": "Kokteli i craft pivo",
+      "bakery": "Svakodnevno svježa pekarnica",
+      "restaurant": "Moderna europska kuhinja"
+    },
+    "categories": {
+      "pizza": ["Pizze", "Tjestenina", "Pića"],
+      "sushi": ["Rolice", "Nigiri", "Pića"],
+      "asian": ["Rezanci", "Riža", "Pića"],
+      "burger": ["Burgeri", "Prilozi", "Pića"],
+      "coffee": ["Kava", "Pekarstvo", "Sendviči"],
+      "bar": ["Kokteli", "Pivo", "Grickalice"],
+      "bakery": ["Kruhovi", "Peciva", "Torte"],
+      "restaurant": ["Predjela", "Glavna jela", "Deserti"]
+    },
+    "items": {
+      "pizza": [
+        {"name": "Margherita", "description": "Rajčica, mozzarella, bosiljak"},
+        {"name": "Pepperoni"},
+        {"name": "Četiri sira"},
+        {"name": "Špageti carbonara"},
+        {"name": "Tagliatelle bolognese"},
+        {"name": "Negazirana voda 0,5 L"},
+        {"name": "Vino kuće, čaša"}
+      ],
+      "sushi": [
+        {"name": "California Roll", "description": "Rak, avokado, krastavac"},
+        {"name": "Philadelphia Roll"},
+        {"name": "Spicy Tuna Roll"},
+        {"name": "Nigiri od lososa (2 kom)"},
+        {"name": "Nigiri od tune (2 kom)"},
+        {"name": "Zeleni čaj"},
+        {"name": "Asahi pivo"}
+      ],
+      "asian": [
+        {"name": "Pad Thai", "description": "Rižini rezanci, kozice, kikiriki, limeta"},
+        {"name": "Pileći ramen"},
+        {"name": "Pržena riža s piletinom"},
+        {"name": "Bibimbap"},
+        {"name": "Jasminov čaj"},
+        {"name": "Singha pivo"}
+      ],
+      "burger": [
+        {"name": "Klasični cheeseburger", "description": "Goveđi pljeskavica, cheddar, salata, rajčica, kiseli krastavci"},
+        {"name": "Burger sa slaninom"},
+        {"name": "Vegetarijanski burger"},
+        {"name": "Pomfrit"},
+        {"name": "Lukova kolobari"},
+        {"name": "Coca-Cola 0,4 L"},
+        {"name": "Vanilijev milkshake"}
+      ],
+      "coffee": [
+        {"name": "Espresso"},
+        {"name": "Cappuccino"},
+        {"name": "Latte"},
+        {"name": "Maslac croissant"},
+        {"name": "Muffin s borovnicama"},
+        {"name": "Šunka i sir"},
+        {"name": "Avokado tost"}
+      ],
+      "bar": [
+        {"name": "Mojito"},
+        {"name": "Aperol Spritz"},
+        {"name": "Negroni"},
+        {"name": "Točeno svijetlo pivo"},
+        {"name": "IPA"},
+        {"name": "Nachos sa sirom"},
+        {"name": "Marinirane masline"}
+      ],
+      "bakery": [
+        {"name": "Kruh s kvascem"},
+        {"name": "Baguette"},
+        {"name": "Maslac croissant"},
+        {"name": "Pain au chocolat"},
+        {"name": "Cimet rolat"},
+        {"name": "Komad cheesecake-a"},
+        {"name": "Tiramisu"}
+      ],
+      "restaurant": [
+        {"name": "Caesar salata"},
+        {"name": "Bruschetta (3 kom)"},
+        {"name": "Ribeye steak s roštilja", "description": "300 g, posluženo s pečenim krumpirom"},
+        {"name": "Filet lososa"},
+        {"name": "Rižoto s gljivama"},
+        {"name": "Tiramisu"},
+        {"name": "Crème brûlée"}
+      ]
+    }
+  },
+  "sk": {
+    "subtitles": {
+      "pizza": "Autentická talianska pizzeria",
+      "sushi": "Čerstvá japonská kuchyňa",
+      "asian": "Pan-ázijská kuchyňa",
+      "burger": "Ručne vyrábané burgery",
+      "coffee": "Specialty káva a pečivo",
+      "bar": "Koktaily a remeselné pivo",
+      "bakery": "Denne čerstvá pekáreň",
+      "restaurant": "Moderná európska kuchyňa"
+    },
+    "categories": {
+      "pizza": ["Pizze", "Cestoviny", "Nápoje"],
+      "sushi": ["Rolky", "Nigiri", "Nápoje"],
+      "asian": ["Rezance", "Ryža", "Nápoje"],
+      "burger": ["Burgery", "Prílohy", "Nápoje"],
+      "coffee": ["Káva", "Pečivo", "Sendviče"],
+      "bar": ["Koktaily", "Pivo", "Pochutiny"],
+      "bakery": ["Chleby", "Pečivo", "Torty"],
+      "restaurant": ["Predjedlá", "Hlavné jedlá", "Dezerty"]
+    },
+    "items": {
+      "pizza": [
+        {"name": "Margherita", "description": "Paradajka, mozzarella, bazalka"},
+        {"name": "Pepperoni"},
+        {"name": "Štyri syry"},
+        {"name": "Špagety carbonara"},
+        {"name": "Tagliatelle bolognese"},
+        {"name": "Neperlivá voda 0,5 l"},
+        {"name": "Domáce víno, pohár"}
+      ],
+      "sushi": [
+        {"name": "California Roll", "description": "Krab, avokádo, uhorka"},
+        {"name": "Philadelphia Roll"},
+        {"name": "Spicy Tuna Roll"},
+        {"name": "Lososové nigiri (2 ks)"},
+        {"name": "Tuniakové nigiri (2 ks)"},
+        {"name": "Zelený čaj"},
+        {"name": "Pivo Asahi"}
+      ],
+      "asian": [
+        {"name": "Pad Thai", "description": "Ryžové rezance, krevety, arašidy, limetka"},
+        {"name": "Kuracie ramen"},
+        {"name": "Smažená ryža s kuracím"},
+        {"name": "Bibimbap"},
+        {"name": "Jazmínový čaj"},
+        {"name": "Pivo Singha"}
+      ],
+      "burger": [
+        {"name": "Klasický cheeseburger", "description": "Hovädzia placka, čedar, šalát, paradajka, uhorky"},
+        {"name": "Slaninový burger"},
+        {"name": "Vegetariánsky burger"},
+        {"name": "Hranolky"},
+        {"name": "Cibuľové krúžky"},
+        {"name": "Coca-Cola 0,4 l"},
+        {"name": "Vanilkový kokteil"}
+      ],
+      "coffee": [
+        {"name": "Espresso"},
+        {"name": "Cappuccino"},
+        {"name": "Latte"},
+        {"name": "Maslový croissant"},
+        {"name": "Čučoriedkový muffin"},
+        {"name": "Šunka a syr"},
+        {"name": "Avokádový toast"}
+      ],
+      "bar": [
+        {"name": "Mojito"},
+        {"name": "Aperol Spritz"},
+        {"name": "Negroni"},
+        {"name": "Točený ležiak"},
+        {"name": "IPA"},
+        {"name": "Nachos so syrom"},
+        {"name": "Marinované olivy"}
+      ],
+      "bakery": [
+        {"name": "Kvasníkový chlieb"},
+        {"name": "Bageta"},
+        {"name": "Maslový croissant"},
+        {"name": "Pain au chocolat"},
+        {"name": "Škoricový závitok"},
+        {"name": "Kúsok cheesecake"},
+        {"name": "Tiramisu"}
+      ],
+      "restaurant": [
+        {"name": "Caesarov šalát"},
+        {"name": "Bruschetta (3 ks)"},
+        {"name": "Grilovaný ribeye steak", "description": "300 g, podávaný s pečenými zemiakmi"},
+        {"name": "Lososový filet"},
+        {"name": "Hubové rizoto"},
+        {"name": "Tiramisu"},
+        {"name": "Crème brûlée"}
+      ]
+    }
+  },
+  "sl": {
+    "subtitles": {
+      "pizza": "Avtentična italijanska picerija",
+      "sushi": "Sveža japonska kuhinja",
+      "asian": "Pan-azijska kuhinja",
+      "burger": "Ročno izdelani burgerji",
+      "coffee": "Specialty kava in pecivo",
+      "bar": "Koktajli in obrtno pivo",
+      "bakery": "Vsakodnevno sveža pekarna",
+      "restaurant": "Moderna evropska kuhinja"
+    },
+    "categories": {
+      "pizza": ["Pice", "Testenine", "Pijače"],
+      "sushi": ["Zvitki", "Nigiri", "Pijače"],
+      "asian": ["Rezanci", "Riž", "Pijače"],
+      "burger": ["Burgerji", "Priloge", "Pijače"],
+      "coffee": ["Kava", "Pecivo", "Sendviči"],
+      "bar": ["Koktajli", "Pivo", "Prigrizki"],
+      "bakery": ["Kruh", "Pecivo", "Torte"],
+      "restaurant": ["Predjedi", "Glavne jedi", "Sladice"]
+    },
+    "items": {
+      "pizza": [
+        {"name": "Margherita", "description": "Paradižnik, mozzarella, bazilika"},
+        {"name": "Pepperoni"},
+        {"name": "Štiri siri"},
+        {"name": "Špageti carbonara"},
+        {"name": "Tagliatelle bolognese"},
+        {"name": "Negazirana voda 0,5 L"},
+        {"name": "Hišno vino, kozarec"}
+      ],
+      "sushi": [
+        {"name": "California Roll", "description": "Rak, avokado, kumara"},
+        {"name": "Philadelphia Roll"},
+        {"name": "Spicy Tuna Roll"},
+        {"name": "Nigiri z lososom (2 kos)"},
+        {"name": "Nigiri s tuno (2 kos)"},
+        {"name": "Zeleni čaj"},
+        {"name": "Pivo Asahi"}
+      ],
+      "asian": [
+        {"name": "Pad Thai", "description": "Riževi rezanci, kozice, arašidi, limeta"},
+        {"name": "Piščančji ramen"},
+        {"name": "Pražen riž s piščancem"},
+        {"name": "Bibimbap"},
+        {"name": "Jasminov čaj"},
+        {"name": "Pivo Singha"}
+      ],
+      "burger": [
+        {"name": "Klasičen cheeseburger", "description": "Goveji burger, cheddar, solata, paradižnik, kumarice"},
+        {"name": "Burger s slanino"},
+        {"name": "Vegetarijanski burger"},
+        {"name": "Pomfrit"},
+        {"name": "Čebulni obročki"},
+        {"name": "Coca-Cola 0,4 L"},
+        {"name": "Vanilijev mlečni napitek"}
+      ],
+      "coffee": [
+        {"name": "Espresso"},
+        {"name": "Cappuccino"},
+        {"name": "Latte"},
+        {"name": "Masleni croissant"},
+        {"name": "Borovničev muffin"},
+        {"name": "Šunka in sir"},
+        {"name": "Avokadov toast"}
+      ],
+      "bar": [
+        {"name": "Mojito"},
+        {"name": "Aperol Spritz"},
+        {"name": "Negroni"},
+        {"name": "Točeno svetlo pivo"},
+        {"name": "IPA"},
+        {"name": "Nachos s sirom"},
+        {"name": "Marinirane olive"}
+      ],
+      "bakery": [
+        {"name": "Kvašen kruh"},
+        {"name": "Baguette"},
+        {"name": "Masleni croissant"},
+        {"name": "Pain au chocolat"},
+        {"name": "Cimetov zvitek"},
+        {"name": "Kos cheesecake"},
+        {"name": "Tiramisu"}
+      ],
+      "restaurant": [
+        {"name": "Caesar solata"},
+        {"name": "Bruschetta (3 kos)"},
+        {"name": "Ribeye zrezek z žara", "description": "300 g, postrežen s pečenim krompirjem"},
+        {"name": "Filet lososa"},
+        {"name": "Gobov rižoto"},
+        {"name": "Tiramisu"},
+        {"name": "Crème brûlée"}
+      ]
+    }
+  },
+  "et": {
+    "subtitles": {
+      "pizza": "Autentne Itaalia pitsabaar",
+      "sushi": "Värske Jaapani köök",
+      "asian": "Pan-Aasia köök",
+      "burger": "Käsitsi tehtud burgerid",
+      "coffee": "Eriline kohv ja küpsetised",
+      "bar": "Kokteilid ja käsitööõlu",
+      "bakery": "Iga päev värske pagariäri",
+      "restaurant": "Kaasaegne Euroopa köök"
+    },
+    "categories": {
+      "pizza": ["Pitsad", "Pasta", "Joogid"],
+      "sushi": ["Rullid", "Nigiri", "Joogid"],
+      "asian": ["Nuudlid", "Riis", "Joogid"],
+      "burger": ["Burgerid", "Lisandid", "Joogid"],
+      "coffee": ["Kohv", "Küpsetised", "Võileivad"],
+      "bar": ["Kokteilid", "Õlu", "Suupisted"],
+      "bakery": ["Leivad", "Küpsetised", "Koogid"],
+      "restaurant": ["Eelroad", "Pearoad", "Magustoidud"]
+    },
+    "items": {
+      "pizza": [
+        {"name": "Margherita", "description": "Tomat, mozzarella, basiilik"},
+        {"name": "Pepperoni"},
+        {"name": "Neli juustu"},
+        {"name": "Spagetid carbonara"},
+        {"name": "Tagliatelle bolognese"},
+        {"name": "Mullideta vesi 0,5 L"},
+        {"name": "Maja vein, klaas"}
+      ],
+      "sushi": [
+        {"name": "California Roll", "description": "Krabi, avokaado, kurk"},
+        {"name": "Philadelphia Roll"},
+        {"name": "Spicy Tuna Roll"},
+        {"name": "Lõhe nigiri (2 tk)"},
+        {"name": "Tuunikala nigiri (2 tk)"},
+        {"name": "Roheline tee"},
+        {"name": "Asahi õlu"}
+      ],
+      "asian": [
+        {"name": "Pad Thai", "description": "Riisinuudlid, krevetid, maapähklid, laim"},
+        {"name": "Kana ramen"},
+        {"name": "Praetud riis kanaga"},
+        {"name": "Bibimbap"},
+        {"name": "Jasmiini tee"},
+        {"name": "Singha õlu"}
+      ],
+      "burger": [
+        {"name": "Klassikaline cheeseburger", "description": "Veiselihakotlett, cheddar, salat, tomat, hapukurgid"},
+        {"name": "Pekonburger"},
+        {"name": "Taimetoitlane burger"},
+        {"name": "Friikartulid"},
+        {"name": "Sibularõngad"},
+        {"name": "Coca-Cola 0,4 L"},
+        {"name": "Vanilli piimakokteil"}
+      ],
+      "coffee": [
+        {"name": "Espresso"},
+        {"name": "Cappuccino"},
+        {"name": "Latte"},
+        {"name": "Või croissant"},
+        {"name": "Mustika muffin"},
+        {"name": "Sink ja juust"},
+        {"name": "Avokaadoga röstsai"}
+      ],
+      "bar": [
+        {"name": "Mojito"},
+        {"name": "Aperol Spritz"},
+        {"name": "Negroni"},
+        {"name": "Vaadiõlu hele"},
+        {"name": "IPA"},
+        {"name": "Nachos juustuga"},
+        {"name": "Marineeritud oliivid"}
+      ],
+      "bakery": [
+        {"name": "Hapendatud leib"},
+        {"name": "Baguette"},
+        {"name": "Või croissant"},
+        {"name": "Pain au chocolat"},
+        {"name": "Kaneelirull"},
+        {"name": "Juustukoogi tükk"},
+        {"name": "Tiramisu"}
+      ],
+      "restaurant": [
+        {"name": "Caesari salat"},
+        {"name": "Bruschetta (3 tk)"},
+        {"name": "Grillitud ribeye steik", "description": "300 g, serveeritud röstitud kartulitega"},
+        {"name": "Lõhefilee"},
+        {"name": "Seenerisotto"},
+        {"name": "Tiramisu"},
+        {"name": "Crème brûlée"}
+      ]
+    }
+  },
+  "lv": {
+    "subtitles": {
+      "pizza": "Autentiska itāļu picērija",
+      "sushi": "Svaiga japāņu virtuve",
+      "asian": "Pan-aziātu virtuve",
+      "burger": "Ar roku darināti burgeri",
+      "coffee": "Specialty kafija un konditorejas izstrādājumi",
+      "bar": "Kokteiļi un amatniecības alus",
+      "bakery": "Katru dienu svaiga maizes ceptuve",
+      "restaurant": "Moderna Eiropas virtuve"
+    },
+    "categories": {
+      "pizza": ["Picas", "Pasta", "Dzērieni"],
+      "sushi": ["Rullīši", "Nigiri", "Dzērieni"],
+      "asian": ["Nūdeles", "Rīsi", "Dzērieni"],
+      "burger": ["Burgeri", "Piedevas", "Dzērieni"],
+      "coffee": ["Kafija", "Konditoreja", "Sendviči"],
+      "bar": ["Kokteiļi", "Alus", "Uzkodas"],
+      "bakery": ["Maizes", "Konditoreja", "Tortes"],
+      "restaurant": ["Uzkodas", "Pamatēdieni", "Deserti"]
+    },
+    "items": {
+      "pizza": [
+        {"name": "Margherita", "description": "Tomāts, mozzarella, baziliks"},
+        {"name": "Pepperoni"},
+        {"name": "Četri sieri"},
+        {"name": "Spageti carbonara"},
+        {"name": "Tagliatelle bolognese"},
+        {"name": "Negāzēts ūdens 0,5 L"},
+        {"name": "Mājas vīns, glāze"}
+      ],
+      "sushi": [
+        {"name": "California Roll", "description": "Krabis, avokado, gurķis"},
+        {"name": "Philadelphia Roll"},
+        {"name": "Spicy Tuna Roll"},
+        {"name": "Laša nigiri (2 gab)"},
+        {"name": "Tunča nigiri (2 gab)"},
+        {"name": "Zaļā tēja"},
+        {"name": "Asahi alus"}
+      ],
+      "asian": [
+        {"name": "Pad Thai", "description": "Rīsu nūdeles, garneles, zemesrieksti, laims"},
+        {"name": "Vistas ramen"},
+        {"name": "Cepti rīsi ar vistu"},
+        {"name": "Bibimbap"},
+        {"name": "Jasmīna tēja"},
+        {"name": "Singha alus"}
+      ],
+      "burger": [
+        {"name": "Klasiskais cheeseburger", "description": "Liellopu kotlete, čedars, salāti, tomāts, marinēti gurķi"},
+        {"name": "Bekona burgers"},
+        {"name": "Veģetārais burgers"},
+        {"name": "Frī kartupeļi"},
+        {"name": "Sīpolu riņķi"},
+        {"name": "Coca-Cola 0,4 L"},
+        {"name": "Vaniļas kokteilis"}
+      ],
+      "coffee": [
+        {"name": "Espresso"},
+        {"name": "Cappuccino"},
+        {"name": "Latte"},
+        {"name": "Sviesta croissant"},
+        {"name": "Melleņu mafins"},
+        {"name": "Šķiņķis un siers"},
+        {"name": "Tosts ar avokado"}
+      ],
+      "bar": [
+        {"name": "Mojito"},
+        {"name": "Aperol Spritz"},
+        {"name": "Negroni"},
+        {"name": "Liets gaišais alus"},
+        {"name": "IPA"},
+        {"name": "Nachos ar sieru"},
+        {"name": "Marinētas olīvas"}
+      ],
+      "bakery": [
+        {"name": "Ieraudzes maize"},
+        {"name": "Baguette"},
+        {"name": "Sviesta croissant"},
+        {"name": "Pain au chocolat"},
+        {"name": "Kanēļa rullīši"},
+        {"name": "Siera kūkas gabaliņš"},
+        {"name": "Tiramisu"}
+      ],
+      "restaurant": [
+        {"name": "Cēzara salāti"},
+        {"name": "Bruschetta (3 gab)"},
+        {"name": "Grilēts ribeye steiks", "description": "300 g, pasniegts ar ceptiem kartupeļiem"},
+        {"name": "Laša filejas"},
+        {"name": "Sēņu rizoto"},
+        {"name": "Tiramisu"},
+        {"name": "Crème brûlée"}
+      ]
+    }
+  },
+  "lt": {
+    "subtitles": {
+      "pizza": "Autentiška itališka picerija",
+      "sushi": "Šviežia japoniška virtuvė",
+      "asian": "Pan-azijinė virtuvė",
+      "burger": "Rankų darbo burgeriai",
+      "coffee": "Specialty kava ir kepiniai",
+      "bar": "Kokteiliai ir amatininkų alus",
+      "bakery": "Kasdien šviežia kepykla",
+      "restaurant": "Moderni Europos virtuvė"
+    },
+    "categories": {
+      "pizza": ["Picos", "Makaronai", "Gėrimai"],
+      "sushi": ["Suktinukai", "Nigiri", "Gėrimai"],
+      "asian": ["Makaronai", "Ryžiai", "Gėrimai"],
+      "burger": ["Burgeriai", "Garnyrai", "Gėrimai"],
+      "coffee": ["Kava", "Kepiniai", "Sumuštiniai"],
+      "bar": ["Kokteiliai", "Alus", "Užkandžiai"],
+      "bakery": ["Duona", "Kepiniai", "Tortai"],
+      "restaurant": ["Užkandžiai", "Pagrindiniai patiekalai", "Desertai"]
+    },
+    "items": {
+      "pizza": [
+        {"name": "Margherita", "description": "Pomidoras, mozzarella, bazilikas"},
+        {"name": "Pepperoni"},
+        {"name": "Keturi sūriai"},
+        {"name": "Spagečiai carbonara"},
+        {"name": "Tagliatelle bolognese"},
+        {"name": "Negazuotas vanduo 0,5 L"},
+        {"name": "Namų vynas, taurė"}
+      ],
+      "sushi": [
+        {"name": "California Roll", "description": "Krabas, avokadas, agurkas"},
+        {"name": "Philadelphia Roll"},
+        {"name": "Spicy Tuna Roll"},
+        {"name": "Lašišos nigiri (2 vnt)"},
+        {"name": "Tuno nigiri (2 vnt)"},
+        {"name": "Žalioji arbata"},
+        {"name": "Asahi alus"}
+      ],
+      "asian": [
+        {"name": "Pad Thai", "description": "Ryžių makaronai, krevetės, žemės riešutai, laimas"},
+        {"name": "Vištienos ramenas"},
+        {"name": "Kepti ryžiai su vištiena"},
+        {"name": "Bibimbap"},
+        {"name": "Jazminų arbata"},
+        {"name": "Singha alus"}
+      ],
+      "burger": [
+        {"name": "Klasikinis cheeseburger", "description": "Jautienos kotletas, čedaras, salotos, pomidoras, marinuoti agurkėliai"},
+        {"name": "Šoninės burgeris"},
+        {"name": "Vegetariškas burgeris"},
+        {"name": "Bulvytės"},
+        {"name": "Svogūnų žiedeliai"},
+        {"name": "Coca-Cola 0,4 L"},
+        {"name": "Vanilinis kokteilis"}
+      ],
+      "coffee": [
+        {"name": "Espresso"},
+        {"name": "Cappuccino"},
+        {"name": "Latte"},
+        {"name": "Sviestinis croissant"},
+        {"name": "Mėlynių keksiukas"},
+        {"name": "Kumpis ir sūris"},
+        {"name": "Skrebutis su avokadu"}
+      ],
+      "bar": [
+        {"name": "Mojito"},
+        {"name": "Aperol Spritz"},
+        {"name": "Negroni"},
+        {"name": "Pilstomas šviesusis alus"},
+        {"name": "IPA"},
+        {"name": "Nachos su sūriu"},
+        {"name": "Marinuoti alyvuogės"}
+      ],
+      "bakery": [
+        {"name": "Raugo duona"},
+        {"name": "Baguette"},
+        {"name": "Sviestinis croissant"},
+        {"name": "Pain au chocolat"},
+        {"name": "Cinamoninis suktinukas"},
+        {"name": "Sūrio pyrago gabalas"},
+        {"name": "Tiramisu"}
+      ],
+      "restaurant": [
+        {"name": "Cezario salotos"},
+        {"name": "Bruschetta (3 vnt)"},
+        {"name": "Kepta ribeye kepsnys", "description": "300 g, patiekiamas su keptomis bulvėmis"},
+        {"name": "Lašišos filė"},
+        {"name": "Grybų rizotas"},
+        {"name": "Tiramisu"},
+        {"name": "Crème brûlée"}
+      ]
+    }
+  },
+  "sr": {
+    "subtitles": {
+      "pizza": "Autentična italijanska picerija",
+      "sushi": "Sveža japanska kuhinja",
+      "asian": "Pan-azijska kuhinja",
+      "burger": "Ručno pravljeni burgeri",
+      "coffee": "Specialty kafa i peciva",
+      "bar": "Kokteli i kraft pivo",
+      "bakery": "Svakodnevno sveža pekara",
+      "restaurant": "Moderna evropska kuhinja"
+    },
+    "categories": {
+      "pizza": ["Pice", "Testenine", "Pića"],
+      "sushi": ["Rolnice", "Nigiri", "Pića"],
+      "asian": ["Rezanci", "Pirinač", "Pića"],
+      "burger": ["Burgeri", "Prilozi", "Pića"],
+      "coffee": ["Kafa", "Peciva", "Sendviči"],
+      "bar": ["Kokteli", "Pivo", "Grickalice"],
+      "bakery": ["Hlebovi", "Peciva", "Torte"],
+      "restaurant": ["Predjela", "Glavna jela", "Dezerti"]
+    },
+    "items": {
+      "pizza": [
+        {"name": "Margherita", "description": "Paradajz, mocarela, bosiljak"},
+        {"name": "Pepperoni"},
+        {"name": "Četiri sira"},
+        {"name": "Špageti karbonara"},
+        {"name": "Tagliatelle bolognese"},
+        {"name": "Negazirana voda 0,5 L"},
+        {"name": "Vino kuće, čaša"}
+      ],
+      "sushi": [
+        {"name": "California Roll", "description": "Rak, avokado, krastavac"},
+        {"name": "Philadelphia Roll"},
+        {"name": "Spicy Tuna Roll"},
+        {"name": "Nigiri sa lososom (2 kom)"},
+        {"name": "Nigiri sa tunom (2 kom)"},
+        {"name": "Zeleni čaj"},
+        {"name": "Asahi pivo"}
+      ],
+      "asian": [
+        {"name": "Pad Thai", "description": "Pirinčani rezanci, kozice, kikiriki, limeta"},
+        {"name": "Pileći ramen"},
+        {"name": "Pržen pirinač sa piletinom"},
+        {"name": "Bibimbap"},
+        {"name": "Jasminov čaj"},
+        {"name": "Singha pivo"}
+      ],
+      "burger": [
+        {"name": "Klasični cheeseburger", "description": "Goveđa pljeskavica, čedar, zelena salata, paradajz, kiseli krastavci"},
+        {"name": "Burger sa slaninom"},
+        {"name": "Vegetarijanski burger"},
+        {"name": "Pomfrit"},
+        {"name": "Lukovi prstenovi"},
+        {"name": "Coca-Cola 0,4 L"},
+        {"name": "Vanila milkshake"}
+      ],
+      "coffee": [
+        {"name": "Espresso"},
+        {"name": "Cappuccino"},
+        {"name": "Latte"},
+        {"name": "Puter croissant"},
+        {"name": "Borovnica muffin"},
+        {"name": "Šunka i sir"},
+        {"name": "Tost sa avokadom"}
+      ],
+      "bar": [
+        {"name": "Mojito"},
+        {"name": "Aperol Spritz"},
+        {"name": "Negroni"},
+        {"name": "Točeno svetlo pivo"},
+        {"name": "IPA"},
+        {"name": "Nachos sa sirom"},
+        {"name": "Marinirane masline"}
+      ],
+      "bakery": [
+        {"name": "Hleb sa kvascem"},
+        {"name": "Baget"},
+        {"name": "Puter croissant"},
+        {"name": "Pain au chocolat"},
+        {"name": "Cimet rolat"},
+        {"name": "Parče cheesecake-a"},
+        {"name": "Tiramisu"}
+      ],
+      "restaurant": [
+        {"name": "Cezar salata"},
+        {"name": "Bruschetta (3 kom)"},
+        {"name": "Roštilj ribeye stejk", "description": "300 g, servirano sa pečenim krompirom"},
+        {"name": "Filet lososa"},
+        {"name": "Pečurkasti rižoto"},
+        {"name": "Tiramisu"},
+        {"name": "Crème brûlée"}
+      ]
+    }
+  },
+  "ca": {
+    "subtitles": {
+      "pizza": "Pizzeria italiana autèntica",
+      "sushi": "Cuina japonesa fresca",
+      "asian": "Cuina pan-asiàtica",
+      "burger": "Hamburgueses artesanes",
+      "coffee": "Cafè d'especialitat i pastisseria",
+      "bar": "Còctels i cervesa artesana",
+      "bakery": "Forn fresc cada dia",
+      "restaurant": "Cuina europea moderna"
+    },
+    "categories": {
+      "pizza": ["Pizzes", "Pasta", "Begudes"],
+      "sushi": ["Rolls", "Nigiri", "Begudes"],
+      "asian": ["Fideus", "Arròs", "Begudes"],
+      "burger": ["Hamburgueses", "Acompanyaments", "Begudes"],
+      "coffee": ["Cafè", "Pastisseria", "Entrepans"],
+      "bar": ["Còctels", "Cervesa", "Per picar"],
+      "bakery": ["Pans", "Pastisseria", "Pastissos"],
+      "restaurant": ["Entrants", "Plats principals", "Postres"]
+    },
+    "items": {
+      "pizza": [
+        {"name": "Margherita", "description": "Tomàquet, mozzarella, alfàbrega"},
+        {"name": "Pepperoni"},
+        {"name": "Quatre formatges"},
+        {"name": "Espaguetis carbonara"},
+        {"name": "Tagliatelle bolonyesa"},
+        {"name": "Aigua sense gas 0,5 L"},
+        {"name": "Vi de la casa, copa"}
+      ],
+      "sushi": [
+        {"name": "California Roll", "description": "Cranc, alvocat, cogombre"},
+        {"name": "Philadelphia Roll"},
+        {"name": "Spicy Tuna Roll"},
+        {"name": "Nigiri de salmó (2 unit)"},
+        {"name": "Nigiri de tonyina (2 unit)"},
+        {"name": "Te verd"},
+        {"name": "Cervesa Asahi"}
+      ],
+      "asian": [
+        {"name": "Pad Thai", "description": "Fideus d'arròs, gambes, cacauets, llima"},
+        {"name": "Ramen de pollastre"},
+        {"name": "Arròs fregit amb pollastre"},
+        {"name": "Bibimbap"},
+        {"name": "Te de gessamí"},
+        {"name": "Cervesa Singha"}
+      ],
+      "burger": [
+        {"name": "Cheeseburger clàssica", "description": "Hamburguesa de vedella, cheddar, enciam, tomàquet, cogombrets"},
+        {"name": "Hamburguesa amb bacó"},
+        {"name": "Hamburguesa vegetariana"},
+        {"name": "Patates fregides"},
+        {"name": "Anelles de ceba"},
+        {"name": "Coca-Cola 0,4 L"},
+        {"name": "Batut de vainilla"}
+      ],
+      "coffee": [
+        {"name": "Espresso"},
+        {"name": "Cappuccino"},
+        {"name": "Latte"},
+        {"name": "Croissant de mantega"},
+        {"name": "Magdalena de nabius"},
+        {"name": "Pernil i formatge"},
+        {"name": "Torrada d'alvocat"}
+      ],
+      "bar": [
+        {"name": "Mojito"},
+        {"name": "Aperol Spritz"},
+        {"name": "Negroni"},
+        {"name": "Cervesa rossa de barril"},
+        {"name": "IPA"},
+        {"name": "Nachos amb formatge"},
+        {"name": "Olives marinades"}
+      ],
+      "bakery": [
+        {"name": "Pa de massa mare"},
+        {"name": "Baguette"},
+        {"name": "Croissant de mantega"},
+        {"name": "Pain au chocolat"},
+        {"name": "Rotllo de canyella"},
+        {"name": "Tall de cheesecake"},
+        {"name": "Tiramisú"}
+      ],
+      "restaurant": [
+        {"name": "Amanida Cèsar"},
+        {"name": "Bruschetta (3 unit)"},
+        {"name": "Ribeye a la brasa", "description": "300 g, servit amb patates al forn"},
+        {"name": "Filet de salmó"},
+        {"name": "Risotto de bolets"},
+        {"name": "Tiramisú"},
+        {"name": "Crema cremada"}
+      ]
+    }
+  },
+  "ga": {
+    "subtitles": {
+      "pizza": "Pizzeria Iodálach barántúil",
+      "sushi": "Cócaireacht úr Sheapánach",
+      "asian": "Cistin Pan-Áiseach",
+      "burger": "Burgers déanta de láimh",
+      "coffee": "Caife speisialta agus arán milis",
+      "bar": "Cocktail agus beoir cheardaíochta",
+      "bakery": "Báicéireacht úr go laethúil",
+      "restaurant": "Cistin Eorpach nua-aimseartha"
+    },
+    "categories": {
+      "pizza": ["Pizzaí", "Pasta", "Deochanna"],
+      "sushi": ["Rollaí", "Nigiri", "Deochanna"],
+      "asian": ["Núdail", "Rís", "Deochanna"],
+      "burger": ["Burgers", "Béilí Cliathánacha", "Deochanna"],
+      "coffee": ["Caife", "Arán Milis", "Ceapairí"],
+      "bar": ["Cocktail", "Beoir", "Sneaiceanna"],
+      "bakery": ["Aráin", "Arán Milis", "Cístí"],
+      "restaurant": ["Réamhchúrsaí", "Príomhchúrsaí", "Mhilseoga"]
+    },
+    "items": {
+      "pizza": [
+        {"name": "Margherita", "description": "Trátaí, mozzarella, basal"},
+        {"name": "Pepperoni"},
+        {"name": "Ceithre cháis"},
+        {"name": "Spaghetti carbonara"},
+        {"name": "Tagliatelle bolognese"},
+        {"name": "Uisce gan ghás 0,5 L"},
+        {"name": "Fíon an tí, gloine"}
+      ],
+      "sushi": [
+        {"name": "California Roll", "description": "Portán, abhacáid, cúcamar"},
+        {"name": "Philadelphia Roll"},
+        {"name": "Spicy Tuna Roll"},
+        {"name": "Nigiri bradáin (2 phíosa)"},
+        {"name": "Nigiri tuinnín (2 phíosa)"},
+        {"name": "Tae glas"},
+        {"name": "Beoir Asahi"}
+      ],
+      "asian": [
+        {"name": "Pad Thai", "description": "Núdail ríse, ribíní, peanuts, líoma"},
+        {"name": "Ramen sicín"},
+        {"name": "Rís rósta le sicín"},
+        {"name": "Bibimbap"},
+        {"name": "Tae jasmine"},
+        {"name": "Beoir Singha"}
+      ],
+      "burger": [
+        {"name": "Cheeseburger clasaiceach", "description": "Pirín mairteola, cheddar, leitís, tráta, cucamair piclaí"},
+        {"name": "Burger bagúin"},
+        {"name": "Burger glasraí"},
+        {"name": "Sceallóga"},
+        {"name": "Fáinní oinniúin"},
+        {"name": "Coca-Cola 0,4 L"},
+        {"name": "Crith bainne fanaile"}
+      ],
+      "coffee": [
+        {"name": "Espresso"},
+        {"name": "Cappuccino"},
+        {"name": "Latte"},
+        {"name": "Croissant ime"},
+        {"name": "Borróg sméar gorm"},
+        {"name": "Liamhás agus cáis"},
+        {"name": "Tóst abhacáide"}
+      ],
+      "bar": [
+        {"name": "Mojito"},
+        {"name": "Aperol Spritz"},
+        {"name": "Negroni"},
+        {"name": "Lager bairille"},
+        {"name": "IPA"},
+        {"name": "Nachos le cáis"},
+        {"name": "Ológa marinated"}
+      ],
+      "bakery": [
+        {"name": "Arán giosta"},
+        {"name": "Baguette"},
+        {"name": "Croissant ime"},
+        {"name": "Pain au chocolat"},
+        {"name": "Rolla cainéil"},
+        {"name": "Píosa cheesecake"},
+        {"name": "Tiramisu"}
+      ],
+      "restaurant": [
+        {"name": "Sailéad Caesar"},
+        {"name": "Bruschetta (3 phíosa)"},
+        {"name": "Stéig ribeye gríoscáilte", "description": "300 g, freastalaíodh le prátaí rósta"},
+        {"name": "Filléid bradáin"},
+        {"name": "Risotto beacán"},
+        {"name": "Tiramisu"},
+        {"name": "Crème brûlée"}
+      ]
+    }
+  },
+  "is": {
+    "subtitles": {
+      "pizza": "Ósvikið ítölsk pitsería",
+      "sushi": "Ferskt japanskt eldhús",
+      "asian": "Pan-asískt eldhús",
+      "burger": "Handgerðir borgarar",
+      "coffee": "Sérkaffi og bakkelsi",
+      "bar": "Kokteilar og handverksbjór",
+      "bakery": "Ferskt bakarí daglega",
+      "restaurant": "Nútíma evrópskt eldhús"
+    },
+    "categories": {
+      "pizza": ["Pitsur", "Pasta", "Drykkir"],
+      "sushi": ["Rúllur", "Nigiri", "Drykkir"],
+      "asian": ["Núðlur", "Hrísgrjón", "Drykkir"],
+      "burger": ["Borgarar", "Meðlæti", "Drykkir"],
+      "coffee": ["Kaffi", "Bakkelsi", "Samlokur"],
+      "bar": ["Kokteilar", "Bjór", "Snarl"],
+      "bakery": ["Brauð", "Bakkelsi", "Kökur"],
+      "restaurant": ["Forréttir", "Aðalréttir", "Eftirréttir"]
+    },
+    "items": {
+      "pizza": [
+        {"name": "Margherita", "description": "Tómatur, mozzarella, basílíka"},
+        {"name": "Pepperoni"},
+        {"name": "Fjórir ostar"},
+        {"name": "Spaghetti carbonara"},
+        {"name": "Tagliatelle bolognese"},
+        {"name": "Vatn án kolsýru 0,5 L"},
+        {"name": "Hússvín, glas"}
+      ],
+      "sushi": [
+        {"name": "California Roll", "description": "Krabbi, avókadó, gúrka"},
+        {"name": "Philadelphia Roll"},
+        {"name": "Spicy Tuna Roll"},
+        {"name": "Lax-nigiri (2 stk)"},
+        {"name": "Túnfisk-nigiri (2 stk)"},
+        {"name": "Grænt te"},
+        {"name": "Asahi bjór"}
+      ],
+      "asian": [
+        {"name": "Pad Thai", "description": "Hrísgrjónanúðlur, rækjur, jarðhnetur, lime"},
+        {"name": "Kjúklingaramen"},
+        {"name": "Steikt hrísgrjón með kjúkling"},
+        {"name": "Bibimbap"},
+        {"name": "Jasmín-te"},
+        {"name": "Singha bjór"}
+      ],
+      "burger": [
+        {"name": "Klassískur cheeseburger", "description": "Nautakjötspatti, cheddar, salat, tómatur, súrar gúrkur"},
+        {"name": "Bacon-borgari"},
+        {"name": "Grænmetisborgari"},
+        {"name": "Franskar"},
+        {"name": "Laukshringir"},
+        {"name": "Coca-Cola 0,4 L"},
+        {"name": "Vanillu-mjólkurhristingur"}
+      ],
+      "coffee": [
+        {"name": "Espresso"},
+        {"name": "Cappuccino"},
+        {"name": "Latte"},
+        {"name": "Smjörcroissant"},
+        {"name": "Bláberjamuffins"},
+        {"name": "Skinka og ostur"},
+        {"name": "Avókadótósti"}
+      ],
+      "bar": [
+        {"name": "Mojito"},
+        {"name": "Aperol Spritz"},
+        {"name": "Negroni"},
+        {"name": "Krana-lager"},
+        {"name": "IPA"},
+        {"name": "Nachos með osti"},
+        {"name": "Marineraðar ólífur"}
+      ],
+      "bakery": [
+        {"name": "Súrdeigsbrauð"},
+        {"name": "Baguette"},
+        {"name": "Smjörcroissant"},
+        {"name": "Pain au chocolat"},
+        {"name": "Kanilrúlla"},
+        {"name": "Cheesecake sneið"},
+        {"name": "Tiramisu"}
+      ],
+      "restaurant": [
+        {"name": "Caesar-salat"},
+        {"name": "Bruschetta (3 stk)"},
+        {"name": "Grillaður ribeye-steik", "description": "300 g, borinn fram með bökuðum kartöflum"},
+        {"name": "Laxaflak"},
+        {"name": "Sveppa-risotto"},
+        {"name": "Tiramisu"},
+        {"name": "Crème brûlée"}
+      ]
+    }
+  },
+  "fa": {
+    "subtitles": {
+      "pizza": "پیتزافروشی اصیل ایتالیایی",
+      "sushi": "آشپزی ژاپنی تازه",
+      "asian": "آشپزی پان-آسیایی",
+      "burger": "برگرهای دست‌ساز",
+      "coffee": "قهوه تخصصی و شیرینی",
+      "bar": "کوکتل و آبجوی صنعتی",
+      "bakery": "نانوایی تازه روزانه",
+      "restaurant": "آشپزی مدرن اروپایی"
+    },
+    "categories": {
+      "pizza": ["پیتزاها", "پاستا", "نوشیدنی‌ها"],
+      "sushi": ["رول‌ها", "نیگیری", "نوشیدنی‌ها"],
+      "asian": ["نودل", "برنج", "نوشیدنی‌ها"],
+      "burger": ["برگرها", "ضمائم", "نوشیدنی‌ها"],
+      "coffee": ["قهوه", "شیرینی", "ساندویچ‌ها"],
+      "bar": ["کوکتل‌ها", "آبجو", "خوراکی‌ها"],
+      "bakery": ["نان‌ها", "شیرینی", "کیک‌ها"],
+      "restaurant": ["پیش‌غذاها", "غذاهای اصلی", "دسرها"]
+    },
+    "items": {
+      "pizza": [
+        {"name": "مارگاریتا", "description": "گوجه، موزارلا، ریحان"},
+        {"name": "پپرونی"},
+        {"name": "چهار پنیر"},
+        {"name": "اسپاگتی کاربونارا"},
+        {"name": "تالیاتله بولونیز"},
+        {"name": "آب بدون گاز ۰.۵ لیتر"},
+        {"name": "شراب خانه، گیلاس"}
+      ],
+      "sushi": [
+        {"name": "کالیفرنیا رول", "description": "خرچنگ، آووکادو، خیار"},
+        {"name": "فیلادلفیا رول"},
+        {"name": "تن ماهی تند رول"},
+        {"name": "نیگیری ماهی سالمون (۲ عدد)"},
+        {"name": "نیگیری تن ماهی (۲ عدد)"},
+        {"name": "چای سبز"},
+        {"name": "آبجو آساهی"}
+      ],
+      "asian": [
+        {"name": "پد تای", "description": "نودل برنجی، میگو، بادام زمینی، لیمو ترش"},
+        {"name": "رامن مرغ"},
+        {"name": "برنج سرخ شده با مرغ"},
+        {"name": "بی‌بیم‌بپ"},
+        {"name": "چای یاس"},
+        {"name": "آبجو سینگا"}
+      ],
+      "burger": [
+        {"name": "چیزبرگر کلاسیک", "description": "گوشت گاو، چدار، کاهو، گوجه، خیارشور"},
+        {"name": "برگر بیکن"},
+        {"name": "برگر گیاهی"},
+        {"name": "سیب‌زمینی سرخ‌کرده"},
+        {"name": "حلقه پیاز"},
+        {"name": "کوکاکولا ۰.۴ لیتر"},
+        {"name": "شیک وانیل"}
+      ],
+      "coffee": [
+        {"name": "اسپرسو"},
+        {"name": "کاپوچینو"},
+        {"name": "لاته"},
+        {"name": "کرواسان کره"},
+        {"name": "مافین زغال‌اخته"},
+        {"name": "ژامبون و پنیر"},
+        {"name": "تست آووکادو"}
+      ],
+      "bar": [
+        {"name": "موخیتو"},
+        {"name": "اپرول اسپریتز"},
+        {"name": "نگرونی"},
+        {"name": "آبجو بشکه"},
+        {"name": "آی‌پی‌ای"},
+        {"name": "ناچو با پنیر"},
+        {"name": "زیتون مارینا"}
+      ],
+      "bakery": [
+        {"name": "نان خمیر ترش"},
+        {"name": "باگت"},
+        {"name": "کرواسان کره"},
+        {"name": "پن او شکلات"},
+        {"name": "رول دارچین"},
+        {"name": "تکه چیزکیک"},
+        {"name": "تیرامیسو"}
+      ],
+      "restaurant": [
+        {"name": "سالاد سزار"},
+        {"name": "بروسکتا (۳ عدد)"},
+        {"name": "ریبای استیک گریل", "description": "۳۰۰ گرم، با سیب‌زمینی کبابی سرو می‌شود"},
+        {"name": "فیله سالمون"},
+        {"name": "ریزوتو قارچ"},
+        {"name": "تیرامیسو"},
+        {"name": "کرم بروله"}
+      ]
+    }
+  },
+  "ar": {
+    "subtitles": {
+      "pizza": "بيتزا إيطالية أصيلة",
+      "sushi": "مطبخ ياباني طازج",
+      "asian": "مطبخ بان آسيوي",
+      "burger": "برغر مصنوع يدويا",
+      "coffee": "قهوة مختصة ومعجنات",
+      "bar": "كوكتيلات وبيرة حرفية",
+      "bakery": "مخبز طازج يوميا",
+      "restaurant": "مطبخ أوروبي حديث"
+    },
+    "categories": {
+      "pizza": ["بيتزا", "باستا", "مشروبات"],
+      "sushi": ["رولز", "نيغيري", "مشروبات"],
+      "asian": ["نودلز", "أرز", "مشروبات"],
+      "burger": ["برغر", "أطباق جانبية", "مشروبات"],
+      "coffee": ["قهوة", "معجنات", "ساندويتشات"],
+      "bar": ["كوكتيلات", "بيرة", "وجبات خفيفة"],
+      "bakery": ["خبز", "معجنات", "كيك"],
+      "restaurant": ["مقبلات", "أطباق رئيسية", "حلويات"]
+    },
+    "items": {
+      "pizza": [
+        {"name": "مارغريتا", "description": "طماطم، موتزاريلا، ريحان"},
+        {"name": "بيبروني"},
+        {"name": "أربعة أجبان"},
+        {"name": "سباغيتي كاربونارا"},
+        {"name": "تالياتيلي بولونيز"},
+        {"name": "ماء بدون غاز 0.5 لتر"},
+        {"name": "نبيذ المنزل، كأس"}
+      ],
+      "sushi": [
+        {"name": "كاليفورنيا رول", "description": "سرطان البحر، أفوكادو، خيار"},
+        {"name": "فيلادلفيا رول"},
+        {"name": "تونة حارة رول"},
+        {"name": "نيغيري سلمون (قطعتان)"},
+        {"name": "نيغيري تونة (قطعتان)"},
+        {"name": "شاي أخضر"},
+        {"name": "بيرة أساهي"}
+      ],
+      "asian": [
+        {"name": "باد تاي", "description": "نودلز أرز، روبيان، فول سوداني، ليمون"},
+        {"name": "رامن دجاج"},
+        {"name": "أرز مقلي بالدجاج"},
+        {"name": "بيبيمباب"},
+        {"name": "شاي ياسمين"},
+        {"name": "بيرة سينغا"}
+      ],
+      "burger": [
+        {"name": "تشيز برغر كلاسيكي", "description": "لحم بقر، شيدر، خس، طماطم، مخللات"},
+        {"name": "برغر بيكون"},
+        {"name": "برغر نباتي"},
+        {"name": "بطاطس مقلية"},
+        {"name": "حلقات بصل"},
+        {"name": "كوكا كولا 0.4 لتر"},
+        {"name": "ميلك شيك فانيلا"}
+      ],
+      "coffee": [
+        {"name": "إسبريسو"},
+        {"name": "كابتشينو"},
+        {"name": "لاتيه"},
+        {"name": "كرواسون بالزبدة"},
+        {"name": "مافن التوت"},
+        {"name": "جامبون وجبن"},
+        {"name": "توست أفوكادو"}
+      ],
+      "bar": [
+        {"name": "موخيتو"},
+        {"name": "أبيرول سبريتز"},
+        {"name": "نيغروني"},
+        {"name": "بيرة لاجر من البرميل"},
+        {"name": "آي بي إيه"},
+        {"name": "ناتشوز بالجبن"},
+        {"name": "زيتون متبل"}
+      ],
+      "bakery": [
+        {"name": "خبز العجين المخمر"},
+        {"name": "باغيت"},
+        {"name": "كرواسون بالزبدة"},
+        {"name": "بان أو شوكولا"},
+        {"name": "لفافة قرفة"},
+        {"name": "قطعة تشيزكيك"},
+        {"name": "تيراميسو"}
+      ],
+      "restaurant": [
+        {"name": "سلطة سيزر"},
+        {"name": "بروسكيتا (3 قطع)"},
+        {"name": "ريب آي مشوي", "description": "300 جرام، يقدم مع البطاطس المشوية"},
+        {"name": "فيليه سلمون"},
+        {"name": "ريزوتو الفطر"},
+        {"name": "تيراميسو"},
+        {"name": "كريم بروليه"}
+      ]
+    }
+  },
+  "ja": {
+    "subtitles": {
+      "pizza": "本格イタリアンピッツェリア",
+      "sushi": "新鮮な日本料理",
+      "asian": "汎アジア料理",
+      "burger": "手作りバーガー",
+      "coffee": "スペシャルティコーヒーとペストリー",
+      "bar": "カクテルとクラフトビール",
+      "bakery": "毎日新鮮なベーカリー",
+      "restaurant": "モダンヨーロッパ料理"
+    },
+    "categories": {
+      "pizza": ["ピザ", "パスタ", "ドリンク"],
+      "sushi": ["ロール", "握り", "ドリンク"],
+      "asian": ["麺", "ご飯", "ドリンク"],
+      "burger": ["バーガー", "サイド", "ドリンク"],
+      "coffee": ["コーヒー", "ペストリー", "サンドイッチ"],
+      "bar": ["カクテル", "ビール", "おつまみ"],
+      "bakery": ["パン", "ペストリー", "ケーキ"],
+      "restaurant": ["前菜", "メイン", "デザート"]
+    },
+    "items": {
+      "pizza": [
+        {"name": "マルゲリータ", "description": "トマト、モッツァレラ、バジル"},
+        {"name": "ペパロニ"},
+        {"name": "クアトロフォルマッジ"},
+        {"name": "スパゲッティ・カルボナーラ"},
+        {"name": "タリアテッレ・ボロネーゼ"},
+        {"name": "ミネラルウォーター 0.5L"},
+        {"name": "ハウスワイン グラス"}
+      ],
+      "sushi": [
+        {"name": "カリフォルニアロール", "description": "カニ、アボカド、きゅうり"},
+        {"name": "フィラデルフィアロール"},
+        {"name": "スパイシーツナロール"},
+        {"name": "サーモン握り (2貫)"},
+        {"name": "マグロ握り (2貫)"},
+        {"name": "緑茶"},
+        {"name": "アサヒビール"}
+      ],
+      "asian": [
+        {"name": "パッタイ", "description": "ライスヌードル、エビ、ピーナッツ、ライム"},
+        {"name": "鶏ラーメン"},
+        {"name": "鶏チャーハン"},
+        {"name": "ビビンバ"},
+        {"name": "ジャスミン茶"},
+        {"name": "シンハービール"}
+      ],
+      "burger": [
+        {"name": "クラシックチーズバーガー", "description": "ビーフパティ、チェダー、レタス、トマト、ピクルス"},
+        {"name": "ベーコンバーガー"},
+        {"name": "ベジバーガー"},
+        {"name": "フライドポテト"},
+        {"name": "オニオンリング"},
+        {"name": "コカ・コーラ 0.4L"},
+        {"name": "バニラミルクシェイク"}
+      ],
+      "coffee": [
+        {"name": "エスプレッソ"},
+        {"name": "カプチーノ"},
+        {"name": "ラテ"},
+        {"name": "バタークロワッサン"},
+        {"name": "ブルーベリーマフィン"},
+        {"name": "ハム&チーズ"},
+        {"name": "アボカドトースト"}
+      ],
+      "bar": [
+        {"name": "モヒート"},
+        {"name": "アペロールスプリッツ"},
+        {"name": "ネグローニ"},
+        {"name": "生ビール"},
+        {"name": "IPA"},
+        {"name": "チーズナチョス"},
+        {"name": "マリネオリーブ"}
+      ],
+      "bakery": [
+        {"name": "サワードウブレッド"},
+        {"name": "バゲット"},
+        {"name": "バタークロワッサン"},
+        {"name": "パン・オ・ショコラ"},
+        {"name": "シナモンロール"},
+        {"name": "チーズケーキスライス"},
+        {"name": "ティラミス"}
+      ],
+      "restaurant": [
+        {"name": "シーザーサラダ"},
+        {"name": "ブルスケッタ (3個)"},
+        {"name": "リブアイステーキのグリル", "description": "300g、ローストポテト添え"},
+        {"name": "サーモンフィレ"},
+        {"name": "マッシュルームリゾット"},
+        {"name": "ティラミス"},
+        {"name": "クレームブリュレ"}
+      ]
+    }
+  },
+  "ko": {
+    "subtitles": {
+      "pizza": "정통 이탈리안 피자",
+      "sushi": "신선한 일본 요리",
+      "asian": "범아시아 요리",
+      "burger": "수제 버거",
+      "coffee": "스페셜티 커피와 페이스트리",
+      "bar": "칵테일과 크래프트 맥주",
+      "bakery": "매일 신선한 베이커리",
+      "restaurant": "모던 유럽 요리"
+    },
+    "categories": {
+      "pizza": ["피자", "파스타", "음료"],
+      "sushi": ["롤", "니기리", "음료"],
+      "asian": ["면", "밥", "음료"],
+      "burger": ["버거", "사이드", "음료"],
+      "coffee": ["커피", "페이스트리", "샌드위치"],
+      "bar": ["칵테일", "맥주", "안주"],
+      "bakery": ["빵", "페이스트리", "케이크"],
+      "restaurant": ["전채", "메인", "디저트"]
+    },
+    "items": {
+      "pizza": [
+        {"name": "마르게리타", "description": "토마토, 모짜렐라, 바질"},
+        {"name": "페퍼로니"},
+        {"name": "콰트로 포르마지"},
+        {"name": "스파게티 카르보나라"},
+        {"name": "탈리아텔레 볼로네제"},
+        {"name": "생수 0.5L"},
+        {"name": "하우스 와인, 잔"}
+      ],
+      "sushi": [
+        {"name": "캘리포니아 롤", "description": "게, 아보카도, 오이"},
+        {"name": "필라델피아 롤"},
+        {"name": "스파이시 튜나 롤"},
+        {"name": "연어 니기리 (2개)"},
+        {"name": "참치 니기리 (2개)"},
+        {"name": "녹차"},
+        {"name": "아사히 맥주"}
+      ],
+      "asian": [
+        {"name": "팟타이", "description": "쌀국수, 새우, 땅콩, 라임"},
+        {"name": "치킨 라멘"},
+        {"name": "치킨 볶음밥"},
+        {"name": "비빔밥"},
+        {"name": "재스민 차"},
+        {"name": "싱하 맥주"}
+      ],
+      "burger": [
+        {"name": "클래식 치즈버거", "description": "소고기 패티, 체다, 양상추, 토마토, 피클"},
+        {"name": "베이컨 버거"},
+        {"name": "채식 버거"},
+        {"name": "감자튀김"},
+        {"name": "어니언 링"},
+        {"name": "코카콜라 0.4L"},
+        {"name": "바닐라 밀크쉐이크"}
+      ],
+      "coffee": [
+        {"name": "에스프레소"},
+        {"name": "카푸치노"},
+        {"name": "라떼"},
+        {"name": "버터 크루아상"},
+        {"name": "블루베리 머핀"},
+        {"name": "햄&치즈"},
+        {"name": "아보카도 토스트"}
+      ],
+      "bar": [
+        {"name": "모히토"},
+        {"name": "아페롤 스프리츠"},
+        {"name": "네그로니"},
+        {"name": "생맥주 라거"},
+        {"name": "IPA"},
+        {"name": "치즈 나초"},
+        {"name": "마리네이드 올리브"}
+      ],
+      "bakery": [
+        {"name": "사워도우 빵"},
+        {"name": "바게트"},
+        {"name": "버터 크루아상"},
+        {"name": "팽 오 쇼콜라"},
+        {"name": "시나몬 롤"},
+        {"name": "치즈케이크 한 조각"},
+        {"name": "티라미수"}
+      ],
+      "restaurant": [
+        {"name": "시저 샐러드"},
+        {"name": "브루스케타 (3개)"},
+        {"name": "그릴 립아이 스테이크", "description": "300g, 구운 감자와 함께 제공"},
+        {"name": "연어 필레"},
+        {"name": "버섯 리조토"},
+        {"name": "티라미수"},
+        {"name": "크렘 브륄레"}
+      ]
+    }
+  },
+  "zh": {
+    "subtitles": {
+      "pizza": "正宗意大利披萨店",
+      "sushi": "新鲜日本料理",
+      "asian": "泛亚洲料理",
+      "burger": "手工汉堡",
+      "coffee": "精品咖啡与糕点",
+      "bar": "鸡尾酒与精酿啤酒",
+      "bakery": "每日新鲜烘焙",
+      "restaurant": "现代欧洲料理"
+    },
+    "categories": {
+      "pizza": ["披萨", "意面", "饮料"],
+      "sushi": ["卷", "握寿司", "饮料"],
+      "asian": ["面食", "米饭", "饮料"],
+      "burger": ["汉堡", "配菜", "饮料"],
+      "coffee": ["咖啡", "糕点", "三明治"],
+      "bar": ["鸡尾酒", "啤酒", "小吃"],
+      "bakery": ["面包", "糕点", "蛋糕"],
+      "restaurant": ["前菜", "主菜", "甜点"]
+    },
+    "items": {
+      "pizza": [
+        {"name": "玛格丽特", "description": "番茄、马苏里拉、罗勒"},
+        {"name": "意大利辣肠"},
+        {"name": "四种奶酪"},
+        {"name": "意式培根面"},
+        {"name": "博洛尼亚肉酱面"},
+        {"name": "纯净水 0.5升"},
+        {"name": "招牌葡萄酒（杯）"}
+      ],
+      "sushi": [
+        {"name": "加州卷", "description": "蟹肉、牛油果、黄瓜"},
+        {"name": "费城卷"},
+        {"name": "辣金枪鱼卷"},
+        {"name": "三文鱼握寿司（2件）"},
+        {"name": "金枪鱼握寿司（2件）"},
+        {"name": "绿茶"},
+        {"name": "朝日啤酒"}
+      ],
+      "asian": [
+        {"name": "泰式炒河粉", "description": "米粉、虾、花生、青柠"},
+        {"name": "鸡肉拉面"},
+        {"name": "鸡肉炒饭"},
+        {"name": "韩式拌饭"},
+        {"name": "茉莉花茶"},
+        {"name": "胜狮啤酒"}
+      ],
+      "burger": [
+        {"name": "经典芝士汉堡", "description": "牛肉饼、切达奶酪、生菜、番茄、酸黄瓜"},
+        {"name": "培根汉堡"},
+        {"name": "素食汉堡"},
+        {"name": "薯条"},
+        {"name": "洋葱圈"},
+        {"name": "可口可乐 0.4升"},
+        {"name": "香草奶昔"}
+      ],
+      "coffee": [
+        {"name": "意式浓缩"},
+        {"name": "卡布奇诺"},
+        {"name": "拿铁"},
+        {"name": "黄油牛角包"},
+        {"name": "蓝莓玛芬"},
+        {"name": "火腿芝士"},
+        {"name": "牛油果吐司"}
+      ],
+      "bar": [
+        {"name": "莫吉托"},
+        {"name": "阿佩罗气泡酒"},
+        {"name": "尼格罗尼"},
+        {"name": "扎啤"},
+        {"name": "IPA"},
+        {"name": "芝士玉米片"},
+        {"name": "腌橄榄"}
+      ],
+      "bakery": [
+        {"name": "酸面包"},
+        {"name": "法棍"},
+        {"name": "黄油牛角包"},
+        {"name": "巧克力可颂"},
+        {"name": "肉桂卷"},
+        {"name": "芝士蛋糕（一片）"},
+        {"name": "提拉米苏"}
+      ],
+      "restaurant": [
+        {"name": "凯撒沙拉"},
+        {"name": "布鲁斯凯塔（3件）"},
+        {"name": "炭烤肋眼牛排", "description": "300克，配烤土豆"},
+        {"name": "三文鱼柳"},
+        {"name": "蘑菇烩饭"},
+        {"name": "提拉米苏"},
+        {"name": "焦糖布丁"}
+      ]
+    }
+  }
+}

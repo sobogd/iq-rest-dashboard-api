@@ -11,8 +11,9 @@ import {
 import { ConfigService } from "@nestjs/config";
 import type { Request, Response } from "express";
 import { AuthService } from "./auth.service";
-import { SendOtpDto, VerifyOtpDto } from "./dto";
+import { GoogleAuthDto, SendOtpDto, VerifyOtpDto } from "./dto";
 import { authCookieOptions } from "../common/session-utils";
+import { getRequestCurrency } from "../common/geo";
 
 const SESSION_COOKIE = "iqr_session";
 const EMAIL_COOKIE = "iqr_email";
@@ -29,8 +30,16 @@ export class AuthController {
 
   @Post("send-otp")
   @HttpCode(HttpStatus.OK)
-  async sendOtp(@Body() dto: SendOtpDto) {
-    const result = await this.auth.sendOtp(dto.email, dto.locale || "en");
+  async sendOtp(@Body() dto: SendOtpDto, @Req() req: Request) {
+    // Always detect currency — the seeder uses it both for create-flow signups and the
+    // default-template fallback for plain-login new users.
+    const currency = getRequestCurrency(req);
+    const result = await this.auth.sendOtp(
+      dto.email,
+      dto.locale || "en",
+      dto.signupContext,
+      currency,
+    );
     return { ok: true, isNewUser: result.isNewUser };
   }
 
@@ -49,8 +58,15 @@ export class AuthController {
 
   @Post("google")
   @HttpCode(HttpStatus.OK)
-  async google(@Body() body: { credential?: string }, @Res({ passthrough: true }) res: Response) {
-    const result = await this.auth.verifyGoogleCredential(body.credential || "");
+  async google(@Body() body: GoogleAuthDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    const acceptLang = req.headers["accept-language"]?.toString().split(",")[0]?.split("-")[0];
+    const currency = getRequestCurrency(req);
+    const result = await this.auth.verifyGoogleCredential(
+      body.credential || "",
+      body.signupContext,
+      currency,
+      acceptLang ?? null,
+    );
     const domain = this.config.get<string>("COOKIE_DOMAIN") || undefined;
     const opts = authCookieOptions(domain);
     res.cookie(SESSION_COOKIE, result.token, opts);

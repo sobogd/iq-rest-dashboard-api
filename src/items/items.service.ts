@@ -63,6 +63,13 @@ export class ItemsService {
     if (body.allergens !== undefined) data.allergens = body.allergens;
     if (body.options !== undefined) data.options = (body.options as Prisma.InputJsonValue) ?? Prisma.JsonNull;
     if (body.sortOrder !== undefined) data.sortOrder = body.sortOrder;
+    // User edited a seeded sample item — drop the example flag so it stops showing the badge.
+    // Triggers on default-language rename OR any translations edit (per-locale rename).
+    if (item.isExample) {
+      const renamedDefault = body.name !== undefined && body.name !== item.name;
+      const renamedTranslations = body.translations !== undefined;
+      if (renamedDefault || renamedTranslations) data.isExample = false;
+    }
     return this.prisma.item.update({ where: { id }, data });
   }
 

@@ -12,7 +12,6 @@ import { ItemsModule } from "./items/items.module";
 import { TablesModule } from "./tables/tables.module";
 import { ReservationsModule } from "./reservations/reservations.module";
 import { OrdersModule } from "./orders/orders.module";
-import { OnboardingModule } from "./onboarding/onboarding.module";
 import { UploadModule } from "./upload/upload.module";
 import { TranslateModule } from "./translate/translate.module";
 import { SupportModule } from "./support/support.module";
@@ -39,7 +38,6 @@ import { HealthController } from "./health/health.controller";
     TablesModule,
     ReservationsModule,
     OrdersModule,
-    OnboardingModule,
     UploadModule,
     TranslateModule,
     SupportModule,

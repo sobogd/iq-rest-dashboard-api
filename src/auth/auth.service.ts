@@ -11,6 +11,8 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { MailService } from "../mail/mail.service";
 import { I18nService } from "../i18n/i18n.service";
+import { OnboardingSeedService } from "../onboarding/onboarding-seed.service";
+import { isCuisineKey, type CuisineKey } from "../onboarding/cuisine";
 import {
   generateOTP,
   generateSessionToken,
@@ -21,6 +23,8 @@ import {
   safeCompare,
 } from "../common/session-utils";
 import { validateEmail } from "../common/validate-email";
+
+export type SignupContext = { cuisine: string; restaurantName: string };
 
 const SEND_LIMIT_WINDOW = 15 * 60 * 1000;
 const SEND_LIMIT_MAX = 5;
@@ -50,6 +54,7 @@ export class AuthService implements OnModuleDestroy {
     private readonly mail: MailService,
     private readonly config: ConfigService,
     private readonly i18n: I18nService,
+    private readonly seed: OnboardingSeedService,
   ) {
     // Don't keep the Node process alive for the cleanup timer alone.
     this.rateLimitSweep.unref?.();
@@ -79,7 +84,12 @@ export class AuthService implements OnModuleDestroy {
     return entry.count > max;
   }
 
-  async sendOtp(emailRaw: string, locale = "en"): Promise<{ isNewUser: boolean }> {
+  async sendOtp(
+    emailRaw: string,
+    locale = "en",
+    signupContext?: SignupContext,
+    currency?: string,
+  ): Promise<{ isNewUser: boolean }> {
     const email = validateEmail(emailRaw);
     if (!email) throw new BadRequestException("Invalid email");
 
@@ -91,14 +101,28 @@ export class AuthService implements OnModuleDestroy {
     const otpHash = hashOTP(code);
     const otpExpiresAt = new Date(Date.now() + OTP_EXPIRY_MS);
     const normalizedLocale = this.i18n.urlLocale(locale);
+    let pending = this.normalizeSignupContext(signupContext, currency);
 
     const existing = await this.prisma.user.findUnique({ where: { email }, select: { id: true } });
     let isNewUser = false;
 
+    // Brand-new email and no create-flow context → seed a generic template anyway so the user
+    // doesn't land on a blank dashboard. Existing users are left alone (their pending fields
+    // are not overwritten with defaults).
+    if (!existing && Object.keys(pending).length === 0) {
+      pending = this.defaultSignupContext(email, currency);
+    }
+
     if (existing) {
       await this.prisma.user.update({
         where: { email },
-        data: { otp: otpHash, otpExpiresAt, otpAttempts: 0, preferredLocale: normalizedLocale },
+        data: {
+          otp: otpHash,
+          otpExpiresAt,
+          otpAttempts: 0,
+          preferredLocale: normalizedLocale,
+          ...pending,
+        },
       });
     } else {
       isNewUser = true;
@@ -111,6 +135,7 @@ export class AuthService implements OnModuleDestroy {
               otpExpiresAt,
               otpAttempts: 0,
               preferredLocale: normalizedLocale,
+              ...pending,
             },
           });
           const company = await tx.company.create({
@@ -130,7 +155,13 @@ export class AuthService implements OnModuleDestroy {
           // No company is leaked because the transaction rolled the create back.
           await this.prisma.user.update({
             where: { email },
-            data: { otp: otpHash, otpExpiresAt, otpAttempts: 0, preferredLocale: normalizedLocale },
+            data: {
+              otp: otpHash,
+              otpExpiresAt,
+              otpAttempts: 0,
+              preferredLocale: normalizedLocale,
+              ...pending,
+            },
           });
           isNewUser = false;
         } else {
@@ -141,6 +172,100 @@ export class AuthService implements OnModuleDestroy {
 
     await this.mail.sendOtp({ email, code, locale });
     return { isNewUser };
+  }
+
+  /** Pick out a pending-signup-context field set, or empty object if no valid context.
+   *  Cuisine is validated via the literal whitelist; restaurantName is trimmed and capped. */
+  private normalizeSignupContext(
+    ctx: SignupContext | undefined,
+    currency: string | undefined,
+  ): { pendingCuisine: CuisineKey; pendingRestaurantName: string; pendingCurrency: string } | Record<string, never> {
+    if (!ctx || !isCuisineKey(ctx.cuisine)) return {};
+    const name = ctx.restaurantName?.trim().slice(0, 120);
+    if (!name) return {};
+    return {
+      pendingCuisine: ctx.cuisine,
+      pendingRestaurantName: name,
+      pendingCurrency: currency || "EUR",
+    };
+  }
+
+  /** Fallback context for a brand-new user who didn't go through the create-flow (i.e. came in
+   *  via plain /login). Picks the generic "restaurant" cuisine and derives a name from the
+   *  email local-part so they still land in a populated dashboard. */
+  private defaultSignupContext(
+    email: string,
+    currency: string | undefined,
+  ): { pendingCuisine: CuisineKey; pendingRestaurantName: string; pendingCurrency: string } {
+    const local = email.split("@")[0] || "my";
+    const cleaned = local.replace(/[._-]+/g, " ").trim().slice(0, 40);
+    const name = cleaned ? cleaned.charAt(0).toUpperCase() + cleaned.slice(1) : "My";
+    return {
+      pendingCuisine: "restaurant",
+      pendingRestaurantName: `${name}'s Restaurant`,
+      pendingCurrency: currency || "EUR",
+    };
+  }
+
+  /** After a successful auth (OTP or Google), if the user has a stored signup context AND no
+   *  restaurant yet, seed a template restaurant. Pending fields are cleared **only on success**
+   *  so a transient seed failure can be retried by simply logging in again.
+   *  Returns true when seeding actually happened in this call (so callers can skip a follow-up
+   *  query for the now-flipped onboardingStep). */
+  private async applyPendingAndMaybeSeed(userId: string, fallbackLocale: string | null | undefined): Promise<boolean> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        pendingCuisine: true,
+        pendingRestaurantName: true,
+        pendingCurrency: true,
+        preferredLocale: true,
+        companies: {
+          take: 1,
+          select: {
+            company: {
+              select: { id: true, restaurants: { take: 1, select: { id: true } } },
+            },
+          },
+        },
+      },
+    });
+    if (!user?.pendingCuisine) return false;
+
+    const company = user.companies[0]?.company;
+    const hasRestaurant = (company?.restaurants?.length ?? 0) > 0;
+
+    // No company or restaurant already exists → context is moot; clear pending and exit.
+    if (!company || hasRestaurant || !isCuisineKey(user.pendingCuisine)) {
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { pendingCuisine: null, pendingRestaurantName: null, pendingCurrency: null },
+      });
+      return false;
+    }
+
+    let seeded = false;
+    try {
+      await this.seed.seedTemplate({
+        companyId: company.id,
+        cuisine: user.pendingCuisine,
+        restaurantName: user.pendingRestaurantName || "My Restaurant",
+        currency: user.pendingCurrency || "EUR",
+        locale: user.preferredLocale || fallbackLocale,
+      });
+      seeded = true;
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[auth] template seed failed — pending kept for retry on next login", err);
+    }
+
+    if (seeded) {
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { pendingCuisine: null, pendingRestaurantName: null, pendingCurrency: null },
+      });
+    }
+    return seeded;
   }
 
   async verifyOtp(emailRaw: string, code: string): Promise<{ token: string; userId: string; onboardingStep: number; isNewUser: boolean; legacyDashboard: boolean }> {
@@ -198,14 +323,18 @@ export class AuthService implements OnModuleDestroy {
       },
     });
 
+    // If signup-flow context was attached on send-otp, seed the template restaurant now.
+    const seeded = await this.applyPendingAndMaybeSeed(user.id, null);
+
     const companyEdge = user.companies[0];
-    const onboardingStep = companyEdge?.company?.onboardingStep ?? 0;
+    // Seeder flips company.onboardingStep to 3 on success — derive locally to avoid a re-query.
+    const finalStep = seeded ? 3 : companyEdge?.company?.onboardingStep ?? 0;
     const legacyDashboard = isLegacyCompany(companyEdge?.company?.createdAt);
     return {
       token,
       userId: user.id,
-      onboardingStep,
-      isNewUser: !companyEdge?.company || onboardingStep < 3,
+      onboardingStep: finalStep,
+      isNewUser: !companyEdge?.company || finalStep < 3,
       legacyDashboard,
     };
   }
@@ -270,7 +399,12 @@ export class AuthService implements OnModuleDestroy {
     }).catch(() => {});
   }
 
-  async verifyGoogleCredential(credential: string): Promise<{
+  async verifyGoogleCredential(
+    credential: string,
+    signupContext?: SignupContext,
+    currency?: string,
+    locale?: string | null,
+  ): Promise<{
     token: string;
     userId: string;
     email: string;
@@ -328,13 +462,21 @@ export class AuthService implements OnModuleDestroy {
 
     const token = generateSessionToken();
     const tokenHash = hashSessionToken(token);
+    // Stash the signup context on the user row so the seeder can pick it up
+    // in the same code path as the OTP flow (single source of truth).
+    // Brand-new Google account with no create-flow context → use the default template.
+    let pending = this.normalizeSignupContext(signupContext, currency);
+    if (isNewUser && Object.keys(pending).length === 0) {
+      pending = this.defaultSignupContext(email, currency);
+    }
     await this.prisma.user.update({
       where: { id: user.id },
-      data: { sessionToken: tokenHash },
+      data: { sessionToken: tokenHash, ...pending },
     });
 
-    const onboardingStep = user.companies[0]?.company?.onboardingStep ?? 0;
+    const seeded = await this.applyPendingAndMaybeSeed(user.id, locale ?? null);
+    const finalStep = seeded ? 3 : user.companies[0]?.company?.onboardingStep ?? 0;
     const legacyDashboard = isLegacyCompany(user.companies[0]?.company?.createdAt);
-    return { token, userId: user.id, email, onboardingStep, isNewUser, legacyDashboard };
+    return { token, userId: user.id, email, onboardingStep: finalStep, isNewUser, legacyDashboard };
   }
 }

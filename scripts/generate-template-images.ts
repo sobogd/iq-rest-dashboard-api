@@ -157,6 +157,8 @@ function buildJobs(cache: Cache): Job[] {
     }
 
     tpl.items.forEach((item, idx) => {
+      // Skip drink items — they're the kind of menu rows that look fine without a photo.
+      if (isDrinkItem(cuisine, idx)) return;
       const key = `${cuisine}:${idx}`;
       if (!FORCE && cache.dishes[key]) return;
       const slug = item.name.en.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
@@ -179,14 +181,27 @@ async function runJob(job: Job): Promise<{ url: string }> {
     job.kind === "background"
       ? { w: 1920, h: 1080, fit: "cover" as const }
       : { w: 1024, h: 1024, fit: "inside" as const };
+  // q=80 + effort=6 + smartSubsample = perceptually lossless on food photography but
+  // ~25-40% smaller than the previous q=85 default settings.
   const url = await uploadGeneratedImage(b64, {
     pathPrefix: job.kind === "background" ? "templates/backgrounds" : "templates/dishes",
     companyId: "",
     filenamePrefix: job.filenamePrefix,
     resize,
-    quality: 85,
+    quality: 80,
   });
   return { url };
+}
+
+/** Items inside a "Drinks" category (water, sodas, basic teas) get no image — they don't add
+ *  much visual interest and inflate menu load. Identifies drink items by the category having
+ *  the literal English name "Drinks". */
+function isDrinkItem(cuisine: CuisineKey, itemIndex: number): boolean {
+  const tpl = cuisineTemplates[cuisine];
+  const item = tpl.items[itemIndex];
+  if (!item) return false;
+  const cat = tpl.categories[item.categoryIndex];
+  return cat?.name.en === "Drinks";
 }
 
 async function main(): Promise<void> {

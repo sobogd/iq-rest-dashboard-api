@@ -59,13 +59,15 @@ export class AuthController {
   @Post("google")
   @HttpCode(HttpStatus.OK)
   async google(@Body() body: GoogleAuthDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    // Prefer the app locale the SPA is currently on (sent in body) over the browser's
+    // Accept-Language header — they often disagree (e.g. RU UI on a Chrome with en-US default).
     const acceptLang = req.headers["accept-language"]?.toString().split(",")[0]?.split("-")[0];
     const currency = getRequestCurrency(req);
     const result = await this.auth.verifyGoogleCredential(
       body.credential || "",
       body.signupContext,
       currency,
-      acceptLang ?? null,
+      body.locale || acceptLang || null,
     );
     const domain = this.config.get<string>("COOKIE_DOMAIN") || undefined;
     const opts = authCookieOptions(domain);

@@ -40,6 +40,10 @@ export class GoogleAuthDto {
   credential?: string;
 
   @IsOptional()
+  @IsString()
+  locale?: string;
+
+  @IsOptional()
   @ValidateNested()
   @Type(() => SignupContextDto)
   signupContext?: SignupContextDto;

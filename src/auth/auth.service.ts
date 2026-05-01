@@ -438,8 +438,11 @@ export class AuthService implements OnModuleDestroy {
 
     if (!user) {
       isNewUser = true;
+      const normalizedLocale = locale ? this.i18n.urlLocale(locale) : null;
       const created = await this.prisma.$transaction(async (tx) => {
-        const newUser = await tx.user.create({ data: { email } });
+        const newUser = await tx.user.create({
+          data: { email, ...(normalizedLocale ? { preferredLocale: normalizedLocale } : {}) },
+        });
         const company = await tx.company.create({
           data: {
             name: displayName,

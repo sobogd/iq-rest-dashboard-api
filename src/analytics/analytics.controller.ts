@@ -172,6 +172,33 @@ export class AnalyticsController {
     return { ok: true };
   }
 
+  // Cookieless aggregate counter — no sid/IP/UA persisted. Lawful without consent.
+  // Frontend calls this on every track() regardless of consent state.
+  @Throttle({
+    burst: { ttl: seconds(1), limit: 30 },
+    sustained: { ttl: minutes(1), limit: 1500 },
+  })
+  @Post("pulse")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async pulse(@Req() req: Request, @Body() body: { event?: string }) {
+    if (!body.event || !EVENT_REGEX.test(body.event)) {
+      throw new BadRequestException("event invalid");
+    }
+    if (readCookie(req, DISABLED_COOKIE) === "1") return;
+    const country = headerStr(req, "cf-ipcountry") || "XX";
+    const region = decodeCity(headerStr(req, "cf-region")) || "";
+    const now = new Date();
+    const hour = new Date(Date.UTC(
+      now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(),
+      now.getUTCHours(), 0, 0, 0,
+    ));
+    await this.prisma.pulseHourly.upsert({
+      where: { hour_event_country_region: { hour, event: body.event, country, region } },
+      create: { hour, event: body.event, country, region, hits: 1 },
+      update: { hits: { increment: 1 } },
+    });
+  }
+
   @Post("identify")
   @HttpCode(HttpStatus.OK)
   @UseGuards(AuthGuard)

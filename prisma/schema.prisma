@@ -344,6 +344,21 @@ model AnalyticsEvent {
   @@map("analytics_events")
 }
 
+/// Cookieless aggregate counters. No sid/IP/UA — just event×hour×country×region.
+/// Lawful without consent (truly anonymous, outside ePrivacy + GDPR scope).
+model PulseHourly {
+  hour    DateTime
+  event   String
+  country String   @default("XX")
+  region  String   @default("")
+  hits    Int      @default(0)
+
+  @@id([hour, event, country, region])
+  @@index([event, hour])
+  @@index([hour])
+  @@map("pulse_hourly")
+}
+
 model Order {
   id              String   @id @default(cuid())
   restaurantId    String

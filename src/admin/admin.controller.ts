@@ -50,7 +50,9 @@ export class AdminController {
   @Get("companies")
   async listCompanies(@Query() query: ListQuery) {
     const filter = query.filter || "all";
-    const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
     // "active" = company has menu scans (page views) within the last 30 days.
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
@@ -74,13 +76,20 @@ export class AdminController {
     });
 
     const ids = companies.map((c) => c.id);
-    const [monthly, lastVisits] = ids.length
+    const [monthly, today, lastVisits] = ids.length
       ? await Promise.all([
           this.prisma.$queryRaw<{ companyId: string; count: bigint }[]>`
             SELECT "companyId", COUNT(DISTINCT "sessionId") AS count
             FROM page_views
             WHERE "companyId" = ANY(${ids}::text[])
               AND "createdAt" >= ${startOfMonth}
+            GROUP BY "companyId"
+          `,
+          this.prisma.$queryRaw<{ companyId: string; count: bigint }[]>`
+            SELECT "companyId", COUNT(DISTINCT "sessionId") AS count
+            FROM page_views
+            WHERE "companyId" = ANY(${ids}::text[])
+              AND "createdAt" >= ${startOfDay}
             GROUP BY "companyId"
           `,
           this.prisma.$queryRaw<{ companyId: string; last: Date | null }[]>`
@@ -91,8 +100,9 @@ export class AdminController {
             GROUP BY s."companyId"
           `,
         ])
-      : [[], []];
+      : [[], [], []];
     const monthlyMap = new Map(monthly.map((r) => [r.companyId, Number(r.count)]));
+    const todayMap = new Map(today.map((r) => [r.companyId, Number(r.count)]));
     const lastVisitMap = new Map(lastVisits.map((r) => [r.companyId, r.last]));
 
     const items = companies.map((c) => ({
@@ -104,6 +114,7 @@ export class AdminController {
       itemsCount: c._count.items,
       messagesCount: c._count.supportMessages,
       monthlyViews: monthlyMap.get(c.id) || 0,
+      todayScans: todayMap.get(c.id) || 0,
       lastVisit: lastVisitMap.get(c.id)?.toISOString() ?? null,
       scanLimit: c.plan === "FREE" ? c.scanLimit : null,
       emailsSent: c.emailsSent,
@@ -408,6 +419,7 @@ export class AdminController {
         region: s?.region ?? null,
         city: s?.city ?? null,
         device: detectDevice(s?.userAgent ?? null),
+        os: detectOs(s?.userAgent ?? null),
         source: s?.gclid ? "Ads" : "Direct",
       };
     });
@@ -466,6 +478,7 @@ export class AdminController {
               ip: session.ip,
               userAgent: session.userAgent,
               device: detectDevice(session.userAgent),
+              os: detectOs(session.userAgent),
               country: session.country,
               region: session.region,
               city: session.city,
@@ -541,6 +554,17 @@ function detectDevice(ua: string | null | undefined): Device {
   if (/ipad|tablet|playbook|silk|kindle|nexus 7|nexus 9|nexus 10/i.test(ua)) return "tablet";
   if (/mobile|android|iphone|ipod|blackberry|windows phone|opera mini|iemobile/i.test(ua)) return "mobile";
   return "desktop";
+}
+
+type OS = "ios" | "android" | "macos" | "windows" | "linux" | "unknown";
+function detectOs(ua: string | null | undefined): OS {
+  if (!ua) return "unknown";
+  if (/iphone|ipad|ipod/i.test(ua)) return "ios";
+  if (/android/i.test(ua)) return "android";
+  if (/windows/i.test(ua)) return "windows";
+  if (/mac os x|macintosh/i.test(ua)) return "macos";
+  if (/linux/i.test(ua)) return "linux";
+  return "unknown";
 }
 
 function startOfDayInTz(tz: string): Date {

@@ -139,6 +139,7 @@ export class AnalyticsController {
     const ip = extractIp(req);
     const ua = req.headers["user-agent"] || null;
     const country = headerStr(req, "cf-ipcountry");
+    const region = decodeCity(headerStr(req, "cf-region"));
     const city = decodeCity(headerStr(req, "cf-ipcity"));
     const gclid = body.gclid && GCLID_REGEX.test(body.gclid) ? body.gclid : null;
 
@@ -146,12 +147,13 @@ export class AnalyticsController {
     // backfill those on update without overwriting fields already populated.
     const existing = await this.prisma.session.findUnique({
       where: { id: sessionId },
-      select: { country: true, city: true, gclid: true },
+      select: { country: true, region: true, city: true, gclid: true },
     });
 
     if (existing) {
-      const patch: { country?: string; city?: string; gclid?: string } = {};
+      const patch: { country?: string; region?: string; city?: string; gclid?: string } = {};
       if (!existing.country && country) patch.country = country;
+      if (!existing.region && region) patch.region = region;
       if (!existing.city && city) patch.city = city;
       if (!existing.gclid && gclid) patch.gclid = gclid;
       if (Object.keys(patch).length) {
@@ -159,7 +161,7 @@ export class AnalyticsController {
       }
     } else {
       await this.prisma.session.create({
-        data: { id: sessionId, ip, userAgent: ua, country, city, gclid },
+        data: { id: sessionId, ip, userAgent: ua, country, region, city, gclid },
       });
     }
 

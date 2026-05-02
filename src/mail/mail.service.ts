@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleDestroy } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import type { Transporter } from "nodemailer";
 import { I18nService } from "../i18n/i18n.service";
+import { pickWelcomePersonal, isRtl as isWelcomeRtl } from "./templates/welcome-personal";
 
 interface SendOtpOptions {
   email: string;
@@ -93,6 +94,48 @@ export class MailService implements OnModuleDestroy {
         </div>
       `,
       text: `${t.greeting}\n\n${t.intro}\n\n${code}\n\n${t.expiry}`,
+    });
+  }
+
+  /** Personal welcome email — manually triggered from admin panel.
+   *  Locale picks the matching translation (falls back to English).
+   *  `name` substitutes {name} in subject + greeting (restaurant title or
+   *  email local-part).
+   */
+  async sendWelcomePersonal({
+    email,
+    name,
+    locale,
+  }: {
+    email: string;
+    name: string;
+    locale: string;
+  }): Promise<void> {
+    const cfg = this.smtpConfig();
+    if (!cfg) {
+      this.logger.warn("SMTP not configured — welcome_personal skipped");
+      return;
+    }
+    const transporter = await this.getTransporter(cfg);
+    const t = pickWelcomePersonal(locale);
+    const subject = t.subject.replace("{name}", name);
+    const greeting = t.greeting.replace("{name}", name);
+    const dir = isWelcomeRtl(locale) ? "rtl" : "ltr";
+
+    await transporter.sendMail({
+      from: this.cachedFrom ?? cfg.from,
+      to: email,
+      subject,
+      html: `
+        <div dir="${dir}" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:520px;margin:0 auto;padding:32px 20px;color:#1a1a1a">
+          <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${greeting}</p>
+          <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${t.body}</p>
+          <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${t.help}</p>
+          <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${t.closing}</p>
+          <p style="font-size:15px;margin:0;color:#1a1a1a">${t.signature}</p>
+        </div>
+      `,
+      text: `${greeting}\n\n${t.body}\n\n${t.help}\n\n${t.closing}\n\n${t.signature.replace(/<br>/g, "\n")}`,
     });
   }
 

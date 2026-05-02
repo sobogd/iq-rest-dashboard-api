@@ -232,6 +232,55 @@ export class AdminController {
     });
   }
 
+  /** Manually trigger an email template to a company's primary owner.
+   *  Records the send in Company.emailsSent JSON for tracking + idempotency hint. */
+  @Post("companies/:id/send-email")
+  async sendEmail(
+    @Param("id") companyId: string,
+    @Body() body: { template?: string },
+  ) {
+    const template = body.template;
+    if (template !== "welcome_personal") {
+      throw new BadRequestException("Unknown template");
+    }
+
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      include: {
+        users: {
+          orderBy: { user: { createdAt: "asc" } },
+          take: 1,
+          include: { user: { select: { email: true, preferredLocale: true } } },
+        },
+        restaurants: { take: 1, select: { title: true, defaultLanguage: true } },
+      },
+    });
+    if (!company) throw new NotFoundException("Company not found");
+
+    const owner = company.users[0]?.user;
+    if (!owner?.email) throw new BadRequestException("Owner email not found");
+    if (company.emailUnsubscribed) throw new BadRequestException("Owner unsubscribed");
+
+    const restaurant = company.restaurants[0];
+    const locale = owner.preferredLocale || restaurant?.defaultLanguage || "en";
+    const name = restaurant?.title || owner.email.split("@")[0];
+
+    await this.mail.sendWelcomePersonal({ email: owner.email, name, locale });
+
+    // Record in emailsSent JSON: { welcome_personal: "ISO timestamp" }
+    const existing =
+      company.emailsSent && typeof company.emailsSent === "object" && !Array.isArray(company.emailsSent)
+        ? (company.emailsSent as Record<string, string>)
+        : {};
+    const updated = { ...existing, [template]: new Date().toISOString() };
+    await this.prisma.company.update({
+      where: { id: companyId },
+      data: { emailsSent: updated },
+    });
+
+    return { ok: true, template, sentAt: updated[template], to: owner.email, locale };
+  }
+
   @Post("companies/:id/messages")
   async sendMessage(
     @Req() req: Request,

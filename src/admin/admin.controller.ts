@@ -544,48 +544,29 @@ export class AdminController {
 
   // ────────────────── PULSE (cookieless raw event log) ──────────────────
 
-  @Get("pulse/top")
-  async pulseTop(
-    @Query("from") from?: string,
-    @Query("to") to?: string,
-    @Query("country") country?: string,
-    @Query("region") region?: string,
-    @Query("limit") limitRaw = "20",
-  ) {
-    const range = parsePulseRange(from, to);
-    const limit = Math.min(100, Math.max(1, parseInt(limitRaw, 10) || 20));
-    const rows = await this.prisma.pulseEvent.groupBy({
-      by: ["event"],
-      where: {
-        at: { gte: range.from, lte: range.to },
-        ...(country ? { country } : {}),
-        ...(region ? { region } : {}),
-      },
-      _count: { _all: true },
-      orderBy: { _count: { event: "desc" } },
-      take: limit,
-    });
-    return {
-      events: rows.map((r) => ({ event: r.event, hits: Number(r._count?._all ?? 0) })),
-    };
-  }
-
-  /** Raw event log, newest first. No bucketing — each row is a single track() call. */
+  /** Raw event log, newest first. Filters on backend by source = pre-signup
+   *  (land/auth/onboarding/wizard) vs dashboard (everything else). */
   @Get("pulse/timeline")
   async pulseTimeline(
     @Query("from") from?: string,
     @Query("to") to?: string,
-    @Query("country") country?: string,
-    @Query("region") region?: string,
-    @Query("limit") limitRaw = "1000",
+    @Query("source") source: "presignup" | "dashboard" = "presignup",
+    @Query("limit") limitRaw = "500",
   ) {
     const range = parsePulseRange(from, to);
-    const limit = Math.min(5000, Math.max(1, parseInt(limitRaw, 10) || 1000));
+    const limit = Math.min(2000, Math.max(1, parseInt(limitRaw, 10) || 500));
+
+    const PRESIGNUP_PREFIXES = ["land_", "auth_", "create_flow_", "onboarding_", "wizard_"];
+    const presignupOR = PRESIGNUP_PREFIXES.map((p) => ({ event: { startsWith: p } }));
+    const eventFilter =
+      source === "presignup"
+        ? { OR: presignupOR }
+        : { NOT: { OR: presignupOR } };
+
     const rows = await this.prisma.pulseEvent.findMany({
       where: {
         at: { gte: range.from, lte: range.to },
-        ...(country ? { country } : {}),
-        ...(region ? { region } : {}),
+        ...eventFilter,
       },
       orderBy: { at: "desc" },
       take: limit,

@@ -66,6 +66,12 @@ export class MailService implements OnModuleDestroy {
     return this.transporterPromise;
   }
 
+  /** Inline text-mark logo for email headers. Light-bg variant: dark "IQ"
+   *  + primary orange "Rest", Inter-fallback bold. RTL-flip handled by parent dir. */
+  private logoMark(): string {
+    return `<div style="text-align:center;margin:0 0 28px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Inter,sans-serif;font-size:32px;font-weight:900;letter-spacing:-1px;line-height:1"><span style="color:#1a1a1a">IQ </span><span style="color:#FF6229">Rest</span></div>`;
+  }
+
   async sendOtp({ email, code, locale }: SendOtpOptions): Promise<void> {
     const cfg = this.smtpConfig();
     if (!cfg) {
@@ -85,6 +91,7 @@ export class MailService implements OnModuleDestroy {
       subject,
       html: `
         <div dir="${dir}" style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto;padding:32px 20px;color:#1a1a1a">
+          ${this.logoMark()}
           <p>${t.greeting}</p>
           <p>${t.intro}</p>
           <div style="margin:24px 0;padding:24px;background:#f5f5f5;border-radius:12px;text-align:center">
@@ -128,6 +135,7 @@ export class MailService implements OnModuleDestroy {
       subject,
       html: `
         <div dir="${dir}" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:520px;margin:0 auto;padding:32px 20px;color:#1a1a1a">
+          ${this.logoMark()}
           <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${greeting}</p>
           <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${t.body}</p>
           <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${t.help}</p>
@@ -158,6 +166,7 @@ export class MailService implements OnModuleDestroy {
       subject: t.subject,
       html: `
         <div dir="${dir}" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:520px;margin:0 auto;padding:32px 20px;color:#1a1a1a">
+          ${this.logoMark()}
           <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${t.greeting}</p>
           <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${t.body}</p>
           <p style="font-size:17px;line-height:1.7;margin:0 0 20px">

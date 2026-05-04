@@ -17,6 +17,7 @@ import {
 } from "@nestjs/common";
 import type { Request, Response } from "express";
 import { ConfigService } from "@nestjs/config";
+import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AdminGuard } from "./admin.guard";
 import { AuthService } from "../auth/auth.service";
@@ -631,6 +632,96 @@ export class AdminController {
       })),
     };
   }
+
+  // ────────────────── USAGE EVENTS (new unified analytics) ──────────────────
+
+  /** Usage events for a single day (UTC), paginated for infinite scroll.
+   *  20 events per page, ordered by id desc (cuid is time-sortable). */
+  @Get("usage/timeline")
+  async usageTimeline(
+    @Query("date") dateRaw?: string,
+    @Query("scope") scope: "all" | "anonymous" | "identified" = "all",
+    @Query("companyId") companyId?: string,
+    @Query("cursor") cursor?: string,
+  ) {
+    const day = parseDayUtc(dateRaw);
+    const where: Prisma.UsageEventWhereInput = {
+      at: { gte: day.from, lt: day.to },
+    };
+    if (companyId) {
+      where.companyId = companyId;
+    } else if (scope === "anonymous") {
+      where.companyId = null;
+    } else if (scope === "identified") {
+      where.companyId = { not: null };
+    }
+
+    const PAGE_SIZE = 20;
+    const rows = await this.prisma.usageEvent.findMany({
+      where,
+      orderBy: [{ at: "desc" }, { id: "desc" }],
+      take: PAGE_SIZE,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      select: {
+        id: true,
+        at: true,
+        event: true,
+        country: true,
+        region: true,
+        device: true,
+        platform: true,
+        gclid: true,
+        companyId: true,
+      },
+    });
+
+    // Resolve companyId → friendly label (first restaurant title, or first user
+    // email). Single batched query keeps the endpoint cheap.
+    const companyIds = Array.from(new Set(rows.map((r) => r.companyId).filter((x): x is string => !!x)));
+    const labels = new Map<string, string>();
+    if (companyIds.length) {
+      const companies = await this.prisma.company.findMany({
+        where: { id: { in: companyIds } },
+        select: {
+          id: true,
+          restaurants: { select: { title: true }, take: 1, orderBy: { createdAt: "asc" } },
+          users: {
+            select: { user: { select: { email: true } } },
+            take: 1,
+            orderBy: { createdAt: "asc" },
+          },
+        },
+      });
+      for (const c of companies) {
+        const restaurantTitle = c.restaurants[0]?.title?.trim();
+        const userEmail = c.users[0]?.user.email;
+        const label = restaurantTitle || userEmail || c.id;
+        labels.set(c.id, label);
+      }
+    }
+
+    // Total count for the header — only computed on the first page request.
+    const total = !cursor ? await this.prisma.usageEvent.count({ where }) : undefined;
+
+    return {
+      day: day.iso,
+      ...(total !== undefined ? { total } : {}),
+      hasMore: rows.length === PAGE_SIZE,
+      nextCursor: rows.length === PAGE_SIZE ? rows[rows.length - 1].id : null,
+      events: rows.map((r) => ({
+        id: r.id,
+        at: r.at.toISOString(),
+        event: r.event,
+        country: r.country,
+        region: r.region,
+        device: r.device,
+        platform: r.platform,
+        gclid: r.gclid,
+        companyId: r.companyId,
+        companyLabel: r.companyId ? labels.get(r.companyId) ?? null : null,
+      })),
+    };
+  }
 }
 // ────────────────── helpers ──────────────────
 
@@ -642,6 +733,25 @@ function parsePulseRange(from?: string, to?: string): { from: Date; to: Date } {
     throw new BadRequestException("from/to invalid");
   }
   return { from: fromDate, to: toDate };
+}
+
+/** Single UTC day window. Accepts "YYYY-MM-DD"; defaults to today UTC. */
+function parseDayUtc(raw?: string): { from: Date; to: Date; iso: string } {
+  let base: Date;
+  if (raw) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+      throw new BadRequestException("date must be YYYY-MM-DD");
+    }
+    base = new Date(`${raw}T00:00:00.000Z`);
+    if (Number.isNaN(base.getTime())) throw new BadRequestException("date invalid");
+  } else {
+    const now = new Date();
+    base = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  }
+  const from = base;
+  const to = new Date(from.getTime() + 24 * 60 * 60 * 1000);
+  const iso = from.toISOString().slice(0, 10);
+  return { from, to, iso };
 }
 
 

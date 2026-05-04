@@ -18,6 +18,7 @@ import { SupportModule } from "./support/support.module";
 import { StripeModule } from "./stripe/stripe.module";
 import { GeoModule } from "./geo/geo.module";
 import { AnalyticsModule } from "./analytics/analytics.module";
+import { UsageModule } from "./usage/usage.module";
 import { AdminModule } from "./admin/admin.module";
 import { HealthController } from "./health/health.controller";
 
@@ -44,6 +45,7 @@ import { HealthController } from "./health/health.controller";
     StripeModule,
     GeoModule,
     AnalyticsModule,
+    UsageModule,
     AdminModule,
   ],
   controllers: [HealthController],

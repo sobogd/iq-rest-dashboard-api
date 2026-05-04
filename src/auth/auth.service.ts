@@ -39,7 +39,8 @@ const LEGACY_SALT = "iqr-legacy-v1";
 const LEGACY_EMAIL_HASHES = new Set<string>([
   "4308dbfd8111b3a6cfc8655dc23c843d2ffbd3541831315f2ffe240421ab7169",
   "7f9765f0ff8e32b88b54a14b4ba773a5b782e653b139dd47d3c78e9188aad5eb",
-  "8f9e4fafa7606a6757c532ad0b0d66e882dd6d53deda494b3af481244c65aa5d",
+  // "8f9e4fafa7606a6757c532ad0b0d66e882dd6d53deda494b3af481244c65aa5d", // support@iq-rest.com — TEMP off, admin testing new dashboard
+  "bfd849ef637d5f481afecc13b46f5bcab6b19f271f733a8d4a377ea1b6a28338", // sobogd@gmail.com — test routing to legacy dashboard
 ]);
 
 function hashLegacyEmail(email: string): string {

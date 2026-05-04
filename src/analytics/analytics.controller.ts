@@ -182,7 +182,7 @@ export class AnalyticsController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async pulse(
     @Req() req: Request,
-    @Body() body: { event?: string; gclid?: string; country?: string; region?: string },
+    @Body() body: { event?: string; gclid?: string; country?: string; region?: string; occurredAt?: number },
   ) {
     if (!body.event || !EVENT_REGEX.test(body.event)) {
       throw new BadRequestException("event invalid");
@@ -196,8 +196,13 @@ export class AnalyticsController {
     const country = bodyCountry || headerStr(req, "cf-ipcountry") || "XX";
     const region = bodyRegion || decodeCity(headerStr(req, "cf-region")) || "";
     const gclid = body.gclid && GCLID_REGEX.test(body.gclid) ? body.gclid : null;
+    // Client-sent UTC ms timestamp preserves source-order across racing fetch().
+    // Fallback to server time if absent (back-compat with old clients).
+    const at = typeof body.occurredAt === "number" && Number.isFinite(body.occurredAt)
+      ? new Date(body.occurredAt)
+      : new Date();
     await this.prisma.pulseEvent.create({
-      data: { event: body.event, country, region, gclid },
+      data: { at, event: body.event, country, region, gclid },
     });
   }
 

@@ -310,58 +310,7 @@ model SupportMessage {
   @@map("support_messages")
 }
 
-model Session {
-  id        String   @id @default(cuid())
-  userId    String?
-  companyId String?
-  ip        String?
-  userAgent String?
-  country   String?
-  region    String?
-  city      String?
-  gclid     String?
-  createdAt DateTime @default(now())
-
-  events AnalyticsEvent[]
-
-  @@index([userId, createdAt])
-  @@index([companyId, createdAt])
-  @@index([createdAt])
-  @@map("sessions")
-}
-
-model AnalyticsEvent {
-  id         String   @id @default(cuid())
-  sessionId  String
-  event      String
-  occurredAt DateTime
-  createdAt  DateTime @default(now())
-
-  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-
-  @@index([sessionId, occurredAt])
-  @@index([event, occurredAt])
-  @@map("analytics_events")
-}
-
-/// Cookieless raw event log. No sid/IP/UA — just timestamp + event + country/region.
-/// Lawful without consent (truly anonymous, outside ePrivacy + GDPR scope).
-model PulseEvent {
-  id      String   @id @default(cuid())
-  at      DateTime @default(now())
-  event   String
-  country String   @default("XX")
-  region  String   @default("")
-  gclid   String?  // Google Click ID — captured server-side from landing URL
-
-  @@index([at])
-  @@index([event, at])
-  @@index([gclid])
-  @@map("pulse_events")
-}
-
-/// New unified analytics. Replaces PulseEvent + Session + AnalyticsEvent for new
-/// client tracking; the old tables stay for the legacy admin views.
+/// Unified analytics. Replaces the old PulseEvent + Session + AnalyticsEvent.
 /// Anonymous by default (event + at + country + region + device + platform).
 /// gclid is set only by SSR (server-pulse from /app/<locale>/page.tsx on landing
 /// arrival with ?gclid=...). companyId is attached server-side from the auth

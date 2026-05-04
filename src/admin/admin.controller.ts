@@ -94,11 +94,10 @@ export class AdminController {
             GROUP BY "companyId"
           `,
           this.prisma.$queryRaw<{ companyId: string; last: Date | null }[]>`
-            SELECT s."companyId", MAX(e."occurredAt") AS last
-            FROM sessions s
-            LEFT JOIN analytics_events e ON e."sessionId" = s."id"
-            WHERE s."companyId" = ANY(${ids}::text[])
-            GROUP BY s."companyId"
+            SELECT "companyId", MAX(at) AS last
+            FROM usage_events
+            WHERE "companyId" = ANY(${ids}::text[])
+            GROUP BY "companyId"
           `,
         ])
       : [[], [], []];
@@ -143,14 +142,9 @@ export class AdminController {
     if (!company) throw new NotFoundException("Company not found");
 
     const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-    const [monthlyViews, session] = await Promise.all([
-      this.prisma.pageView.count({ where: { companyId: id, createdAt: { gte: startOfMonth } } }),
-      this.prisma.session.findFirst({
-        where: { companyId: id },
-        orderBy: { createdAt: "desc" },
-        select: { id: true },
-      }),
-    ]);
+    const monthlyViews = await this.prisma.pageView.count({
+      where: { companyId: id, createdAt: { gte: startOfMonth } },
+    });
 
     const menuOrigin = process.env.PUBLIC_MENU_URL || "https://iq-rest.com";
 
@@ -170,7 +164,6 @@ export class AdminController {
       messagesCount: company._count.supportMessages,
       monthlyViews,
       scanLimit: company.scanLimit,
-      sessionId: session?.id || null,
       users: company.users.map((uc) => ({
         id: uc.user.id,
         email: uc.user.email,
@@ -397,242 +390,6 @@ export class AdminController {
     return { ok: true };
   }
 
-  // ────────────────── ANALYTICS ──────────────────
-
-  @Get("analytics/sessions-list")
-  async sessionsList(
-    @Query("period") period = "today",
-    @Query("tz") tz = "UTC",
-    @Query("offset") offsetRaw = "0",
-    @Query("limit") limitRaw = "100",
-  ) {
-    const { dateFrom, dateTo } = computeDateRange(period, tz);
-    const dateFilter = dateTo ? { gte: dateFrom, lt: dateTo } : { gte: dateFrom };
-    const offset = Math.max(0, parseInt(offsetRaw, 10) || 0);
-    const limit = Math.min(500, Math.max(1, parseInt(limitRaw, 10) || 100));
-
-    const dateLte = dateTo ?? new Date();
-    const total = await this.prisma.$queryRaw<{ count: bigint }[]>`
-      SELECT COUNT(DISTINCT "sessionId") AS count
-      FROM analytics_events
-      WHERE "occurredAt" >= ${dateFrom} AND "occurredAt" < ${dateLte}
-    `;
-    const totalCount = Number(total[0]?.count ?? 0);
-
-    // One pass: aggregate first/last/count per session within the window.
-    const aggregates = await this.prisma.$queryRaw<
-      { sessionId: string; first: Date; last: Date; count: bigint }[]
-    >`
-      SELECT "sessionId",
-             MIN("occurredAt") AS first,
-             MAX("occurredAt") AS last,
-             COUNT(*) AS count
-      FROM analytics_events
-      WHERE "occurredAt" >= ${dateFrom} AND "occurredAt" < ${dateLte}
-      GROUP BY "sessionId"
-      ORDER BY MAX("occurredAt") DESC
-      OFFSET ${offset}
-      LIMIT ${limit}
-    `;
-
-    const sessionIds = aggregates.map((a) => a.sessionId);
-    const sessionRows = sessionIds.length
-      ? await this.prisma.session.findMany({
-          where: { id: { in: sessionIds } },
-          select: { id: true, userId: true, createdAt: true, country: true, region: true, city: true, gclid: true, userAgent: true },
-        })
-      : [];
-    const sessionById = new Map(sessionRows.map((s) => [s.id, s]));
-
-    const userIds = Array.from(
-      new Set(sessionRows.map((s) => s.userId).filter((v): v is string => !!v)),
-    );
-    const users = userIds.length
-      ? await this.prisma.user.findMany({
-          where: { id: { in: userIds } },
-          select: { id: true, email: true },
-        })
-      : [];
-    const emailById = new Map(users.map((u) => [u.id, u.email]));
-
-    const sessions = aggregates.map((a) => {
-      const s = sessionById.get(a.sessionId);
-      const duration = Math.max(0, Math.round((a.last.getTime() - a.first.getTime()) / 1000));
-      return {
-        sessionId: a.sessionId,
-        lastEvent: a.last.toISOString(),
-        duration,
-        eventCount: Number(a.count),
-        userId: s?.userId ?? null,
-        email: s?.userId ? emailById.get(s.userId) ?? null : null,
-        country: s?.country ?? null,
-        region: s?.region ?? null,
-        city: s?.city ?? null,
-        device: detectDevice(s?.userAgent ?? null),
-        os: detectOs(s?.userAgent ?? null),
-        source: s?.gclid ? "Ads" : "Direct",
-      };
-    });
-
-    return { sessions, total: totalCount, hasMore: offset + sessions.length < totalCount };
-  }
-
-  @Get("analytics/sessions")
-  async sessions(
-    @Query("sessionId") sessionId?: string,
-    @Query("event") event?: string,
-    @Query("from") from?: string,
-    @Query("to") to?: string,
-    @Query("eventOffset") eventOffsetRaw = "0",
-    @Query("eventLimit") eventLimitRaw = "200",
-  ) {
-    if (sessionId) {
-      const eventOffset = Math.max(0, parseInt(eventOffsetRaw, 10) || 0);
-      const eventLimit = Math.min(1000, Math.max(1, parseInt(eventLimitRaw, 10) || 200));
-      const session = await this.prisma.session.findUnique({
-        where: { id: sessionId },
-        include: {
-          events: {
-            orderBy: { occurredAt: "desc" },
-            skip: eventOffset,
-            take: eventLimit,
-            select: { id: true, event: true, occurredAt: true, createdAt: true },
-          },
-          _count: { select: { events: true } },
-        },
-      });
-      let restaurantName: string | null = null;
-      let email: string | null = null;
-      if (session?.companyId) {
-        const r = await this.prisma.restaurant.findFirst({
-          where: { companyId: session.companyId },
-          select: { title: true },
-        });
-        restaurantName = r?.title ?? null;
-      }
-      if (session?.userId) {
-        const u = await this.prisma.user.findUnique({
-          where: { id: session.userId },
-          select: { email: true },
-        });
-        email = u?.email ?? null;
-      }
-      return {
-        session: session
-          ? {
-              id: session.id,
-              userId: session.userId,
-              email,
-              companyId: session.companyId,
-              restaurantName,
-              ip: session.ip,
-              userAgent: session.userAgent,
-              device: detectDevice(session.userAgent),
-              os: detectOs(session.userAgent),
-              country: session.country,
-              region: session.region,
-              city: session.city,
-              gclid: session.gclid,
-              createdAt: session.createdAt,
-            }
-          : null,
-        events: session?.events ?? [],
-        eventsTotal: session?._count?.events ?? 0,
-        hasMore: session
-          ? eventOffset + session.events.length < (session._count?.events ?? 0)
-          : false,
-      };
-    }
-
-    const dateFrom = from ? new Date(from) : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const dateTo = to ? new Date(to) : new Date();
-    const where: Record<string, unknown> = {
-      events: { some: { occurredAt: { gte: dateFrom, lte: dateTo } } },
-    };
-
-    if (event) {
-      const matching = await this.prisma.analyticsEvent.findMany({
-        where: { event, occurredAt: { gte: dateFrom, lte: dateTo } },
-        distinct: ["sessionId"],
-        select: { sessionId: true },
-        take: 200,
-      });
-      const ids = matching.map((m) => m.sessionId);
-      if (ids.length === 0) return { sessions: [] };
-      where.id = { in: ids };
-    }
-
-    const sessions = await this.prisma.session.findMany({
-      where,
-      orderBy: { createdAt: "desc" },
-      take: 100,
-      select: {
-        id: true,
-        userId: true,
-        createdAt: true,
-        _count: { select: { events: true } },
-      },
-    });
-
-    return {
-      sessions: sessions.map((s) => ({
-        sessionId: s.id,
-        userId: s.userId,
-        createdAt: s.createdAt,
-        eventCount: s._count.events,
-      })),
-    };
-  }
-
-  @Delete("analytics/sessions")
-  @HttpCode(HttpStatus.OK)
-  async deleteSession(@Body() body: { sessionId?: string }) {
-    if (!body.sessionId) throw new BadRequestException("sessionId required");
-    await this.prisma.session.delete({ where: { id: body.sessionId } });
-    return { success: true };
-  }
-
-  // ────────────────── PULSE (cookieless raw event log) ──────────────────
-
-  /** Raw event log, newest first. Filters on backend by source = pre-signup
-   *  (land/auth/onboarding/wizard) vs dashboard (everything else). */
-  @Get("pulse/timeline")
-  async pulseTimeline(
-    @Query("from") from?: string,
-    @Query("to") to?: string,
-    @Query("source") source: "presignup" | "dashboard" = "presignup",
-    @Query("limit") limitRaw = "500",
-  ) {
-    const range = parsePulseRange(from, to);
-    const limit = Math.min(2000, Math.max(1, parseInt(limitRaw, 10) || 500));
-
-    const PRESIGNUP_PREFIXES = ["land_", "auth_", "create_flow_", "onboarding_", "wizard_"];
-    const presignupOR = PRESIGNUP_PREFIXES.map((p) => ({ event: { startsWith: p } }));
-    const eventFilter =
-      source === "presignup"
-        ? { OR: presignupOR }
-        : { NOT: { OR: presignupOR } };
-
-    const rows = await this.prisma.pulseEvent.findMany({
-      where: {
-        at: { gte: range.from, lte: range.to },
-        ...eventFilter,
-      },
-      orderBy: { at: "desc" },
-      take: limit,
-      select: { at: true, event: true, country: true, region: true, gclid: true },
-    });
-    return {
-      events: rows.map((r) => ({
-        at: r.at.toISOString(),
-        event: r.event,
-        country: r.country,
-        region: r.region,
-        gclid: r.gclid,
-      })),
-    };
-  }
-
   // ────────────────── USAGE EVENTS (new unified analytics) ──────────────────
 
   /** Usage events for a single day (UTC), paginated for infinite scroll.
@@ -723,17 +480,8 @@ export class AdminController {
     };
   }
 }
-// ────────────────── helpers ──────────────────
 
-function parsePulseRange(from?: string, to?: string): { from: Date; to: Date } {
-  const now = new Date();
-  const toDate = to ? new Date(to) : now;
-  const fromDate = from ? new Date(from) : new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-  if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) {
-    throw new BadRequestException("from/to invalid");
-  }
-  return { from: fromDate, to: toDate };
-}
+// ────────────────── helpers ──────────────────
 
 /** Single UTC day window. Accepts "YYYY-MM-DD"; defaults to today UTC. */
 function parseDayUtc(raw?: string): { from: Date; to: Date; iso: string } {
@@ -752,61 +500,4 @@ function parseDayUtc(raw?: string): { from: Date; to: Date; iso: string } {
   const to = new Date(from.getTime() + 24 * 60 * 60 * 1000);
   const iso = from.toISOString().slice(0, 10);
   return { from, to, iso };
-}
-
-
-/** Coarse device classification from a User-Agent string. Order matters — tablet check
- *  precedes mobile because iPad UAs may match both signatures. Returns "unknown" when the
- *  UA is missing or unrecognized. */
-type Device = "mobile" | "tablet" | "desktop" | "unknown";
-function detectDevice(ua: string | null | undefined): Device {
-  if (!ua) return "unknown";
-  // iPad on iPadOS 13+ identifies as "Macintosh" — also catch via touch-points hint when present.
-  if (/ipad|tablet|playbook|silk|kindle|nexus 7|nexus 9|nexus 10/i.test(ua)) return "tablet";
-  if (/mobile|android|iphone|ipod|blackberry|windows phone|opera mini|iemobile/i.test(ua)) return "mobile";
-  return "desktop";
-}
-
-type OS = "ios" | "android" | "macos" | "windows" | "linux" | "unknown";
-function detectOs(ua: string | null | undefined): OS {
-  if (!ua) return "unknown";
-  if (/iphone|ipad|ipod/i.test(ua)) return "ios";
-  if (/android/i.test(ua)) return "android";
-  if (/windows/i.test(ua)) return "windows";
-  if (/mac os x|macintosh/i.test(ua)) return "macos";
-  if (/linux/i.test(ua)) return "linux";
-  return "unknown";
-}
-
-function startOfDayInTz(tz: string): Date {
-  const now = new Date();
-  const fmt = new Intl.DateTimeFormat("en-CA", {
-    timeZone: tz,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-  const parts = fmt.formatToParts(now);
-  const y = Number(parts.find((p) => p.type === "year")!.value);
-  const m = Number(parts.find((p) => p.type === "month")!.value) - 1;
-  const d = Number(parts.find((p) => p.type === "day")!.value);
-  const todayLocal = new Date(Date.UTC(y, m, d));
-  const utcStr = todayLocal.toLocaleString("en-US", { timeZone: "UTC" });
-  const tzStr = todayLocal.toLocaleString("en-US", { timeZone: tz });
-  const offsetMs = new Date(utcStr).getTime() - new Date(tzStr).getTime();
-  return new Date(todayLocal.getTime() + offsetMs);
-}
-
-function computeDateRange(period: string, tz: string): { dateFrom: Date; dateTo?: Date } {
-  const todayStart = startOfDayInTz(tz);
-  if (period === "yesterday") {
-    return { dateFrom: new Date(todayStart.getTime() - 86400000), dateTo: todayStart };
-  }
-  if (period === "all") {
-    return { dateFrom: new Date(0) };
-  }
-  if (period === "7days") {
-    return { dateFrom: new Date(todayStart.getTime() - 7 * 86400000) };
-  }
-  return { dateFrom: todayStart };
 }

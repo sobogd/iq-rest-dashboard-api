@@ -428,6 +428,8 @@ export class AdminController {
         device: true,
         platform: true,
         gclid: true,
+        keyword: true,
+        campaign: true,
         companyId: true,
       },
     });
@@ -474,6 +476,8 @@ export class AdminController {
         device: r.device,
         platform: r.platform,
         gclid: r.gclid,
+        keyword: r.keyword,
+        campaign: r.campaign,
         companyId: r.companyId,
         companyLabel: r.companyId ? labels.get(r.companyId) ?? null : null,
       })),

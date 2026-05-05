@@ -764,7 +764,7 @@ Suggest new negative keywords to add.`;
 
 // ────────────────── helpers ──────────────────
 
-async function parseGadsResponse(res: Response): Promise<Record<string, unknown>> {
+async function parseGadsResponse(res: globalThis.Response): Promise<Record<string, unknown>> {
   const text = await res.text();
   try { return JSON.parse(text) as Record<string, unknown>; }
   catch { return { _rawError: text.slice(0, 500) }; }

@@ -668,7 +668,7 @@ Match type guidance:
 
 Do NOT suggest keywords already in the existing negatives or positive keywords list.
 Return ONLY valid JSON array, no markdown, no explanation outside the JSON:
-[{"keyword":"...","matchType":"BROAD|PHRASE|EXACT","reason":"..."}]`;
+[{"keyword":"...","matchType":"BROAD|PHRASE|EXACT","reason":"...","example":"exact search term from the list that triggered this suggestion"}]`;
 
     const userPrompt = `Campaign: ${body.campaign} | Language: ${camp.lang} | Geo: ${camp.geo}
 

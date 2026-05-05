@@ -684,14 +684,14 @@ ${existingNegatives.map(n => `- [${n.matchType}] ${n.text}`).join("\n")}
 Suggest new negative keywords to add.`;
 
     const geminiRes = await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent",
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
       {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: systemPrompt }] },
           contents: [{ role: "user", parts: [{ text: userPrompt }] }],
-          generationConfig: { temperature: 1.0, maxOutputTokens: 8192 },
+          generationConfig: { temperature: 0.4, maxOutputTokens: 8192 },
         }),
       },
     );

@@ -359,6 +359,16 @@ model Order {
   @@map("orders")
 }
 
+model GoogleAdsExclusion {
+  id        String   @id @default(cuid())
+  keyword   String
+  matchType String
+  createdAt DateTime @default(now())
+
+  @@unique([keyword, matchType])
+  @@map("google_ads_exclusions")
+}
+
 // Multi-currency pricing for Stripe
 model CurrencyPrice {
   id             String  @id @default(cuid())

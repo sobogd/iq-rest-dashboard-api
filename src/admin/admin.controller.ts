@@ -588,6 +588,11 @@ export class AdminController {
     const { token, devToken } = await this.gadsToken();
     const cid = camp.id;
 
+    const exclusions = await this.prisma.googleAdsExclusion.findMany({
+      select: { keyword: true, matchType: true },
+    });
+    const exclusionSet = new Set(exclusions.map((e) => `${e.keyword.toLowerCase()}|${e.matchType}`));
+
     const [stRaw, negRaw, kwRaw] = await Promise.all([
       this.gaqlQuery(token, devToken, `
         SELECT search_term_view.search_term, metrics.clicks, metrics.impressions
@@ -704,6 +709,10 @@ Suggest new negative keywords to add.`;
       // Return empty — user sees raw log
     }
 
+    suggestions = suggestions.filter(
+      (s) => !exclusionSet.has(`${s.keyword.toLowerCase()}|${s.matchType}`),
+    );
+
     return {
       ok: true,
       campaign: body.campaign,
@@ -711,6 +720,7 @@ Suggest new negative keywords to add.`;
       log: {
         searchTermsCount: searchTerms.length,
         existingNegativesCount: existingNegatives.length,
+        exclusionsCount: exclusions.length,
         keywordsCount: keywords.length,
         searchTerms,
         existingNegatives,
@@ -722,7 +732,11 @@ Suggest new negative keywords to add.`;
 
   @Post("google-ads/add-negatives")
   @HttpCode(HttpStatus.OK)
-  async addNegatives(@Body() body: { campaign?: string; keywords?: Array<{ keyword: string; matchType: string }> }) {
+  async addNegatives(@Body() body: {
+    campaign?: string;
+    keywords?: Array<{ keyword: string; matchType: string }>;
+    exclusions?: Array<{ keyword: string; matchType: string }>;
+  }) {
     const CAMPAIGNS: Record<string, string> = {
       EN: "23812981575",
       IT: "23815769905",
@@ -730,35 +744,52 @@ Suggest new negative keywords to add.`;
     };
     const campaignId = CAMPAIGNS[body.campaign ?? ""];
     if (!campaignId) throw new BadRequestException("campaign must be EN, IT or ES");
-    if (!body.keywords?.length) throw new BadRequestException("keywords required");
+    if (!body.keywords?.length && !body.exclusions?.length) throw new BadRequestException("keywords or exclusions required");
 
-    const { token, devToken } = await this.gadsToken();
+    const results: Record<string, unknown> = {};
 
-    const operations = body.keywords.map(kw => ({
-      create: {
-        campaign: `customers/6803239831/campaigns/${campaignId}`,
-        negative: true,
-        keyword: { text: kw.keyword, matchType: kw.matchType },
-      },
-    }));
+    // Save exclusions to DB (upsert — ignore duplicates)
+    if (body.exclusions?.length) {
+      for (const ex of body.exclusions) {
+        await this.prisma.googleAdsExclusion.upsert({
+          where: { keyword_matchType: { keyword: ex.keyword.toLowerCase(), matchType: ex.matchType } },
+          create: { keyword: ex.keyword.toLowerCase(), matchType: ex.matchType },
+          update: {},
+        });
+      }
+      results.exclusionsSaved = body.exclusions.length;
+    }
 
-    const res = await fetch(
-      "https://googleads.googleapis.com/v23/customers/6803239831/campaignCriteria:mutate",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "developer-token": devToken,
-          "login-customer-id": "3424878580",
-          "Content-Type": "application/json",
+    // Add negatives to Google Ads
+    if (body.keywords?.length) {
+      const { token, devToken } = await this.gadsToken();
+      const operations = body.keywords.map(kw => ({
+        create: {
+          campaign: `customers/6803239831/campaigns/${campaignId}`,
+          negative: true,
+          keyword: { text: kw.keyword, matchType: kw.matchType },
         },
-        body: JSON.stringify({ operations, partialFailure: true }),
-      },
-    );
+      }));
+      const res = await fetch(
+        "https://googleads.googleapis.com/v23/customers/6803239831/campaignCriteria:mutate",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "developer-token": devToken,
+            "login-customer-id": "3424878580",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ operations, partialFailure: true }),
+        },
+      );
+      const json = await parseGadsResponse(res);
+      if (!res.ok) throw new BadRequestException(JSON.stringify(json));
+      results.added = body.keywords.length;
+      results.gadsResult = json;
+    }
 
-    const json = await parseGadsResponse(res);
-    if (!res.ok) throw new BadRequestException(JSON.stringify(json));
-    return { ok: true, campaign: body.campaign, added: body.keywords.length, result: json };
+    return { ok: true, campaign: body.campaign, ...results };
   }
 }
 

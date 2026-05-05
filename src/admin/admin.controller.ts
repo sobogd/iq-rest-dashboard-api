@@ -15,6 +15,7 @@ import {
   Res,
   UseGuards,
 } from "@nestjs/common";
+import { OAuth2Client } from "google-auth-library";
 import type { Request, Response } from "express";
 import { ConfigService } from "@nestjs/config";
 import { Prisma } from "@prisma/client";
@@ -482,6 +483,68 @@ export class AdminController {
     };
   }
 }
+
+  // ────────────────── CONVERSION UPLOAD ──────────────────
+
+  @Post("usage/upload-conversion")
+  @HttpCode(HttpStatus.OK)
+  async uploadConversion(@Body() body: { gclid?: string; type?: string }) {
+    const { gclid, type } = body;
+    if (!gclid) throw new BadRequestException("gclid required");
+
+    const CONVERSIONS: Record<string, { id: string; value: number }> = {
+      T1: { id: "7596477974", value: 1.20 },
+      T2: { id: "7499129024", value: 8.00 },
+      T3: { id: "7596477518", value: 80.00 },
+    };
+    const conv = CONVERSIONS[type ?? ""];
+    if (!conv) throw new BadRequestException("type must be T1, T2 or T3");
+
+    const clientId = this.config.get<string>("GOOGLE_ADS_CLIENT_ID");
+    const clientSecret = this.config.get<string>("GOOGLE_ADS_CLIENT_SECRET");
+    const refreshToken = this.config.get<string>("GOOGLE_ADS_REFRESH_TOKEN");
+    const developerToken = this.config.get<string>("GOOGLE_ADS_DEVELOPER_TOKEN");
+    if (!clientId || !clientSecret || !refreshToken || !developerToken) {
+      throw new BadRequestException("Google Ads env vars not configured");
+    }
+
+    const oauth = new OAuth2Client(clientId, clientSecret);
+    oauth.setCredentials({ refresh_token: refreshToken });
+    const { token } = await oauth.getAccessToken();
+
+    // Europe/Madrid offset: UTC+2 in summer (May)
+    const now = new Date();
+    const madridOffset = 2 * 60;
+    const local = new Date(now.getTime() + madridOffset * 60000);
+    const dt = local.toISOString().replace("T", " ").slice(0, 19) + "+02:00";
+
+    const res = await fetch(
+      "https://googleads.googleapis.com/v18/customers/6803239831:uploadClickConversions",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "developer-token": developerToken,
+          "login-customer-id": "3424878580",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          conversions: [{
+            gclid,
+            conversionAction: `customers/6803239831/conversionActions/${conv.id}`,
+            conversionDateTime: dt,
+            conversionValue: conv.value,
+            currencyCode: "EUR",
+          }],
+          partialFailure: true,
+        }),
+      },
+    );
+
+    const json = await res.json() as Record<string, unknown>;
+    if (!res.ok) throw new BadRequestException(JSON.stringify(json));
+    return { ok: true, type, result: json };
+  }
 
 // ────────────────── helpers ──────────────────
 

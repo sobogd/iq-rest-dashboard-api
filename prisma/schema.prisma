@@ -324,8 +324,7 @@ model UsageEvent {
   device    String?  // 'mobile' / 'tablet' / 'desktop'
   platform  String?  // 'ios' / 'android' / 'windows' / 'macos' / 'linux' / 'other'
   gclid     String?  // SSR-only — landing page on gclid arrival
-  keyword   String?  // ValueTrack {keyword} — search term that triggered the ad
-  campaign  String?  // ValueTrack {campaignname}
+  ad_params String?  // JSON: { kw, term, campaign } from ValueTrack params
   companyId String?  // server-side from iqr_session cookie when logged in
 
   @@index([at])

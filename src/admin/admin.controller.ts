@@ -516,7 +516,7 @@ export class AdminController {
     const dt = local.toISOString().replace("T", " ").slice(0, 19) + "+02:00";
 
     const res = await fetch(
-      "https://googleads.googleapis.com/v18/customers/6803239831:uploadClickConversions",
+      "https://googleads.googleapis.com/v23/customers/6803239831:uploadClickConversions",
       {
         method: "POST",
         headers: {
@@ -538,7 +538,7 @@ export class AdminController {
       },
     );
 
-    const json = await res.json() as Record<string, unknown>;
+    const json = await parseGadsResponse(res);
     if (!res.ok) throw new BadRequestException(JSON.stringify(json));
     return { ok: true, type, result: json };
   }
@@ -559,7 +559,7 @@ export class AdminController {
   }
 
   private async gaqlQuery(token: string, devToken: string, query: string): Promise<unknown[]> {
-    const res = await fetch("https://googleads.googleapis.com/v18/customers/6803239831/googleAds:search", {
+    const res = await fetch("https://googleads.googleapis.com/v23/customers/6803239831/googleAds:search", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -569,7 +569,7 @@ export class AdminController {
       },
       body: JSON.stringify({ query }),
     });
-    const json = await res.json() as { results?: unknown[] };
+    const json = await parseGadsResponse(res) as { results?: unknown[] };
     if (!res.ok) throw new BadRequestException(JSON.stringify(json));
     return json.results ?? [];
   }
@@ -743,7 +743,7 @@ Suggest new negative keywords to add.`;
     }));
 
     const res = await fetch(
-      "https://googleads.googleapis.com/v18/customers/6803239831/campaignCriteria:mutate",
+      "https://googleads.googleapis.com/v23/customers/6803239831/campaignCriteria:mutate",
       {
         method: "POST",
         headers: {
@@ -756,13 +756,19 @@ Suggest new negative keywords to add.`;
       },
     );
 
-    const json = await res.json() as Record<string, unknown>;
+    const json = await parseGadsResponse(res);
     if (!res.ok) throw new BadRequestException(JSON.stringify(json));
     return { ok: true, campaign: body.campaign, added: body.keywords.length, result: json };
   }
 }
 
 // ────────────────── helpers ──────────────────
+
+async function parseGadsResponse(res: Response): Promise<Record<string, unknown>> {
+  const text = await res.text();
+  try { return JSON.parse(text) as Record<string, unknown>; }
+  catch { return { _rawError: text.slice(0, 500) }; }
+}
 
 /** Single UTC day window. Accepts "YYYY-MM-DD"; defaults to today UTC. */
 function parseDayUtc(raw?: string): { from: Date; to: Date; iso: string } {

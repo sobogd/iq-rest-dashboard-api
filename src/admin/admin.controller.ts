@@ -577,156 +577,48 @@ export class AdminController {
   @Post("google-ads/analyze-negatives")
   @HttpCode(HttpStatus.OK)
   async analyzeNegatives(@Body() body: { campaign?: string }) {
-    const CAMPAIGNS: Record<string, { id: string; lang: string; geo: string }> = {
-      EN: { id: "23812981575", lang: "English", geo: "Europe (excl. IT, ES)" },
-      IT: { id: "23815769905", lang: "Italian", geo: "Italy" },
-      ES: { id: "23816420290", lang: "Spanish", geo: "Spain" },
+    const CAMPAIGNS: Record<string, string> = {
+      EN: "23812981575",
+      IT: "23815769905",
+      ES: "23816420290",
     };
-    const camp = CAMPAIGNS[body.campaign ?? ""];
-    if (!camp) throw new BadRequestException("campaign must be EN, IT or ES");
+    const cid = CAMPAIGNS[body.campaign ?? ""];
+    if (!cid) throw new BadRequestException("campaign must be EN, IT or ES");
 
     const { token, devToken } = await this.gadsToken();
-    const cid = camp.id;
 
     const exclusions = await this.prisma.googleAdsExclusion.findMany({
-      select: { keyword: true, matchType: true },
+      select: { keyword: true },
     });
-    const exclusionSet = new Set(exclusions.map((e) => `${e.keyword.toLowerCase()}|${e.matchType}`));
+    const excluded = new Set(exclusions.map((e) => e.keyword.toLowerCase()));
 
-    // Fetch search terms separately to capture raw response for debugging
-    let stRaw: unknown[] = [];
-    let stRawResponse: unknown = null;
-    {
-      const stRes = await fetch("https://googleads.googleapis.com/v23/customers/6803239831/googleAds:search", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "developer-token": devToken,
-          "login-customer-id": "3424878580",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          query: `SELECT search_term_view.search_term, metrics.clicks, metrics.impressions FROM search_term_view WHERE campaign.id = ${cid} AND segments.date DURING LAST_30_DAYS ORDER BY metrics.impressions DESC LIMIT 300`,
-        }),
-      });
-      stRawResponse = await parseGadsResponse(stRes);
-      stRaw = (stRawResponse as { results?: unknown[] }).results ?? [];
-    }
-
-    const [negRaw, kwRaw] = await Promise.all([
-      this.gaqlQuery(token, devToken, `SELECT campaign_criterion.keyword.text, campaign_criterion.keyword.match_type FROM campaign_criterion WHERE campaign.id = ${cid} AND campaign_criterion.type = 'KEYWORD' AND campaign_criterion.negative = true`),
-      this.gaqlQuery(token, devToken, `SELECT ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type FROM ad_group_criterion WHERE campaign.id = ${cid} AND ad_group_criterion.type = 'KEYWORD' AND ad_group_criterion.status != 'REMOVED'`),
-    ]);
+    const stRes = await fetch("https://googleads.googleapis.com/v23/customers/6803239831/googleAds:search", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "developer-token": devToken,
+        "login-customer-id": "3424878580",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        query: `SELECT search_term_view.search_term, metrics.clicks, metrics.impressions FROM search_term_view WHERE campaign.id = ${cid} AND segments.date DURING LAST_30_DAYS ORDER BY metrics.impressions DESC LIMIT 500`,
+      }),
+    });
+    const stJson = await parseGadsResponse(stRes);
+    if (!stRes.ok) throw new BadRequestException(JSON.stringify(stJson));
 
     type STRow = { searchTermView?: { searchTerm?: string }; metrics?: { clicks?: string; impressions?: string } };
-    type NegRow = { campaignCriterion?: { keyword?: { text?: string; matchType?: string } } };
-    type KwRow = { adGroupCriterion?: { keyword?: { text?: string; matchType?: string } } };
-
-    const searchTerms = (stRaw as STRow[]).map(r => ({
+    const allTerms = ((stJson.results as STRow[] | undefined) ?? []).map((r) => ({
       term: r.searchTermView?.searchTerm ?? "",
       impressions: Number(r.metrics?.impressions ?? 0),
       clicks: Number(r.metrics?.clicks ?? 0),
-    }));
-    const existingNegatives = (negRaw as NegRow[]).map(r => ({
-      text: r.campaignCriterion?.keyword?.text ?? "",
-      matchType: r.campaignCriterion?.keyword?.matchType ?? "",
-    }));
-    const keywords = (kwRaw as KwRow[]).map(r => ({
-      text: r.adGroupCriterion?.keyword?.text ?? "",
-      matchType: r.adGroupCriterion?.keyword?.matchType ?? "",
-    }));
-
-    const geminiKey = process.env.GEMINI_API_KEY;
-    if (!geminiKey) throw new BadRequestException("GEMINI_API_KEY not configured");
-
-    const systemPrompt = `You are a Google Ads negative keyword specialist for IQ Rest.
-
-IQ Rest is a B2B SaaS platform for restaurants. It provides:
-- Digital QR menus (restaurants scan a QR code and customers view the menu)
-- Online menu management dashboard
-- The product is sold to RESTAURANT OWNERS and MANAGERS — not to end consumers / diners
-- Price: €9–29/month subscription
-- Ads run in: Italy (IT), Spain (ES), and English-speaking Europe (EN)
-
-Your task: given a list of search terms from Google Ads, suggest new negative keywords to block irrelevant traffic.
-
-Rules for suggesting negatives:
-- Block: searches from individual consumers/diners (e.g. "best pizza near me", "view restaurant menu")
-- Block: competitor or unrelated SaaS products
-- Block: DIY tools, generators, templates, examples ("create qr code free", "menu template", "qr generator")
-- Block: specific restaurant/venue names people are looking for to eat at
-- Block: food delivery apps (Uber Eats, Glovo, etc.)
-- Block: job seekers ("restaurant job", "waiter work")
-- Block: completely unrelated (hotels, travel, personal use)
-- KEEP relevant: restaurant owners searching for menu software, QR systems, digital menu solutions
-
-Match type guidance:
-- BROAD: single generic words always irrelevant regardless of context (e.g. "pizza", "waiter")
-- PHRASE: short phrases that signal wrong intent (e.g. "near me", "delivery app")
-- EXACT: specific full queries that are irrelevant (e.g. "mcdonald's menu")
-
-Do NOT suggest keywords already in the existing negatives or positive keywords list.
-Return ONLY valid JSON array, no markdown, no explanation outside the JSON:
-[{"keyword":"...","matchType":"BROAD|PHRASE|EXACT","reason":"...","example":"exact search term from the list that triggered this suggestion"}]`;
-
-    const userPrompt = `Campaign: ${body.campaign} | Language: ${camp.lang} | Geo: ${camp.geo}
-
-SEARCH TERMS (last 30 days, sorted by impressions):
-${searchTerms.map(s => `- "${s.term}" (${s.impressions} imp, ${s.clicks} clicks)`).join("\n")}
-
-EXISTING POSITIVE KEYWORDS:
-${keywords.map(k => `- [${k.matchType}] ${k.text}`).join("\n")}
-
-EXISTING NEGATIVE KEYWORDS (already blocked — do NOT suggest these again):
-${existingNegatives.map(n => `- [${n.matchType}] ${n.text}`).join("\n")}
-
-Suggest new negative keywords to add.`;
-
-    const geminiRes = await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: systemPrompt }] },
-          contents: [{ role: "user", parts: [{ text: userPrompt }] }],
-          generationConfig: { temperature: 0.4, maxOutputTokens: 8192 },
-        }),
-      },
-    );
-
-    const geminiJson = await geminiRes.json() as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-    };
-    const rawText = geminiJson.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-
-    let suggestions: Array<{ keyword: string; matchType: string; reason: string }> = [];
-    try {
-      const cleaned = rawText.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-      suggestions = JSON.parse(cleaned) as typeof suggestions;
-    } catch {
-      // Return empty — user sees raw log
-    }
-
-    suggestions = suggestions.filter(
-      (s) => !exclusionSet.has(`${s.keyword.toLowerCase()}|${s.matchType}`),
-    );
+    })).filter((t) => t.term && !excluded.has(t.term.toLowerCase()));
 
     return {
       ok: true,
       campaign: body.campaign,
-      suggestions,
-      log: {
-        searchTermsCount: searchTerms.length,
-        existingNegativesCount: existingNegatives.length,
-        exclusionsCount: exclusions.length,
-        keywordsCount: keywords.length,
-        searchTerms,
-        existingNegatives,
-        keywords,
-        geminiRawText: rawText,
-        stRawResponse,
-      },
+      searchTerms: allTerms,
+      debugLog: stJson,
     };
   }
 

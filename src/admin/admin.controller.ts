@@ -593,30 +593,29 @@ export class AdminController {
     });
     const exclusionSet = new Set(exclusions.map((e) => `${e.keyword.toLowerCase()}|${e.matchType}`));
 
-    const [stRaw, negRaw, kwRaw] = await Promise.all([
-      this.gaqlQuery(token, devToken, `
-        SELECT search_term_view.search_term, metrics.clicks, metrics.impressions
-        FROM search_term_view
-        WHERE campaign.id = ${cid}
-          AND segments.date DURING LAST_30_DAYS
-          AND metrics.impressions > 0
-        ORDER BY metrics.impressions DESC
-        LIMIT 300
-      `),
-      this.gaqlQuery(token, devToken, `
-        SELECT campaign_criterion.keyword.text, campaign_criterion.keyword.match_type
-        FROM campaign_criterion
-        WHERE campaign.id = ${cid}
-          AND campaign_criterion.type = 'KEYWORD'
-          AND campaign_criterion.negative = true
-      `),
-      this.gaqlQuery(token, devToken, `
-        SELECT ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type
-        FROM ad_group_criterion
-        WHERE campaign.id = ${cid}
-          AND ad_group_criterion.type = 'KEYWORD'
-          AND ad_group_criterion.status != 'REMOVED'
-      `),
+    // Fetch search terms separately to capture raw response for debugging
+    let stRaw: unknown[] = [];
+    let stRawResponse: unknown = null;
+    {
+      const stRes = await fetch("https://googleads.googleapis.com/v23/customers/6803239831/googleAds:search", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "developer-token": devToken,
+          "login-customer-id": "3424878580",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          query: `SELECT search_term_view.search_term, metrics.clicks, metrics.impressions FROM search_term_view WHERE campaign.id = ${cid} AND segments.date DURING LAST_30_DAYS ORDER BY metrics.impressions DESC LIMIT 300`,
+        }),
+      });
+      stRawResponse = await parseGadsResponse(stRes);
+      stRaw = (stRawResponse as { results?: unknown[] }).results ?? [];
+    }
+
+    const [negRaw, kwRaw] = await Promise.all([
+      this.gaqlQuery(token, devToken, `SELECT campaign_criterion.keyword.text, campaign_criterion.keyword.match_type FROM campaign_criterion WHERE campaign.id = ${cid} AND campaign_criterion.type = 'KEYWORD' AND campaign_criterion.negative = true`),
+      this.gaqlQuery(token, devToken, `SELECT ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type FROM ad_group_criterion WHERE campaign.id = ${cid} AND ad_group_criterion.type = 'KEYWORD' AND ad_group_criterion.status != 'REMOVED'`),
     ]);
 
     type STRow = { searchTermView?: { searchTerm?: string }; metrics?: { clicks?: string; impressions?: string } };
@@ -726,6 +725,7 @@ Suggest new negative keywords to add.`;
         existingNegatives,
         keywords,
         geminiRawText: rawText,
+        stRawResponse,
       },
     };
   }

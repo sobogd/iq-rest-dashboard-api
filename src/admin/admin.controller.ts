@@ -482,7 +482,6 @@ export class AdminController {
       })),
     };
   }
-}
 
   // ────────────────── CONVERSION UPLOAD ──────────────────
 
@@ -500,10 +499,10 @@ export class AdminController {
     const conv = CONVERSIONS[type ?? ""];
     if (!conv) throw new BadRequestException("type must be T1, T2 or T3");
 
-    const clientId = this.config.get<string>("GOOGLE_ADS_CLIENT_ID");
-    const clientSecret = this.config.get<string>("GOOGLE_ADS_CLIENT_SECRET");
-    const refreshToken = this.config.get<string>("GOOGLE_ADS_REFRESH_TOKEN");
-    const developerToken = this.config.get<string>("GOOGLE_ADS_DEVELOPER_TOKEN");
+    const clientId = this.config.get<string>("GOOGLE_ADS_CLIENT_ID")!;
+    const clientSecret = this.config.get<string>("GOOGLE_ADS_CLIENT_SECRET")!;
+    const refreshToken = this.config.get<string>("GOOGLE_ADS_REFRESH_TOKEN")!;
+    const developerToken = this.config.get<string>("GOOGLE_ADS_DEVELOPER_TOKEN")!;
     if (!clientId || !clientSecret || !refreshToken || !developerToken) {
       throw new BadRequestException("Google Ads env vars not configured");
     }
@@ -512,10 +511,8 @@ export class AdminController {
     oauth.setCredentials({ refresh_token: refreshToken });
     const { token } = await oauth.getAccessToken();
 
-    // Europe/Madrid offset: UTC+2 in summer (May)
     const now = new Date();
-    const madridOffset = 2 * 60;
-    const local = new Date(now.getTime() + madridOffset * 60000);
+    const local = new Date(now.getTime() + 2 * 60 * 60000);
     const dt = local.toISOString().replace("T", " ").slice(0, 19) + "+02:00";
 
     const res = await fetch(
@@ -545,6 +542,7 @@ export class AdminController {
     if (!res.ok) throw new BadRequestException(JSON.stringify(json));
     return { ok: true, type, result: json };
   }
+}
 
 // ────────────────── helpers ──────────────────
 

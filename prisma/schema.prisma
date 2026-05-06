@@ -148,6 +148,10 @@ model Restaurant {
   reservationSlotMinutes Int     @default(90)
   workingHoursStart      String  @default("10:00")
   workingHoursEnd        String  @default("22:00")
+  // Per-day schedule. Array length 7, index 0=Mon ... 6=Sun.
+  // [{ closed, from, to, lunchFrom, lunchTo }]. Null = legacy single-window
+  // mode driven by workingHoursStart/End.
+  reservationSchedule    Json?
 
   // WhatsApp orders
   ordersEnabled          Boolean @default(false)

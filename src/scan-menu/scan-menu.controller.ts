@@ -34,13 +34,21 @@ interface ScanResult {
   error?: string;
 }
 
-async function compressForVision(base64Data: string): Promise<{ mimeType: string; base64: string }> {
+async function compressForVision(
+  base64Data: string,
+  fallbackMime: string,
+): Promise<{ mimeType: string; base64: string }> {
   const inputBuffer = Buffer.from(base64Data, "base64");
-  const compressed = await sharp(inputBuffer)
-    .resize(4096, 4096, { fit: "inside", withoutEnlargement: true })
-    .jpeg({ quality: 95 })
-    .toBuffer();
-  return { mimeType: "image/jpeg", base64: compressed.toString("base64") };
+  try {
+    const compressed = await sharp(inputBuffer, { failOn: "none" })
+      .resize(4096, 4096, { fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 95 })
+      .toBuffer();
+    return { mimeType: "image/jpeg", base64: compressed.toString("base64") };
+  } catch (err) {
+    console.warn("sharp compress failed, sending original to Gemini:", err);
+    return { mimeType: fallbackMime, base64: base64Data };
+  }
 }
 
 @Controller("scan-menu")
@@ -104,9 +112,9 @@ export class ScanMenuController {
       if (isPdf) {
         contentParts.push({ inline_data: { mime_type: "application/pdf", data: base64Data } });
       } else {
-        const mimeMatch = file.match(/^data:image\/[a-z+]+;base64,/);
+        const mimeMatch = file.match(/^data:(image\/[a-z+]+);base64,/);
         if (!mimeMatch) throw new BadRequestException("Invalid file format");
-        const compressed = await compressForVision(base64Data);
+        const compressed = await compressForVision(base64Data, mimeMatch[1]);
         contentParts.push({ inline_data: { mime_type: compressed.mimeType, data: compressed.base64 } });
       }
     }

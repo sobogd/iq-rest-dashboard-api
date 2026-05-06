@@ -2,6 +2,7 @@ import { NestFactory } from "@nestjs/core";
 import { ValidationPipe } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import cookieParser from "cookie-parser";
+import bodyParser from "body-parser";
 import helmet from "helmet";
 import { AppModule } from "./app.module";
 
@@ -22,6 +23,9 @@ async function bootstrap() {
     }),
   );
   app.use(cookieParser());
+  // Scan-menu uploads can be up to 5×20 MB base64 images; raise the JSON limit.
+  app.use(bodyParser.json({ limit: "120mb" }));
+  app.use(bodyParser.urlencoded({ limit: "120mb", extended: true }));
 
   const corsOrigins = (config.get<string>("CORS_ORIGINS") || "")
     .split(",")

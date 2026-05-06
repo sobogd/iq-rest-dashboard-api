@@ -10,7 +10,6 @@ import {
 } from "@nestjs/common";
 import type { Request } from "express";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
-import sharp from "sharp";
 import { AuthGuard, type AuthedRequest } from "../auth/auth.guard";
 import { PrismaService } from "../prisma/prisma.service";
 import { s3Client, s3Bucket, s3Key } from "../upload/s3";
@@ -32,23 +31,6 @@ interface ScannedCategory {
 interface ScanResult {
   categories?: ScannedCategory[];
   error?: string;
-}
-
-async function compressForVision(
-  base64Data: string,
-  fallbackMime: string,
-): Promise<{ mimeType: string; base64: string }> {
-  const inputBuffer = Buffer.from(base64Data, "base64");
-  try {
-    const compressed = await sharp(inputBuffer, { failOn: "none" })
-      .resize(4096, 4096, { fit: "inside", withoutEnlargement: true })
-      .jpeg({ quality: 95 })
-      .toBuffer();
-    return { mimeType: "image/jpeg", base64: compressed.toString("base64") };
-  } catch (err) {
-    console.warn("sharp compress failed, sending original to Gemini:", err);
-    return { mimeType: fallbackMime, base64: base64Data };
-  }
 }
 
 @Controller("scan-menu")
@@ -114,8 +96,7 @@ export class ScanMenuController {
       } else {
         const mimeMatch = file.match(/^data:(image\/[a-z+]+);base64,/);
         if (!mimeMatch) throw new BadRequestException("Invalid file format");
-        const compressed = await compressForVision(base64Data, mimeMatch[1]);
-        contentParts.push({ inline_data: { mime_type: compressed.mimeType, data: compressed.base64 } });
+        contentParts.push({ inline_data: { mime_type: mimeMatch[1], data: base64Data } });
       }
     }
 

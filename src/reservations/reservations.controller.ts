@@ -13,6 +13,7 @@ import {
 import type { Request } from "express";
 import { AuthGuard, type AuthedRequest } from "../auth/auth.guard";
 import { ReservationsService } from "./reservations.service";
+import { SetStatusDto } from "./dto";
 
 @Controller("reservations")
 @UseGuards(AuthGuard)
@@ -25,7 +26,7 @@ export class ReservationsController {
   }
 
   @Patch(":id")
-  setStatus(@Req() req: Request, @Param("id") id: string, @Body() body: { status: string }) {
+  setStatus(@Req() req: Request, @Param("id") id: string, @Body() body: SetStatusDto) {
     return this.svc.setStatus((req as AuthedRequest).authUser.companyId, id, body.status);
   }
 

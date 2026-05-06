@@ -14,8 +14,84 @@ import { AuthGuard, type AuthedRequest } from "../auth/auth.guard";
 import { PrismaService } from "../prisma/prisma.service";
 import { s3Client, s3Bucket, s3Key } from "../upload/s3";
 
-const MAX_SIZE = 100 * 1024 * 1024;
+const MAX_SIZE = 20 * 1024 * 1024;
 const MAX_FILES = 5;
+
+const SYSTEM_PROMPT = `You are a menu scanner. Analyze the image or PDF of a restaurant menu and extract all items with their prices.
+
+Return valid JSON in this exact format:
+{
+  "categories": [
+    {
+      "name": "Category Name",
+      "items": [
+        { "name": "Item Name", "price": 14.50, "description": "Optional description" }
+      ]
+    }
+  ]
+}
+
+Rules:
+- Group items into logical categories (e.g. "Starters", "Main Course", "Desserts", "Drinks")
+- Extract prices as numbers (no currency symbols). If no price is visible, use 0
+- If the file is NOT a restaurant menu, return: { "error": "not_a_menu" }`;
+
+async function callGeminiForFile(
+  apiKey: string,
+  part: { inline_data: { mime_type: string; data: string } },
+): Promise<ScanResult> {
+  const res = await fetch(
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+        contents: [{ role: "user", parts: [{ text: "Scan this menu" }, part] }],
+        generationConfig: {
+          temperature: 0.1,
+          maxOutputTokens: 50000,
+          responseMimeType: "application/json",
+        },
+      }),
+    },
+  );
+
+  if (!res.ok) {
+    console.error("Gemini API error:", await res.text());
+    return { error: "gemini_error" };
+  }
+
+  const data = (await res.json()) as {
+    candidates?: { content?: { parts?: { text?: string }[] } }[];
+  };
+  const content = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+  if (!content) return { error: "empty_response" };
+
+  try {
+    return JSON.parse(content) as ScanResult;
+  } catch {
+    console.error("Failed to parse AI response:", content);
+    return { error: "parse_error" };
+  }
+}
+
+function mergeCategories(results: ScannedCategory[][]): ScannedCategory[] {
+  const merged = new Map<string, ScannedCategory>();
+  for (const cats of results) {
+    for (const cat of cats) {
+      if (!cat.name || !Array.isArray(cat.items)) continue;
+      const key = cat.name.trim().toLowerCase();
+      const existing = merged.get(key);
+      if (existing) {
+        existing.items.push(...cat.items);
+      } else {
+        merged.set(key, { name: cat.name.trim(), items: [...cat.items] });
+      }
+    }
+  }
+  return Array.from(merged.values()).filter((c) => c.items.length > 0);
+}
 
 interface ScannedItem {
   name: string;
@@ -100,81 +176,35 @@ export class ScanMenuController {
       }
     }
 
-    const multiImageNote = contentParts.length > 1
-      ? `\nYou are receiving ${contentParts.length} files — these are different pages of the SAME menu. Combine all items from all pages into a single unified result. Do not duplicate categories — merge items into the same category if they belong together.`
-      : "";
+    // Send each file to Gemini in parallel
+    const results = await Promise.all(contentParts.map((part) => callGeminiForFile(apiKey, part)));
 
-    const res = await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": apiKey,
-        },
-        body: JSON.stringify({
-          systemInstruction: {
-            parts: [{
-              text: `You are a menu scanner. Analyze the image(s) of a restaurant menu and extract all items with their prices.${multiImageNote}
-
-Return valid JSON in this exact format:
-{
-  "categories": [
-    {
-      "name": "Category Name",
-      "items": [
-        { "name": "Item Name", "price": 14.50, "description": "Optional description" }
-      ]
+    // Collect categories from successful responses
+    const successCategories: ScannedCategory[][] = [];
+    let allNotMenu = true;
+    let anySuccess = false;
+    for (const r of results) {
+      if (r.error === "not_a_menu") continue;
+      allNotMenu = false;
+      if (r.categories && r.categories.length > 0) {
+        successCategories.push(r.categories);
+        anySuccess = true;
+      }
     }
-  ]
-}
 
-Rules:
-- Group items into logical categories (e.g. "Starters", "Main Course", "Desserts", "Drinks")
-- Extract prices as numbers (no currency symbols). If no price is visible, use 0
-- If the image is NOT a restaurant menu, return: { "error": "not_a_menu" }`,
-            }],
-          },
-          contents: [{
-            role: "user",
-            parts: [{ text: "Scan this menu" }, ...contentParts],
-          }],
-          generationConfig: {
-            temperature: 0.1,
-            maxOutputTokens: 50000,
-            responseMimeType: "application/json",
-          },
-        }),
-      },
-    );
-
-    if (!res.ok) {
-      console.error("Gemini API error:", await res.text());
+    if (allNotMenu) {
+      throw new HttpException("not_a_menu", HttpStatus.UNPROCESSABLE_ENTITY);
+    }
+    if (!anySuccess) {
       throw new HttpException("Failed to analyze menu", HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
-    const data = (await res.json()) as {
-      candidates?: { content?: { parts?: { text?: string }[] } }[];
-    };
-    const content = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-    if (!content) throw new HttpException("No response from AI", HttpStatus.INTERNAL_SERVER_ERROR);
-
-    let scanResult: ScanResult;
-    try {
-      scanResult = JSON.parse(content) as ScanResult;
-    } catch {
-      console.error("Failed to parse AI response:", content);
-      throw new HttpException("Failed to parse menu data", HttpStatus.INTERNAL_SERVER_ERROR);
-    }
-
-    if (scanResult.error === "not_a_menu") {
-      throw new HttpException("not_a_menu", HttpStatus.UNPROCESSABLE_ENTITY);
-    }
-    if (!scanResult.categories || scanResult.categories.length === 0) {
+    const merged = mergeCategories(successCategories);
+    if (merged.length === 0) {
       throw new HttpException("not_a_menu", HttpStatus.UNPROCESSABLE_ENTITY);
     }
 
-    return { categories: scanResult.categories };
+    return { categories: merged };
   }
 
   @Post("save")

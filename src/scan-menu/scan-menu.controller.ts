@@ -15,7 +15,7 @@ import { AuthGuard, type AuthedRequest } from "../auth/auth.guard";
 import { PrismaService } from "../prisma/prisma.service";
 import { s3Client, s3Bucket, s3Key } from "../upload/s3";
 
-const MAX_SIZE = 20 * 1024 * 1024;
+const MAX_SIZE = 100 * 1024 * 1024;
 const MAX_FILES = 5;
 
 interface ScannedItem {

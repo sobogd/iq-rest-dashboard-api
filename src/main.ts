@@ -23,9 +23,9 @@ async function bootstrap() {
     }),
   );
   app.use(cookieParser());
-  // Scan-menu uploads can be up to 5×20 MB base64 images; raise the JSON limit.
-  app.use(bodyParser.json({ limit: "120mb" }));
-  app.use(bodyParser.urlencoded({ limit: "120mb", extended: true }));
+  // Authenticated endpoints accept large file uploads (PDF menus, photos).
+  app.use(bodyParser.json({ limit: "500mb" }));
+  app.use(bodyParser.urlencoded({ limit: "500mb", extended: true }));
 
   const corsOrigins = (config.get<string>("CORS_ORIGINS") || "")
     .split(",")

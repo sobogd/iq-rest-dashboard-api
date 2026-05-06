@@ -20,6 +20,7 @@ import { GeoModule } from "./geo/geo.module";
 import { AnalyticsModule } from "./analytics/analytics.module";
 import { UsageModule } from "./usage/usage.module";
 import { AdminModule } from "./admin/admin.module";
+import { ScanMenuModule } from "./scan-menu/scan-menu.module";
 import { HealthController } from "./health/health.controller";
 
 @Module({
@@ -47,6 +48,7 @@ import { HealthController } from "./health/health.controller";
     AnalyticsModule,
     UsageModule,
     AdminModule,
+    ScanMenuModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

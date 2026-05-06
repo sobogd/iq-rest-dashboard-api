@@ -96,6 +96,16 @@ export class RestaurantController {
     }
   }
 
+  @Post("dismiss-scan-banner")
+  async dismissScanBanner(@Req() req: Request) {
+    const { companyId } = (req as AuthedRequest).authUser;
+    await this.prisma.restaurant.updateMany({
+      where: { companyId },
+      data: { scanBannerDismissed: true },
+    });
+    return { ok: true };
+  }
+
   @Get("subscription")
   async subscription(@Req() req: Request) {
     const { companyId } = (req as AuthedRequest).authUser;

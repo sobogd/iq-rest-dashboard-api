@@ -130,6 +130,9 @@ model Restaurant {
   startedFromScratch       Boolean @default(false)
   fromScanner              Boolean @default(false)
 
+  // UI banners (per-restaurant dismissals)
+  scanBannerDismissed      Boolean @default(false)
+
   // Free AI trials
   freeTranslationsLeft      Int @default(5)
   freeImageGenerationsLeft  Int @default(2)

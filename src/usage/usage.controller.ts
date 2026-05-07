@@ -19,6 +19,10 @@ const COUNTRY_REGEX = /^[A-Z]{2}$/;
 const SESSION_COOKIE = "iqr_session";
 const EMAIL_COOKIE = "iqr_email";
 
+// support@iq-rest.com — internal admin company. Skip recording events from
+// this account so support browsing dashboards/menus does not pollute metrics.
+const ADMIN_COMPANY_IDS = new Set(["cmi5yzq5v0000vx0hbjmbks82"]);
+
 function readCookie(req: Request, name: string): string | undefined {
   const fromParser = (req.cookies as Record<string, string | undefined> | undefined)?.[name];
   if (fromParser) return fromParser;
@@ -120,6 +124,8 @@ export class UsageController {
         // Invalid session — proceed anonymously
       }
     }
+
+    if (companyId && ADMIN_COMPANY_IDS.has(companyId)) return;
 
     await this.prisma.usageEvent.create({
       data: {

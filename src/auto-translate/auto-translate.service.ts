@@ -326,9 +326,13 @@ export class AutoTranslateService {
   }
 
   /**
-   * Single Gemini call — translate `fields` for every target language and
-   * return a parsed JSON map. Uses Gemini's structured output mode so we
-   * don't have to chase markdown/JSON-fence quirks.
+   * Translate `fields` into every target language. Splits into one Gemini
+   * call per language (sequential within an item) so a long description
+   * with many target languages does not bust the per-call token budget —
+   * the previous all-langs-in-one-response design silently dropped items
+   * whose JSON output got truncated past `maxOutputTokens`. Per-lang calls
+   * also let one language fail without losing the rest, and let us retry
+   * 429/5xx independently.
    */
   private async translateBatch(
     requests: TranslateRequest[],
@@ -336,41 +340,37 @@ export class AutoTranslateService {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) return {};
 
-    const langInstructions = requests
-      .map((r) => {
-        const ln = LANGUAGE_NAMES[r.lang] || r.lang;
-        const need: string[] = [];
-        if (r.fields.name) need.push("name");
-        if (r.fields.description) need.push("description");
-        return `- ${r.lang} (${ln}): ${need.join(", ")}`;
-      })
-      .join("\n");
-
-    const sourceBlock = JSON.stringify({
-      name: requests[0].fields.name ?? null,
-      description: requests[0].fields.description ?? null,
-    });
-
-    const sources: { name?: string; description?: string } = {};
-    for (const r of requests) {
-      if (r.fields.name && !sources.name) sources.name = r.fields.name;
-      if (r.fields.description && !sources.description) sources.description = r.fields.description;
+    const out: Record<string, { name?: string; description?: string }> = {};
+    for (const req of requests) {
+      const single = await this.translateOne(apiKey, req);
+      if (single) out[req.lang] = single;
     }
+    return out;
+  }
+
+  private async translateOne(
+    apiKey: string,
+    req: TranslateRequest,
+  ): Promise<{ name?: string; description?: string } | null> {
+    const ln = LANGUAGE_NAMES[req.lang] || req.lang;
 
     const properties: Record<string, unknown> = {};
-    for (const r of requests) {
-      const fieldProps: Record<string, unknown> = {};
-      if (r.fields.name !== undefined) fieldProps.name = { type: "string" };
-      if (r.fields.description !== undefined) fieldProps.description = { type: "string" };
-      properties[r.lang] = {
-        type: "object",
-        properties: fieldProps,
-      };
+    const required: string[] = [];
+    if (req.fields.name !== undefined) {
+      properties.name = { type: "string" };
+      required.push("name");
+    }
+    if (req.fields.description !== undefined) {
+      properties.description = { type: "string" };
+      required.push("description");
     }
 
+    const sources: Record<string, string> = {};
+    if (req.fields.name !== undefined) sources.name = req.fields.name ?? "";
+    if (req.fields.description !== undefined) sources.description = req.fields.description ?? "";
+
     const prompt = [
-      "You are a strict literal translator for restaurant menus.",
-      "Translate the given fields into the requested target languages.",
+      `You are a strict literal translator for restaurant menus. Translate the JSON below into ${ln} (${req.lang}).`,
       "Hard rules:",
       "- Translate ONLY what is in the source. Do NOT add adjectives, descriptions, or commentary that is not in the original.",
       "- Do NOT make the text more appetizing or marketing-y.",
@@ -379,61 +379,84 @@ export class AutoTranslateService {
       "- Match the source length and structure as closely as the target language allows.",
       "- If the source is just a name (no description), output just the translated name — never invent a description.",
       "- Output ONLY the final translated text for each field. No alternatives, no 'or X', no parenthetical notes, no explanations, no reasoning, no 'depending on...'. One value per field, nothing else.",
-      "Languages and required fields:",
-      langInstructions,
       "",
-      `Source (in the restaurant's default language): ${JSON.stringify(sources)}`,
+      `Source: ${JSON.stringify(sources)}`,
       "",
-      "Return strict JSON keyed by language code, matching the requested fields per language.",
+      "Output JSON with exactly the same keys as the source.",
     ].join("\n");
 
-    let res: Response;
-    try {
-      res = await fetch(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-          body: JSON.stringify({
-            contents: [{ role: "user", parts: [{ text: prompt }] }],
-            generationConfig: {
-              temperature: 0.1,
-              maxOutputTokens: 4000,
-              responseMimeType: "application/json",
-              responseSchema: {
-                type: "object",
-                properties,
+    const MAX_ATTEMPTS = 3;
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      try {
+        const res = await fetch(
+          "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+            body: JSON.stringify({
+              contents: [{ role: "user", parts: [{ text: prompt }] }],
+              generationConfig: {
+                temperature: 0.1,
+                maxOutputTokens: 2000,
+                responseMimeType: "application/json",
+                responseSchema: {
+                  type: "object",
+                  properties,
+                  required,
+                },
+                thinkingConfig: { thinkingBudget: 0 },
               },
-              thinkingConfig: { thinkingBudget: 0 },
-            },
-          }),
-        },
-      );
-    } catch (err) {
-      this.logger.error(`Gemini fetch failed: ${err}`);
-      return {};
-    }
+            }),
+          },
+        );
 
-    if (!res.ok) {
-      const txt = await res.text();
-      this.logger.error(`Gemini ${res.status}: ${txt.slice(0, 300)}`);
-      return {};
-    }
+        if (res.status === 429 || res.status >= 500) {
+          await sleep(500 * Math.pow(2, attempt));
+          lastErr = new Error(`Gemini ${res.status}`);
+          continue;
+        }
 
-    const data = (await res.json()) as {
-      candidates?: { content?: { parts?: { text?: string }[] } }[];
-    };
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) return {};
-    try {
-      const parsed = JSON.parse(text) as Record<string, { name?: string; description?: string }>;
-      return parsed && typeof parsed === "object" ? parsed : {};
-    } catch (err) {
-      this.logger.error(`Gemini returned invalid JSON: ${err}`);
-      return {};
+        if (!res.ok) {
+          const txt = await res.text();
+          this.logger.error(`Gemini ${res.status} (${req.lang}): ${txt.slice(0, 300)}`);
+          return null;
+        }
+
+        const data = (await res.json()) as {
+          candidates?: {
+            content?: { parts?: { text?: string }[] };
+            finishReason?: string;
+          }[];
+        };
+        const candidate = data.candidates?.[0];
+        const text = candidate?.content?.parts?.[0]?.text;
+        if (candidate?.finishReason && candidate.finishReason !== "STOP") {
+          this.logger.error(
+            `Gemini (${req.lang}) finishReason=${candidate.finishReason} — likely truncated`,
+          );
+        }
+        if (!text) return null;
+        try {
+          return JSON.parse(text) as { name?: string; description?: string };
+        } catch (err) {
+          this.logger.error(
+            `Gemini (${req.lang}) invalid JSON: ${err}; text head: ${text.slice(0, 200)}`,
+          );
+          return null;
+        }
+      } catch (err) {
+        lastErr = err;
+        await sleep(500 * Math.pow(2, attempt));
+      }
     }
-    void sourceBlock;
+    this.logger.error(`Gemini (${req.lang}) all retries failed: ${lastErr}`);
+    return null;
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function parallelLimit<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {

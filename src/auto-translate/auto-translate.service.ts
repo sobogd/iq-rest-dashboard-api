@@ -369,10 +369,15 @@ export class AutoTranslateService {
     }
 
     const prompt = [
-      "You are a professional menu translator.",
-      "Translate the given menu item fields into the requested languages.",
-      "Keep the tone and style. Make it sound natural and appetizing.",
-      "Do not translate or modify any HTML/markdown markers, allergen codes, or numbers.",
+      "You are a strict literal translator for restaurant menus.",
+      "Translate the given fields into the requested target languages.",
+      "Hard rules:",
+      "- Translate ONLY what is in the source. Do NOT add adjectives, descriptions, or commentary that is not in the original.",
+      "- Do NOT make the text more appetizing or marketing-y.",
+      "- Preserve dish names, brand names, and proper nouns as-is when they have no standard translation.",
+      "- Preserve numbers, units, allergen codes, HTML/markdown markers verbatim.",
+      "- Match the source length and structure as closely as the target language allows.",
+      "- If the source is just a name (no description), output just the translated name — never invent a description.",
       "Languages and required fields:",
       langInstructions,
       "",
@@ -391,7 +396,7 @@ export class AutoTranslateService {
           body: JSON.stringify({
             contents: [{ role: "user", parts: [{ text: prompt }] }],
             generationConfig: {
-              temperature: 0.3,
+              temperature: 0.1,
               maxOutputTokens: 4000,
               responseMimeType: "application/json",
               responseSchema: {

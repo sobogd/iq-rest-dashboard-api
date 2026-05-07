@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { PrismaService } from "../prisma/prisma.service";
+import { AutoTranslateService } from "../auto-translate/auto-translate.service";
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 const reservationDaySchema = z
@@ -91,7 +92,10 @@ function pickFields(raw: Record<string, unknown>): RestaurantInput {
 
 @Injectable()
 export class RestaurantService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly autoTranslate: AutoTranslateService,
+  ) {}
 
   async getByCompany(companyId: string) {
     return this.prisma.restaurant.findFirst({ where: { companyId } });
@@ -112,10 +116,37 @@ export class RestaurantService {
           : { reservationSchedule: reservationSchedule as Prisma.InputJsonValue };
 
     if (existing) {
-      return this.prisma.restaurant.update({
+      const updated = await this.prisma.restaurant.update({
         where: { id: existing.id },
         data: { ...(rest as Prisma.RestaurantUpdateInput), ...scheduleField },
       });
+      // Diff languages + defaultLanguage and trigger menu-wide auto-translate
+      // / cleanup / swap so items+categories stay in sync.
+      const prevLangs = existing.languages || [];
+      const nextLangs = updated.languages || [];
+      const added = nextLangs.filter((l) => !prevLangs.includes(l));
+      const removed = prevLangs.filter((l) => !nextLangs.includes(l));
+      const defaultChanged =
+        existing.defaultLanguage !== updated.defaultLanguage &&
+        !!existing.defaultLanguage && !!updated.defaultLanguage;
+      // 1) drop translations for removed languages first (await so the
+      //    add-lang backfill below sees a consistent state)
+      if (removed.length) {
+        await this.autoTranslate.removeLanguagesFromMenu(companyId, removed);
+      }
+      // 2) swap source name/description with the new default's translation
+      if (defaultChanged) {
+        await this.autoTranslate.swapMenuDefaultLanguage(
+          companyId,
+          existing.defaultLanguage,
+          updated.defaultLanguage,
+        );
+      }
+      // 3) backfill newly added languages — sync (UI shows blocking modal)
+      if (added.length) {
+        await this.autoTranslate.runMenuBackfill(companyId);
+      }
+      return updated;
     }
 
     const slug = rest.slug || (await this.uniqueSlug(rest.title || "rest"));

@@ -40,25 +40,157 @@ export class AutoTranslateService {
    *  - if the target translation is empty — translate (fill gap).
    *  - otherwise skip.
    */
-  scheduleItem(opts: {
+  /**
+   * Translate one item synchronously. The item endpoint awaits this so the
+   * response already contains the freshly-translated translations.
+   * Errors are swallowed (logged) — a Gemini hiccup must not break a save.
+   */
+  async translateItem(opts: {
     companyId: string;
     itemId: string;
     sourceNameChanged: boolean;
     sourceDescriptionChanged: boolean;
   }) {
-    setImmediate(() => {
-      this.runItem(opts).catch((err) => this.logger.error(`auto-translate item failed: ${err}`));
-    });
+    try {
+      await this.runItem(opts);
+    } catch (err) {
+      this.logger.error(`auto-translate item failed: ${err}`);
+    }
   }
 
-  scheduleCategory(opts: {
+  async translateCategory(opts: {
     companyId: string;
     categoryId: string;
     sourceNameChanged: boolean;
   }) {
-    setImmediate(() => {
-      this.runCategory(opts).catch((err) => this.logger.error(`auto-translate category failed: ${err}`));
+    try {
+      await this.runCategory(opts);
+    } catch (err) {
+      this.logger.error(`auto-translate category failed: ${err}`);
+    }
+  }
+
+  /**
+   * Walk every item + category in the company, parallelised with a
+   * concurrency cap so we don't pelt Gemini all at once. Runs the gap-fill
+   * path so newly-added languages get populated. The restaurant settings
+   * save awaits this so the UI can keep its blocking modal up.
+   */
+  async runMenuBackfill(companyId: string) {
+    const [items, cats] = await Promise.all([
+      this.prisma.item.findMany({ where: { companyId }, select: { id: true } }),
+      this.prisma.category.findMany({ where: { companyId }, select: { id: true } }),
+    ]);
+    await parallelLimit(items, 5, async (it) => {
+      try {
+        await this.runItem({
+          companyId,
+          itemId: it.id,
+          sourceNameChanged: false,
+          sourceDescriptionChanged: false,
+        });
+      } catch (err) {
+        this.logger.error(`backfill item ${it.id} failed: ${err}`);
+      }
     });
+    await parallelLimit(cats, 5, async (c) => {
+      try {
+        await this.runCategory({
+          companyId,
+          categoryId: c.id,
+          sourceNameChanged: false,
+        });
+      } catch (err) {
+        this.logger.error(`backfill category ${c.id} failed: ${err}`);
+      }
+    });
+  }
+
+  /**
+   * Drop translations[lang] from every item and category in the company. Used
+   * when the user removes a language from restaurant settings.
+   */
+  async removeLanguagesFromMenu(companyId: string, langs: string[]) {
+    if (langs.length === 0) return;
+    // Build chained jsonb minus expression: translations - 'a' - 'b' - ...
+    const minusExpr = langs.map((_, i) => `- $${i + 2}`).join(" ");
+    const args: (string | string[])[] = [companyId, ...langs];
+    await this.prisma.$executeRawUnsafe(
+      `UPDATE items SET translations = translations ${minusExpr} WHERE "companyId" = $1 AND translations IS NOT NULL`,
+      ...args,
+    );
+    await this.prisma.$executeRawUnsafe(
+      `UPDATE categories SET translations = translations ${minusExpr} WHERE "companyId" = $1 AND translations IS NOT NULL`,
+      ...args,
+    );
+  }
+
+  /**
+   * Atomically swap the "source" item.name/description with the translation
+   * stored under the new default language. The previous default's value is
+   * archived back into translations[oldDefault] so nothing is lost.
+   *
+   * Without this swap, item.name keeps holding the oldDefault value while
+   * the dashboard treats item.name as the defaultLanguage source — every
+   * subsequent auto-translate would think the source is in the wrong
+   * language.
+   */
+  async swapMenuDefaultLanguage(companyId: string, oldDefault: string, newDefault: string) {
+    if (!oldDefault || !newDefault || oldDefault === newDefault) return;
+
+    // Items: archive the previous source into translations[oldDefault] only
+    // when that key is missing — otherwise we'd clobber a manual translation
+    // (and its lock) the user already typed.
+    await this.prisma.$executeRawUnsafe(
+      `
+      UPDATE items
+      SET
+        name = COALESCE(translations->$2->>'name', name),
+        description = COALESCE(translations->$2->>'description', description),
+        translations =
+          (COALESCE(translations, '{}'::jsonb) - $2)
+          || CASE
+               WHEN COALESCE(translations, '{}'::jsonb) ? $3
+                 THEN jsonb_build_object($3::text, translations->$3)
+               ELSE
+                 jsonb_build_object(
+                   $3::text,
+                   jsonb_build_object(
+                     'name', name,
+                     'description', description
+                   )
+                 )
+             END
+      WHERE "companyId" = $1
+      `,
+      companyId,
+      newDefault,
+      oldDefault,
+    );
+
+    // Categories: only name.
+    await this.prisma.$executeRawUnsafe(
+      `
+      UPDATE categories
+      SET
+        name = COALESCE(translations->$2->>'name', name),
+        translations =
+          (COALESCE(translations, '{}'::jsonb) - $2)
+          || CASE
+               WHEN COALESCE(translations, '{}'::jsonb) ? $3
+                 THEN jsonb_build_object($3::text, translations->$3)
+               ELSE
+                 jsonb_build_object(
+                   $3::text,
+                   jsonb_build_object('name', name)
+                 )
+             END
+      WHERE "companyId" = $1
+      `,
+      companyId,
+      newDefault,
+      oldDefault,
+    );
   }
 
   private async runItem({
@@ -295,4 +427,16 @@ export class AutoTranslateService {
     }
     void sourceBlock;
   }
+}
+
+async function parallelLimit<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+  const queue = items.slice();
+  const workers = Array.from({ length: Math.min(limit, queue.length) }, async () => {
+    while (queue.length > 0) {
+      const next = queue.shift();
+      if (next === undefined) break;
+      await fn(next);
+    }
+  });
+  await Promise.all(workers);
 }

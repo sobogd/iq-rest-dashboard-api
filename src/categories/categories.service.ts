@@ -34,12 +34,12 @@ export class CategoriesService {
         companyId,
       },
     });
-    this.autoTranslate.scheduleCategory({
+    await this.autoTranslate.translateCategory({
       companyId,
       categoryId: created.id,
       sourceNameChanged: true,
     });
-    return created;
+    return this.prisma.category.findFirst({ where: { id: created.id } });
   }
 
   async update(companyId: string, id: string, body: { name?: string; translations?: CategoryTranslations | null; isActive?: boolean; sortOrder?: number }) {
@@ -61,12 +61,12 @@ export class CategoriesService {
       data.translations = (merged as Prisma.InputJsonValue) ?? Prisma.JsonNull;
     }
     const updated = await this.prisma.category.update({ where: { id }, data });
-    this.autoTranslate.scheduleCategory({
+    await this.autoTranslate.translateCategory({
       companyId,
       categoryId: updated.id,
       sourceNameChanged,
     });
-    return updated;
+    return this.prisma.category.findFirst({ where: { id: updated.id } });
   }
 
   async remove(companyId: string, id: string) {

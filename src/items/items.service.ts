@@ -51,14 +51,15 @@ export class ItemsService {
       },
     });
     // New item — treat as if both source fields just changed; auto-translate
-    // fills any missing additional-language slots.
-    this.autoTranslate.scheduleItem({
+    // fills any missing additional-language slots. Sync so the response
+    // already includes the freshly-translated translations.
+    await this.autoTranslate.translateItem({
       companyId,
       itemId: created.id,
       sourceNameChanged: true,
       sourceDescriptionChanged: !!body.description,
     });
-    return created;
+    return this.prisma.item.findFirst({ where: { id: created.id } });
   }
 
   async update(companyId: string, id: string, body: Partial<ItemUpsert>) {
@@ -95,13 +96,13 @@ export class ItemsService {
     const sourceDescriptionChanged =
       body.description !== undefined && (body.description ?? null) !== (item.description ?? null);
     const updated = await this.prisma.item.update({ where: { id }, data });
-    this.autoTranslate.scheduleItem({
+    await this.autoTranslate.translateItem({
       companyId,
       itemId: updated.id,
       sourceNameChanged,
       sourceDescriptionChanged,
     });
-    return updated;
+    return this.prisma.item.findFirst({ where: { id: updated.id } });
   }
 
   async patch(companyId: string, id: string, body: { isActive?: boolean }) {

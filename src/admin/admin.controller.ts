@@ -33,7 +33,6 @@ const ADMIN_ORIG_EMAIL = "iqr_admin_original_email";
 const ADMIN_ORIG_USER_ID = "iqr_admin_original_user_id";
 
 interface ListQuery {
-  filter?: string;
   tz?: string;
 }
 
@@ -50,21 +49,12 @@ export class AdminController {
   // ────────────────── COMPANIES ──────────────────
 
   @Get("companies")
-  async listCompanies(@Query() query: ListQuery) {
-    const filter = query.filter || "all";
+  async listCompanies(@Query() _query: ListQuery) {
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-    // "active" = company has menu scans (page views) within the last 30 days.
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const where =
-      filter === "active"
-        ? { pageViews: { some: { createdAt: { gte: thirtyDaysAgo } } } }
-        : {};
-
     const companies = await this.prisma.company.findMany({
-      where,
       select: {
         id: true,
         plan: true,
@@ -142,11 +132,6 @@ export class AdminController {
     });
     if (!company) throw new NotFoundException("Company not found");
 
-    const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-    const monthlyViews = await this.prisma.pageView.count({
-      where: { companyId: id, createdAt: { gte: startOfMonth } },
-    });
-
     const menuOrigin = process.env.PUBLIC_MENU_URL || "https://iq-rest.com";
 
     return {
@@ -163,8 +148,6 @@ export class AdminController {
       categoriesCount: company._count.categories,
       itemsCount: company._count.items,
       messagesCount: company._count.supportMessages,
-      monthlyViews,
-      scanLimit: company.scanLimit,
       users: company.users.map((uc) => ({
         id: uc.user.id,
         email: uc.user.email,

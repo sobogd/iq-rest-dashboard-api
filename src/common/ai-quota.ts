@@ -54,51 +54,9 @@ export async function refundAiImageUsage(prisma: PrismaService, restaurantId: st
   });
 }
 
-// Atomically reserve a free translation for the company's restaurant.
-// Paid plans skip the check entirely. Free plans use the per-restaurant
-// freeTranslationsLeft counter (default 5) — decremented inside an
-// updateMany conditional on > 0 so concurrent calls can't overshoot.
-export async function consumeAiTranslationQuota(
-  prisma: PrismaService,
-  companyId: string,
-): Promise<{ restaurantId: string; isPaid: boolean }> {
-  const [company, restaurant] = await Promise.all([
-    prisma.company.findUnique({
-      where: { id: companyId },
-      select: { plan: true, subscriptionStatus: true },
-    }),
-    prisma.restaurant.findFirst({
-      where: { companyId },
-      select: { id: true },
-    }),
-  ]);
-  if (!company || !restaurant) throw new ForbiddenException("Not found");
-
-  const paid = isPaidActive(company);
-  if (paid) return { restaurantId: restaurant.id, isPaid: true };
-
-  const reserved = await prisma.restaurant.updateMany({
-    where: { id: restaurant.id, freeTranslationsLeft: { gt: 0 } },
-    data: {
-      freeTranslationsLeft: { decrement: 1 },
-      translationsUsed: { increment: 1 },
-    },
-  });
-  if (reserved.count === 0) {
-    throw new ForbiddenException("translation_quota_exceeded");
-  }
-  return { restaurantId: restaurant.id, isPaid: false };
-}
-
-export async function refundAiTranslationUsage(prisma: PrismaService, restaurantId: string) {
-  await prisma.restaurant.updateMany({
-    where: { id: restaurantId, translationsUsed: { gt: 0 } },
-    data: {
-      freeTranslationsLeft: { increment: 1 },
-      translationsUsed: { decrement: 1 },
-    },
-  });
-}
+// Translation quota was removed — translations are unlimited and free.
+// Manual /api/translate and the auto-translate background worker both run
+// without metering.
 
 export async function getAiImageUsage(prisma: PrismaService, companyId: string) {
   const [company, restaurant] = await Promise.all([

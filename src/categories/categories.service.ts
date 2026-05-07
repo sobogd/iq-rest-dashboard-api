@@ -1,12 +1,17 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
+import { AutoTranslateService } from "../auto-translate/auto-translate.service";
+import { mergeTranslationsWithLocks } from "../items/items.service";
 
 type CategoryTranslations = Record<string, { name: string }>;
 
 @Injectable()
 export class CategoriesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly autoTranslate: AutoTranslateService,
+  ) {}
 
   list(companyId: string) {
     return this.prisma.category.findMany({
@@ -20,7 +25,7 @@ export class CategoriesService {
       where: { companyId },
       _max: { sortOrder: true },
     });
-    return this.prisma.category.create({
+    const created = await this.prisma.category.create({
       data: {
         name: body.name,
         translations: (body.translations as Prisma.InputJsonValue) ?? Prisma.JsonNull,
@@ -29,22 +34,39 @@ export class CategoriesService {
         companyId,
       },
     });
+    this.autoTranslate.scheduleCategory({
+      companyId,
+      categoryId: created.id,
+      sourceNameChanged: true,
+    });
+    return created;
   }
 
   async update(companyId: string, id: string, body: { name?: string; translations?: CategoryTranslations | null; isActive?: boolean; sortOrder?: number }) {
     const cat = await this.prisma.category.findFirst({ where: { id, companyId } });
     if (!cat) throw new NotFoundException();
-    return this.prisma.category.update({
-      where: { id },
-      data: {
-        ...(body.name !== undefined ? { name: body.name } : {}),
-        ...(body.translations !== undefined
-          ? { translations: (body.translations as Prisma.InputJsonValue) ?? Prisma.JsonNull }
-          : {}),
-        ...(body.isActive !== undefined ? { isActive: body.isActive } : {}),
-        ...(body.sortOrder !== undefined ? { sortOrder: body.sortOrder } : {}),
-      },
+    const sourceNameChanged = body.name !== undefined && body.name !== cat.name;
+
+    const data: Prisma.CategoryUpdateInput = {
+      ...(body.name !== undefined ? { name: body.name } : {}),
+      ...(body.isActive !== undefined ? { isActive: body.isActive } : {}),
+      ...(body.sortOrder !== undefined ? { sortOrder: body.sortOrder } : {}),
+    };
+    if (body.translations !== undefined) {
+      const merged = mergeTranslationsWithLocks(
+        cat.translations as Parameters<typeof mergeTranslationsWithLocks>[0],
+        body.translations as Parameters<typeof mergeTranslationsWithLocks>[1],
+        ["name"],
+      );
+      data.translations = (merged as Prisma.InputJsonValue) ?? Prisma.JsonNull;
+    }
+    const updated = await this.prisma.category.update({ where: { id }, data });
+    this.autoTranslate.scheduleCategory({
+      companyId,
+      categoryId: updated.id,
+      sourceNameChanged,
     });
+    return updated;
   }
 
   async remove(companyId: string, id: string) {

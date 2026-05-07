@@ -483,6 +483,33 @@ export class AdminController {
     };
   }
 
+  // ────────────────── BULK EVENT ACTIONS ──────────────────
+
+  @Post("usage/events/delete")
+  @HttpCode(HttpStatus.OK)
+  async bulkDeleteEvents(@Body() body: { ids?: string[] }) {
+    const ids = Array.isArray(body?.ids) ? body.ids.filter((s) => typeof s === "string" && s.length > 0) : [];
+    if (ids.length === 0) throw new BadRequestException("ids required");
+    const r = await this.prisma.usageEvent.deleteMany({ where: { id: { in: ids } } });
+    return { ok: true, deleted: r.count };
+  }
+
+  @Post("usage/events/link-company")
+  @HttpCode(HttpStatus.OK)
+  async bulkLinkCompany(@Body() body: { ids?: string[]; companyId?: string }) {
+    const ids = Array.isArray(body?.ids) ? body.ids.filter((s) => typeof s === "string" && s.length > 0) : [];
+    if (ids.length === 0) throw new BadRequestException("ids required");
+    const companyId = typeof body?.companyId === "string" ? body.companyId : "";
+    if (!companyId) throw new BadRequestException("companyId required");
+    const exists = await this.prisma.company.findUnique({ where: { id: companyId }, select: { id: true } });
+    if (!exists) throw new BadRequestException("Unknown company");
+    const r = await this.prisma.usageEvent.updateMany({
+      where: { id: { in: ids } },
+      data: { companyId },
+    });
+    return { ok: true, updated: r.count };
+  }
+
   // ────────────────── CONVERSION UPLOAD ──────────────────
 
   @Post("usage/upload-conversion")
@@ -538,8 +565,29 @@ export class AdminController {
       },
     );
 
-    const json = await parseGadsResponse(res);
+    const json = (await parseGadsResponse(res)) as {
+      partialFailureError?: { code?: number; message?: string; details?: unknown[] };
+      results?: { gclid?: string; conversionAction?: string; conversionDateTime?: string }[];
+    };
     if (!res.ok) throw new BadRequestException(JSON.stringify(json));
+    // partialFailure=true — Google Ads returns 200 OK even when an individual
+    // conversion failed (duplicate gclid, expired click, conversion-action
+    // mismatch). Surface that as a 400 so the caller does not think the
+    // upload landed.
+    if (json.partialFailureError && json.partialFailureError.message) {
+      throw new BadRequestException({
+        message: "Conversion not accepted by Google Ads",
+        partialFailureError: json.partialFailureError,
+        results: json.results,
+      });
+    }
+    // No accepted result either — also a silent failure.
+    if (!json.results || json.results.length === 0) {
+      throw new BadRequestException({
+        message: "Google Ads returned no accepted conversion",
+        results: json.results,
+      });
+    }
     return { ok: true, type, result: json };
   }
 

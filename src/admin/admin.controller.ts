@@ -218,7 +218,7 @@ export class AdminController {
     @Body() body: { template?: string },
   ) {
     const template = body.template;
-    if (template !== "welcome_personal") {
+    if (template !== "welcome_personal" && template !== "menu_almost_ready") {
       throw new BadRequestException("Unknown template");
     }
 
@@ -243,7 +243,11 @@ export class AdminController {
     const locale = owner.preferredLocale || restaurant?.defaultLanguage || "en";
     const name = restaurant?.title || owner.email.split("@")[0];
 
-    await this.mail.sendWelcomePersonal({ email: owner.email, name, locale });
+    if (template === "welcome_personal") {
+      await this.mail.sendWelcomePersonal({ email: owner.email, name, locale });
+    } else {
+      await this.mail.sendMenuAlmostReady({ email: owner.email, name, locale });
+    }
 
     // Record in emailsSent JSON: { welcome_personal: "ISO timestamp" }
     const existing =

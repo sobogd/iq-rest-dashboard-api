@@ -3,6 +3,7 @@ import { ConfigService } from "@nestjs/config";
 import type { Transporter } from "nodemailer";
 import { I18nService } from "../i18n/i18n.service";
 import { pickWelcomePersonal, isRtl as isWelcomeRtl } from "./templates/welcome-personal";
+import { pickMenuAlmostReady, isRtl as isMarRtl } from "./templates/menu-almost-ready";
 
 interface SendOtpOptions {
   email: string;
@@ -128,6 +129,46 @@ export class MailService implements OnModuleDestroy {
     const subject = t.subject.replace("{name}", name);
     const greeting = t.greeting.replace("{name}", name);
     const dir = isWelcomeRtl(locale) ? "rtl" : "ltr";
+
+    await transporter.sendMail({
+      from: this.cachedFrom ?? cfg.from,
+      to: email,
+      subject,
+      html: `
+        <div dir="${dir}" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:520px;margin:0 auto;padding:32px 20px;color:#1a1a1a">
+          ${this.logoMark()}
+          <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${greeting}</p>
+          <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${t.body}</p>
+          <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${t.help}</p>
+          <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${t.closing}</p>
+          <p style="font-size:15px;margin:0;color:#1a1a1a">${t.signature}</p>
+        </div>
+      `,
+      text: `${greeting}\n\n${t.body}\n\n${t.help}\n\n${t.closing}\n\n${t.signature.replace(/<br>/g, "\n")}`,
+    });
+  }
+
+  /** Menu-almost-ready reminder — same shape as welcome_personal, different
+   *  copy aimed at owners who started menu setup but didn't finish. */
+  async sendMenuAlmostReady({
+    email,
+    name,
+    locale,
+  }: {
+    email: string;
+    name: string;
+    locale: string;
+  }): Promise<void> {
+    const cfg = this.smtpConfig();
+    if (!cfg) {
+      this.logger.warn("SMTP not configured — menu_almost_ready skipped");
+      return;
+    }
+    const transporter = await this.getTransporter(cfg);
+    const t = pickMenuAlmostReady(locale);
+    const subject = t.subject.replace("{name}", name);
+    const greeting = t.greeting.replace("{name}", name);
+    const dir = isMarRtl(locale) ? "rtl" : "ltr";
 
     await transporter.sendMail({
       from: this.cachedFrom ?? cfg.from,

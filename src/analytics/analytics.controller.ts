@@ -59,12 +59,17 @@ export class AnalyticsController {
       prevStartDate = new Date(startDate.getTime() - DAY_MS);
     } else {
       const days = period === "7d" ? 7 : period === "30d" ? 30 : 90;
-      startDate = new Date(now.getTime() - days * DAY_MS);
+      // Window: [today_utc_midnight - (days-1), tomorrow_utc_midnight) so the
+      // dashboard and the admin list agree for the entire calendar day and
+      // today is fully included.
+      const todayUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+      endDate = new Date(todayUtc.getTime() + DAY_MS);
+      startDate = new Date(endDate.getTime() - days * DAY_MS);
       prevEndDate = startDate;
       prevStartDate = new Date(startDate.getTime() - days * DAY_MS);
     }
 
-    const [totalViews, uniqSessionsRows, byDayRaw, byDayPrevRaw, byLangRaw, byPageRaw, monthlyRows, company] =
+    const [totalViews, uniqSessionsRows, byDayRaw, byDayPrevRaw, byLangRaw, byPageRaw] =
       await Promise.all([
         this.prisma.pageView.count({ where: { companyId, createdAt: { gte: startDate, lt: endDate } } }),
         this.prisma.pageView.groupBy({
@@ -103,48 +108,18 @@ export class AnalyticsController {
           GROUP BY page
           ORDER BY views DESC
         `,
-        this.prisma.pageView.groupBy({
-          by: ["sessionId"],
-          where: {
-            companyId,
-            createdAt: { gte: new Date(now.getFullYear(), now.getMonth(), 1) },
-          },
-        }),
-        this.prisma.company.findUnique({
-          where: { id: companyId },
-          select: { plan: true, scanLimit: true },
-        }),
       ]);
 
     const totalScans = uniqSessionsRows.length;
-    const sessionIds = uniqSessionsRows.map((r) => r.sessionId);
-
-    // Returning visitor count: sessions in the period that also had views before the period.
-    const returning =
-      sessionIds.length > 0
-        ? await this.prisma.pageView.groupBy({
-            by: ["sessionId"],
-            where: {
-              companyId,
-              sessionId: { in: sessionIds },
-              createdAt: { lt: startDate },
-            },
-          })
-        : [];
 
     return {
       period,
       totalViews,
       totalScans,
-      avgPagesPerSession: totalScans > 0 ? totalViews / totalScans : 0,
-      returningScans: returning.length,
       byDay: densifyByDay(byDayRaw, startDate, endDate),
       byDayPrev: densifyByDay(byDayPrevRaw, prevStartDate, prevEndDate),
       byLanguage: byLangRaw.map((l) => ({ language: l.language, views: Number(l.views), scans: Number(l.scans) })),
       byPage: byPageRaw.map((p) => ({ page: p.page, views: Number(p.views), sessions: Number(p.sessions) })),
-      monthlyScans: monthlyRows.length,
-      plan: company?.plan ?? null,
-      scanLimit: company?.scanLimit ?? null,
     };
   }
 }

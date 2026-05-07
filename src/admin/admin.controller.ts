@@ -51,14 +51,20 @@ export class AdminController {
   @Get("companies")
   async listCompanies(@Query() _query: ListQuery) {
     const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    // 30-day rolling window aligned to UTC day boundaries so this list and
+    // the analytics dashboard agree on the same window for an entire calendar
+    // day. Window: [today_utc_midnight - 29d, tomorrow_utc_midnight) — 30
+    // calendar days, today inclusive.
+    const todayUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const upper30d = new Date(todayUtc.getTime() + DAY_MS);
+    const startOf30d = new Date(upper30d.getTime() - 30 * DAY_MS);
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
     const companies = await this.prisma.company.findMany({
       select: {
         id: true,
         plan: true,
-        scanLimit: true,
         subscriptionStatus: true,
         emailsSent: true,
         restaurants: { select: { title: true }, take: 1 },
@@ -74,7 +80,8 @@ export class AdminController {
             SELECT "companyId", COUNT(DISTINCT "sessionId") AS count
             FROM page_views
             WHERE "companyId" = ANY(${ids}::text[])
-              AND "createdAt" >= ${startOfMonth}
+              AND "createdAt" >= ${startOf30d}
+              AND "createdAt" < ${upper30d}
             GROUP BY "companyId"
           `,
           this.prisma.$queryRaw<{ companyId: string; count: bigint }[]>`
@@ -107,8 +114,11 @@ export class AdminController {
       monthlyViews: monthlyMap.get(c.id) || 0,
       todayScans: todayMap.get(c.id) || 0,
       lastVisit: lastVisitMap.get(c.id)?.toISOString() ?? null,
-      scanLimit: c.plan === "FREE" ? c.scanLimit : null,
       emailsSent: c.emailsSent,
+      emailsSentCount:
+        c.emailsSent && typeof c.emailsSent === "object" && !Array.isArray(c.emailsSent)
+          ? Object.keys(c.emailsSent).length
+          : 0,
     }));
 
     return { companies: items, total: items.length };

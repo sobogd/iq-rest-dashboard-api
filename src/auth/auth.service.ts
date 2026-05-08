@@ -332,7 +332,16 @@ export class AuthService implements OnModuleDestroy {
         otp: null,
         otpExpiresAt: null,
         otpAttempts: 0,
+        // Dual-write: legacy single-token column kept until phase B (drop on
+        // 2026-05-13). Multi-device login now lives in the `sessions` table.
         sessionToken: tokenHash,
+      },
+    });
+    await this.prisma.session.create({
+      data: {
+        userId: user.id,
+        tokenHash,
+        expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
       },
     });
 
@@ -374,10 +383,15 @@ export class AuthService implements OnModuleDestroy {
         throw new UnauthorizedException();
       }
       const adminUser = await this.prisma.user.findUnique({ where: { email: adminEmail! } });
-      if (!adminUser?.sessionToken) throw new UnauthorizedException();
-      if (!safeCompare(adminUser.sessionToken, hashSessionToken(adminSession!))) {
-        throw new UnauthorizedException();
-      }
+      if (!adminUser) throw new UnauthorizedException();
+      const adminTokenHash = hashSessionToken(adminSession!);
+      // Phase A dual-read: prefer multi-device sessions row, fall back to the
+      // legacy User.sessionToken column for users who logged in before phase A.
+      const adminSessionRow = await this.prisma.session.findUnique({ where: { tokenHash: adminTokenHash } });
+      const adminSessionValid =
+        (adminSessionRow && adminSessionRow.userId === adminUser.id && (adminSessionRow.expiresAt === null || adminSessionRow.expiresAt > new Date())) ||
+        (adminUser.sessionToken !== null && safeCompare(adminUser.sessionToken, adminTokenHash));
+      if (!adminSessionValid) throw new UnauthorizedException();
     }
 
     const user = await this.prisma.user.findUnique({
@@ -389,8 +403,13 @@ export class AuthService implements OnModuleDestroy {
     if (!company) throw new UnauthorizedException();
 
     if (!isImpersonating) {
-      if (!user.sessionToken) throw new UnauthorizedException();
-      if (!safeCompare(user.sessionToken, hashSessionToken(cookieValue))) {
+      const tokenHash = hashSessionToken(cookieValue);
+      const sessionRow = await this.prisma.session.findUnique({ where: { tokenHash } });
+      const sessionRowValid =
+        sessionRow !== null && sessionRow.userId === user.id && (sessionRow.expiresAt === null || sessionRow.expiresAt > new Date());
+      const legacyValid =
+        user.sessionToken !== null && safeCompare(user.sessionToken, tokenHash);
+      if (!sessionRowValid && !legacyValid) {
         throw new UnauthorizedException();
       }
     }
@@ -404,12 +423,24 @@ export class AuthService implements OnModuleDestroy {
     };
   }
 
-  async logout(email: string | undefined): Promise<void> {
+  async logout(email: string | undefined, cookieValue?: string): Promise<void> {
     if (!email) return;
-    await this.prisma.user.update({
-      where: { email },
-      data: { sessionToken: null },
-    }).catch(() => {});
+    if (cookieValue) {
+      const tokenHash = hashSessionToken(cookieValue);
+      await this.prisma.session.deleteMany({ where: { tokenHash } }).catch(() => undefined);
+      // Legacy compat: if this token was the User.sessionToken (logged in
+      // before phase A), clear it too. Otherwise leave it — it belongs to a
+      // different device that should remain logged in.
+      await this.prisma.user.updateMany({
+        where: { email, sessionToken: tokenHash },
+        data: { sessionToken: null },
+      }).catch(() => undefined);
+    } else {
+      // No token in cookie: nuke everything for this user (defensive).
+      const u = await this.prisma.user.findUnique({ where: { email }, select: { id: true } }).catch(() => null);
+      if (u) await this.prisma.session.deleteMany({ where: { userId: u.id } }).catch(() => undefined);
+      await this.prisma.user.update({ where: { email }, data: { sessionToken: null } }).catch(() => undefined);
+    }
   }
 
   async verifyGoogleCredential(
@@ -488,6 +519,13 @@ export class AuthService implements OnModuleDestroy {
     await this.prisma.user.update({
       where: { id: user.id },
       data: { sessionToken: tokenHash, ...pending },
+    });
+    await this.prisma.session.create({
+      data: {
+        userId: user.id,
+        tokenHash,
+        expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
+      },
     });
 
     const seeded = await this.applyPendingAndMaybeSeed(user.id, locale ?? null);

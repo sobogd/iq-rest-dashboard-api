@@ -93,7 +93,8 @@ export class AuthController {
     // If inside impersonation, log out the admin (real user); otherwise the
     // user identified by iqr_email.
     const emailToLogOut = adminOrigEmail || cookies?.[EMAIL_COOKIE];
-    await this.auth.logout(emailToLogOut);
+    const cookieToLogOut = cookies?.["iqr_admin_original_session"] || cookies?.[SESSION_COOKIE];
+    await this.auth.logout(emailToLogOut, cookieToLogOut);
     const domain = this.config.get<string>("COOKIE_DOMAIN") || undefined;
     const baseOpts = { path: "/", ...(domain ? { domain } : {}) };
     res.clearCookie(SESSION_COOKIE, baseOpts);

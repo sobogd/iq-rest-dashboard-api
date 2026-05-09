@@ -129,6 +129,11 @@ model Restaurant {
   address         String?
   x               String?
   y               String?
+  // Google Places ID for the venue, captured by the dashboard map picker.
+  // Used only to disambiguate the "Open in Google Maps" link when several
+  // businesses share the same address (different floor / unit). Marker on
+  // the public menu map still renders from x/y to avoid Places API cost.
+  googlePlaceId   String?
   phone           String?
   instagram       String?
   whatsapp        String?

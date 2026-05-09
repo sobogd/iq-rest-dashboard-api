@@ -144,10 +144,19 @@ export class AdminController {
 
     const menuOrigin = process.env.PUBLIC_MENU_URL || "https://iq-rest.com";
 
+    // Most-recent gclid across this company's usage events — drives conversion
+    // upload buttons in the admin company-detail UI.
+    const lastGclidEvent = await this.prisma.usageEvent.findFirst({
+      where: { companyId: id, gclid: { not: null } },
+      orderBy: { at: "desc" },
+      select: { gclid: true },
+    });
+
     return {
       id: company.id,
       name: company.name,
       createdAt: company.createdAt,
+      gclid: lastGclidEvent?.gclid ?? null,
       plan: company.plan,
       subscriptionStatus: company.subscriptionStatus,
       billingCycle: company.billingCycle,
@@ -517,96 +526,80 @@ export class AdminController {
     return { ok: true, updated: r.count };
   }
 
-  // ────────────────── GOOGLE ADS NEGATIVES ANALYSIS ──────────────────
+  // ────────────────── CONVERSION UPLOAD ──────────────────
 
-  private async gadsToken(): Promise<{ token: string; devToken: string }> {
+  @Post("usage/upload-conversion")
+  @HttpCode(HttpStatus.OK)
+  async uploadConversion(@Body() body: { gclid?: string; type?: string }) {
+    const { gclid, type } = body;
+    if (!gclid) throw new BadRequestException("gclid required");
+
+    const CONVERSIONS: Record<string, { id: string; value: number }> = {
+      T1: { id: "7596477974", value: 1.20 },
+      T2: { id: "7499129024", value: 8.00 },
+      T3: { id: "7596477518", value: 80.00 },
+    };
+    const conv = CONVERSIONS[type ?? ""];
+    if (!conv) throw new BadRequestException("type must be T1, T2 or T3");
+
     const clientId = this.config.get<string>("GOOGLE_ADS_CLIENT_ID")!;
     const clientSecret = this.config.get<string>("GOOGLE_ADS_CLIENT_SECRET")!;
     const refreshToken = this.config.get<string>("GOOGLE_ADS_REFRESH_TOKEN")!;
-    const devToken = this.config.get<string>("GOOGLE_ADS_DEVELOPER_TOKEN")!;
-    if (!clientId || !clientSecret || !refreshToken || !devToken)
+    const developerToken = this.config.get<string>("GOOGLE_ADS_DEVELOPER_TOKEN")!;
+    if (!clientId || !clientSecret || !refreshToken || !developerToken) {
       throw new BadRequestException("Google Ads env vars not configured");
+    }
+
     const oauth = new OAuth2Client(clientId, clientSecret);
     oauth.setCredentials({ refresh_token: refreshToken });
     const { token } = await oauth.getAccessToken();
-    return { token: token!, devToken };
-  }
 
-  // ──────────────────────── GOOGLE ADS — clicks for a day ────────────────────────
-  //
-  // Returns one row per gclid for the requested date with the campaign name
-  // (used as country flag IT / ES / PT), keyword text, and per-action
-  // conversion booleans (T1 Demo Engaged / T2 Signup Verified / T3 Paid
-  // Subscription). click_view exposes only segments.date — there is no
-  // per-click hour, so the row's date is the segments.date we queried.
-  @Get("google-ads/clicks")
-  async gadsClicks(@Query("date") dateStr?: string) {
-    if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-      throw new BadRequestException("date=YYYY-MM-DD required");
-    }
-    const { token, devToken } = await this.gadsToken();
-    const customerId = "6803239831";
-    const loginCustomerId = this.config.get<string>("GOOGLE_ADS_LOGIN_CUSTOMER_ID") || customerId;
-
-    const T_BY_ID: Record<string, "t1" | "t2" | "t3"> = {
-      "7596477974": "t1",
-      "7499129024": "t2",
-      "7596477518": "t3",
-    };
-
-    const query =
-      "SELECT click_view.gclid, click_view.keyword.text, " +
-      "campaign.name, segments.conversion_action, metrics.conversions " +
-      "FROM click_view WHERE segments.date = '" + dateStr + "'";
+    const now = new Date();
+    const local = new Date(now.getTime() + 2 * 60 * 60000);
+    const dt = local.toISOString().replace("T", " ").slice(0, 19) + "+02:00";
 
     const res = await fetch(
-      `https://googleads.googleapis.com/v22/customers/${customerId}/googleAds:search`,
+      "https://googleads.googleapis.com/v23/customers/6803239831:uploadClickConversions",
       {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
-          "developer-token": devToken,
-          "login-customer-id": loginCustomerId,
+          "developer-token": developerToken,
+          "login-customer-id": "3424878580",
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ query, pageSize: 10000 }),
+        body: JSON.stringify({
+          conversions: [{
+            gclid,
+            conversionAction: `customers/6803239831/conversionActions/${conv.id}`,
+            conversionDateTime: dt,
+            conversionValue: conv.value,
+            currencyCode: "EUR",
+          }],
+          partialFailure: true,
+        }),
       },
     );
-    const payload = (await parseGadsResponse(res)) as {
-      results?: Array<{
-        clickView?: { gclid?: string; keyword?: { text?: string } };
-        campaign?: { name?: string };
-        segments?: { conversionAction?: string };
-        metrics?: { conversions?: number };
-      }>;
-      error?: unknown;
-    };
-    if (!res.ok) throw new BadRequestException(JSON.stringify(payload).slice(0, 500));
 
-    type Row = {
-      gclid: string;
-      campaign: string;
-      keyword: string;
-      t1: boolean;
-      t2: boolean;
-      t3: boolean;
+    const json = (await parseGadsResponse(res)) as {
+      partialFailureError?: { code?: number; message?: string; details?: unknown[] };
+      results?: { gclid?: string; conversionAction?: string; conversionDateTime?: string }[];
     };
-    const map = new Map<string, Row>();
-    for (const r of payload.results || []) {
-      const gclid = r.clickView?.gclid;
-      if (!gclid) continue;
-      const campaign = r.campaign?.name || "";
-      const keyword = r.clickView?.keyword?.text || "";
-      const row =
-        map.get(gclid) ||
-        (map.set(gclid, { gclid, campaign, keyword, t1: false, t2: false, t3: false }).get(gclid)!);
-      const actionRn = r.segments?.conversionAction || "";
-      const actionId = actionRn.split("/").pop() || "";
-      const slot = T_BY_ID[actionId];
-      const count = r.metrics?.conversions || 0;
-      if (slot && count > 0) row[slot] = true;
+    if (!res.ok) throw new BadRequestException(JSON.stringify(json));
+    if (json.partialFailureError && json.partialFailureError.message) {
+      throw new BadRequestException({
+        message: "Conversion not accepted by Google Ads",
+        partialFailureError: json.partialFailureError,
+        results: json.results,
+      });
     }
-    return { date: dateStr, clicks: Array.from(map.values()) };
+    if (!json.results || json.results.length === 0) {
+      throw new BadRequestException({
+        message: "Google Ads returned no accepted conversion",
+        results: json.results,
+      });
+    }
+    return { ok: true, type, result: json };
   }
 
 }

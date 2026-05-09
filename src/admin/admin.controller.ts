@@ -534,10 +534,10 @@ export class AdminController {
     const { gclid, type } = body;
     if (!gclid) throw new BadRequestException("gclid required");
 
-    const CONVERSIONS: Record<string, { id: string; value: number }> = {
-      T1: { id: "7596477974", value: 1.20 },
-      T2: { id: "7499129024", value: 8.00 },
-      T3: { id: "7596477518", value: 80.00 },
+    const CONVERSIONS: Record<string, { id: string }> = {
+      T1: { id: "7596477974" },
+      T2: { id: "7499129024" },
+      T3: { id: "7596477518" },
     };
     const conv = CONVERSIONS[type ?? ""];
     if (!conv) throw new BadRequestException("type must be T1, T2 or T3");
@@ -573,8 +573,6 @@ export class AdminController {
             gclid,
             conversionAction: `customers/6803239831/conversionActions/${conv.id}`,
             conversionDateTime: dt,
-            conversionValue: conv.value,
-            currencyCode: "EUR",
           }],
           partialFailure: true,
         }),

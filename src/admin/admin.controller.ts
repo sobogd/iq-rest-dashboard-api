@@ -390,19 +390,15 @@ export class AdminController {
 
   // ────────────────── USAGE EVENTS (new unified analytics) ──────────────────
 
-  /** Usage events for a single day (UTC), paginated for infinite scroll.
-   *  20 events per page, ordered by id desc (cuid is time-sortable). */
+  /** Usage events, paginated for infinite scroll across full history.
+   *  20 events per page, ordered by at/id desc. */
   @Get("usage/timeline")
   async usageTimeline(
-    @Query("date") dateRaw?: string,
     @Query("scope") scope: "all" | "anonymous" | "identified" = "all",
     @Query("companyId") companyId?: string,
     @Query("cursor") cursor?: string,
   ) {
-    const day = parseDayUtc(dateRaw);
-    const where: Prisma.UsageEventWhereInput = {
-      at: { gte: day.from, lt: day.to },
-    };
+    const where: Prisma.UsageEventWhereInput = {};
     if (companyId) {
       where.companyId = companyId;
     } else if (scope === "anonymous") {
@@ -460,7 +456,6 @@ export class AdminController {
     const total = !cursor ? await this.prisma.usageEvent.count({ where }) : undefined;
 
     return {
-      day: day.iso,
       ...(total !== undefined ? { total } : {}),
       hasMore: rows.length === PAGE_SIZE,
       nextCursor: rows.length === PAGE_SIZE ? rows[rows.length - 1].id : null,
@@ -690,21 +685,3 @@ async function parseGadsResponse(res: globalThis.Response): Promise<Record<strin
   catch { return { _rawError: text.slice(0, 500) }; }
 }
 
-/** Single UTC day window. Accepts "YYYY-MM-DD"; defaults to today UTC. */
-function parseDayUtc(raw?: string): { from: Date; to: Date; iso: string } {
-  let base: Date;
-  if (raw) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-      throw new BadRequestException("date must be YYYY-MM-DD");
-    }
-    base = new Date(`${raw}T00:00:00.000Z`);
-    if (Number.isNaN(base.getTime())) throw new BadRequestException("date invalid");
-  } else {
-    const now = new Date();
-    base = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  }
-  const from = base;
-  const to = new Date(from.getTime() + 24 * 60 * 60 * 1000);
-  const iso = from.toISOString().slice(0, 10);
-  return { from, to, iso };
-}

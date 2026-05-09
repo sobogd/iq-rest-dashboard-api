@@ -112,6 +112,15 @@ export class UsageController {
     const uaString = body.userAgent || headerStr(req, "user-agent");
     const { device, platform } = classifyDevice(uaString);
 
+    // Skip events from admin impersonation — admin browsing as client must
+    // not pollute target's metrics nor surface as anonymous traffic.
+    if (
+      readCookie(req, "iqr_admin_original_session") &&
+      readCookie(req, "iqr_admin_original_email")
+    ) {
+      return;
+    }
+
     // companyId only for authenticated users; quietly skip if cookies absent
     let companyId: string | null = null;
     const sessionCookie = readCookie(req, SESSION_COOKIE);

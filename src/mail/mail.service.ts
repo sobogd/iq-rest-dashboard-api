@@ -4,6 +4,7 @@ import type { Transporter } from "nodemailer";
 import { I18nService } from "../i18n/i18n.service";
 import { pickWelcomePersonal, isRtl as isWelcomeRtl } from "./templates/welcome-personal";
 import { pickMenuAlmostReady, isRtl as isMarRtl } from "./templates/menu-almost-ready";
+import { pickReservationStatus, isRtl as isResRtl } from "./templates/reservation-status";
 
 interface SendOtpOptions {
   email: string;
@@ -185,6 +186,70 @@ export class MailService implements OnModuleDestroy {
         </div>
       `,
       text: `${greeting}\n\n${t.body}\n\n${t.help}\n\n${t.closing}\n\n${t.signature.replace(/<br>/g, "\n")}`,
+    });
+  }
+
+  /** Reservation confirmed/cancelled email to the guest. Skipped silently if
+   *  SMTP isn't configured — caller should fire-and-forget via .catch(). */
+  async sendReservationStatus({
+    email,
+    guestName,
+    restaurantTitle,
+    date,
+    startTime,
+    guestsCount,
+    tableNumber,
+    status,
+    locale,
+  }: {
+    email: string;
+    guestName: string;
+    restaurantTitle: string;
+    date: string;
+    startTime: string;
+    guestsCount: number;
+    tableNumber: number | null;
+    status: "confirmed" | "cancelled";
+    locale: string;
+  }): Promise<void> {
+    const cfg = this.smtpConfig();
+    if (!cfg) {
+      this.logger.warn("SMTP not configured — reservation status email skipped");
+      return;
+    }
+    const transporter = await this.getTransporter(cfg);
+    const t = pickReservationStatus(locale);
+    const sub = (status === "confirmed" ? t.subjectConfirmed : t.subjectCancelled).replace("{restaurant}", restaurantTitle);
+    const greeting = t.greeting.replace("{name}", guestName);
+    const body = (status === "confirmed" ? t.bodyConfirmed : t.bodyCancelled).replace("{restaurant}", restaurantTitle);
+    const outro = status === "confirmed" ? t.outroConfirmed : t.outroCancelled;
+    const sig = t.signature.replace("{restaurant}", restaurantTitle);
+    const dir = isResRtl(locale) ? "rtl" : "ltr";
+
+    const row = (label: string, value: string) =>
+      `<tr><td style="padding:8px 12px;font-size:15px;color:#666;white-space:nowrap;">${label}</td><td style="padding:8px 12px;font-size:15px;font-weight:600;color:#1a1a1a;">${value}</td></tr>`;
+    let rows = "";
+    rows += row(t.dateLabel, date);
+    rows += row(t.timeLabel, startTime);
+    rows += row(t.guestsLabel, String(guestsCount));
+    if (tableNumber !== null && tableNumber !== undefined) rows += row(t.tableLabel, String(tableNumber));
+
+    await transporter.sendMail({
+      from: this.cachedFrom ?? cfg.from,
+      to: email,
+      subject: sub,
+      html: `
+        <div dir="${dir}" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:520px;margin:0 auto;padding:32px 20px;color:#1a1a1a">
+          ${this.logoMark()}
+          <p style="font-size:20px;font-weight:600;line-height:1.5;margin:0 0 20px">${greeting}</p>
+          <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${body}</p>
+          <p style="font-size:15px;font-weight:600;margin:0 0 8px">${t.detailsLabel}</p>
+          <table style="border-collapse:collapse;margin:0 0 24px;background:#f5f5f5;border-radius:12px;overflow:hidden;width:100%">${rows}</table>
+          <p style="font-size:15px;line-height:1.7;margin:0 0 24px;color:#666">${outro}</p>
+          <p style="font-size:15px;margin:0;color:#1a1a1a">${sig}</p>
+        </div>
+      `,
+      text: `${greeting}\n\n${body}\n\n${t.detailsLabel}\n${t.dateLabel}: ${date}\n${t.timeLabel}: ${startTime}\n${t.guestsLabel}: ${guestsCount}${tableNumber !== null && tableNumber !== undefined ? `\n${t.tableLabel}: ${tableNumber}` : ""}\n\n${outro}\n\n${sig}`,
     });
   }
 

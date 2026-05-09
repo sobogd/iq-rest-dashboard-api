@@ -397,6 +397,8 @@ export class AdminController {
     @Query("scope") scope: "all" | "anonymous" | "identified" = "all",
     @Query("companyId") companyId?: string,
     @Query("cursor") cursor?: string,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
   ) {
     const where: Prisma.UsageEventWhereInput = {};
     if (companyId) {
@@ -406,6 +408,19 @@ export class AdminController {
     } else if (scope === "identified") {
       where.companyId = { not: null };
     }
+
+    const atRange: { gte?: Date; lt?: Date } = {};
+    if (from) {
+      const d = new Date(from);
+      if (Number.isNaN(d.getTime())) throw new BadRequestException("from invalid");
+      atRange.gte = d;
+    }
+    if (to) {
+      const d = new Date(to);
+      if (Number.isNaN(d.getTime())) throw new BadRequestException("to invalid");
+      atRange.lt = d;
+    }
+    if (atRange.gte || atRange.lt) where.at = atRange;
 
     const PAGE_SIZE = 20;
     const rows = await this.prisma.usageEvent.findMany({

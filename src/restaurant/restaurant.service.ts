@@ -47,6 +47,7 @@ interface RestaurantInput {
   address?: string | null;
   x?: string | null;
   y?: string | null;
+  googlePlaceId?: string | null;
   phone?: string | null;
   instagram?: string | null;
   whatsapp?: string | null;
@@ -68,7 +69,7 @@ interface RestaurantInput {
 
 const FIELDS: (keyof RestaurantInput)[] = [
   "title", "subtitle", "description", "slug", "currency", "source", "backgroundType",
-  "accentColor", "address", "x", "y", "phone", "instagram", "whatsapp", "languages",
+  "accentColor", "address", "x", "y", "googlePlaceId", "phone", "instagram", "whatsapp", "languages",
   "defaultLanguage", "hideTitle", "reservationsEnabled", "reservationMode",
   "reservationSlotMinutes", "workingHoursStart", "workingHoursEnd",
   "reservationSchedule", "ordersEnabled",

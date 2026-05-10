@@ -120,6 +120,19 @@ export class ItemsService {
     await this.prisma.item.delete({ where: { id } });
   }
 
+  async reorderBulk(companyId: string, items: { id: string; sortOrder: number }[]) {
+    if (!Array.isArray(items) || items.length === 0) return { ok: true };
+    await this.prisma.$transaction(
+      items.map((it) =>
+        this.prisma.item.updateMany({
+          where: { id: it.id, companyId },
+          data: { sortOrder: it.sortOrder },
+        }),
+      ),
+    );
+    return { ok: true };
+  }
+
   async reorder(companyId: string, itemId: string, direction: "up" | "down") {
     const item = await this.prisma.item.findFirst({ where: { id: itemId, companyId } });
     if (!item) throw new NotFoundException();

@@ -56,6 +56,14 @@ export class ItemsController {
     return this.svc.reorder((req as AuthedRequest).authUser.companyId, body.itemId, body.direction);
   }
 
+  @Post("reorder-bulk")
+  reorderBulk(
+    @Req() req: Request,
+    @Body() body: { items: { id: string; sortOrder: number }[] },
+  ) {
+    return this.svc.reorderBulk((req as AuthedRequest).authUser.companyId, body.items);
+  }
+
   @Post("generate-image")
   async generateImage(
     @Req() req: Request,

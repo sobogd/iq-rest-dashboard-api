@@ -59,6 +59,9 @@ export class AdminController {
     const DAY_MS = 24 * 60 * 60 * 1000;
     const upper30d = new Date(todayUtc.getTime() + DAY_MS);
     const startOf30d = new Date(upper30d.getTime() - 30 * DAY_MS);
+    const startOf45d = new Date(upper30d.getTime() - 45 * DAY_MS);
+    const startOf60d = new Date(upper30d.getTime() - 60 * DAY_MS);
+    const startOf85d = new Date(upper30d.getTime() - 85 * DAY_MS);
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
     const companies = await this.prisma.company.findMany({
@@ -74,7 +77,7 @@ export class AdminController {
     });
 
     const ids = companies.map((c) => c.id);
-    const [monthly, today, lastVisits] = ids.length
+    const [monthly, today, d45, d60, d85, lastVisits] = ids.length
       ? await Promise.all([
           this.prisma.$queryRaw<{ companyId: string; count: bigint }[]>`
             SELECT "companyId", COUNT(DISTINCT "sessionId") AS count
@@ -91,6 +94,30 @@ export class AdminController {
               AND "createdAt" >= ${startOfDay}
             GROUP BY "companyId"
           `,
+          this.prisma.$queryRaw<{ companyId: string; count: bigint }[]>`
+            SELECT "companyId", COUNT(DISTINCT "sessionId") AS count
+            FROM page_views
+            WHERE "companyId" = ANY(${ids}::text[])
+              AND "createdAt" >= ${startOf45d}
+              AND "createdAt" < ${upper30d}
+            GROUP BY "companyId"
+          `,
+          this.prisma.$queryRaw<{ companyId: string; count: bigint }[]>`
+            SELECT "companyId", COUNT(DISTINCT "sessionId") AS count
+            FROM page_views
+            WHERE "companyId" = ANY(${ids}::text[])
+              AND "createdAt" >= ${startOf60d}
+              AND "createdAt" < ${upper30d}
+            GROUP BY "companyId"
+          `,
+          this.prisma.$queryRaw<{ companyId: string; count: bigint }[]>`
+            SELECT "companyId", COUNT(DISTINCT "sessionId") AS count
+            FROM page_views
+            WHERE "companyId" = ANY(${ids}::text[])
+              AND "createdAt" >= ${startOf85d}
+              AND "createdAt" < ${upper30d}
+            GROUP BY "companyId"
+          `,
           this.prisma.$queryRaw<{ companyId: string; last: Date | null }[]>`
             SELECT "companyId", MAX(at) AS last
             FROM usage_events
@@ -98,9 +125,12 @@ export class AdminController {
             GROUP BY "companyId"
           `,
         ])
-      : [[], [], []];
+      : [[], [], [], [], [], []];
     const monthlyMap = new Map(monthly.map((r) => [r.companyId, Number(r.count)]));
     const todayMap = new Map(today.map((r) => [r.companyId, Number(r.count)]));
+    const d45Map = new Map(d45.map((r) => [r.companyId, Number(r.count)]));
+    const d60Map = new Map(d60.map((r) => [r.companyId, Number(r.count)]));
+    const d85Map = new Map(d85.map((r) => [r.companyId, Number(r.count)]));
     const lastVisitMap = new Map(lastVisits.map((r) => [r.companyId, r.last]));
 
     const items = companies.map((c) => ({
@@ -113,6 +143,9 @@ export class AdminController {
       messagesCount: c._count.supportMessages,
       monthlyViews: monthlyMap.get(c.id) || 0,
       todayScans: todayMap.get(c.id) || 0,
+      scans45d: d45Map.get(c.id) || 0,
+      scans60d: d60Map.get(c.id) || 0,
+      scans85d: d85Map.get(c.id) || 0,
       lastVisit: lastVisitMap.get(c.id)?.toISOString() ?? null,
       emailsSent: c.emailsSent,
       emailsSentCount:

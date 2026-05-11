@@ -501,6 +501,70 @@ export class AdminController {
     };
   }
 
+  @Get("usage/similar/:id")
+  async usageSimilar(@Param("id") id: string) {
+    const base = await this.prisma.usageEvent.findUnique({ where: { id } });
+    if (!base) throw new NotFoundException("Event not found");
+
+    const where: Prisma.UsageEventWhereInput = {
+      country: base.country,
+      device: base.device,
+      platform: base.platform,
+    };
+    if (base.ip) {
+      where.ip = base.ip;
+    } else {
+      where.region = base.region;
+      where.ip = null;
+    }
+
+    const rows = await this.prisma.usageEvent.findMany({
+      where,
+      orderBy: { at: "desc" },
+      take: 500,
+      select: {
+        id: true, at: true, event: true,
+        country: true, region: true, device: true, platform: true,
+        gclid: true, ad_params: true, companyId: true, ip: true,
+      },
+    });
+
+    const companyIds = Array.from(new Set(rows.map((r) => r.companyId).filter((x): x is string => !!x)));
+    const labels = new Map<string, string>();
+    if (companyIds.length) {
+      const companies = await this.prisma.company.findMany({
+        where: { id: { in: companyIds } },
+        select: {
+          id: true,
+          restaurants: { select: { title: true }, take: 1, orderBy: { createdAt: "asc" } },
+          users: { select: { user: { select: { email: true } } }, take: 1, orderBy: { createdAt: "asc" } },
+        },
+      });
+      for (const c of companies) {
+        const label = c.restaurants[0]?.title?.trim() || c.users[0]?.user.email || c.id;
+        labels.set(c.id, label);
+      }
+    }
+
+    return {
+      total: rows.length,
+      events: rows.map((r) => ({
+        id: r.id,
+        at: r.at.toISOString(),
+        event: r.event,
+        country: r.country,
+        region: r.region,
+        device: r.device,
+        platform: r.platform,
+        gclid: r.gclid,
+        adParams: r.ad_params,
+        companyId: r.companyId,
+        companyLabel: r.companyId ? labels.get(r.companyId) ?? null : null,
+        ip: r.ip,
+      })),
+    };
+  }
+
   // ────────────────── BULK EVENT ACTIONS ──────────────────
 
   @Post("usage/events/delete")

@@ -354,6 +354,7 @@ model UsageEvent {
   gclid     String?  // SSR-only — landing page on gclid arrival
   ad_params String?  // JSON: { kw, term, campaign } from ValueTrack params
   companyId String?  // server-side from iqr_session cookie when logged in
+  ip        String?  // anonymized client IP (IPv4 last octet zeroed, IPv6 truncated to /64)
 
   @@index([at])
   @@index([event, at])

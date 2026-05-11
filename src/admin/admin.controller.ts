@@ -448,6 +448,7 @@ export class AdminController {
         gclid: true,
         ad_params: true,
         companyId: true,
+        ip: true,
       },
     });
 
@@ -495,6 +496,7 @@ export class AdminController {
         adParams: r.ad_params,
         companyId: r.companyId,
         companyLabel: r.companyId ? labels.get(r.companyId) ?? null : null,
+        ip: r.ip,
       })),
     };
   }

@@ -42,6 +42,19 @@ function decodeCity(raw: string | null): string | null {
   try { return decodeURIComponent(raw); } catch { return raw; }
 }
 
+function anonymizeIp(raw: string | null): string | null {
+  if (!raw) return null;
+  const ip = raw.trim().split(",")[0]?.trim();
+  if (!ip) return null;
+  if (ip.includes(":")) {
+    const parts = ip.split(":").filter((p) => p.length > 0);
+    return parts.slice(0, 4).join(":") + "::";
+  }
+  const oct = ip.split(".");
+  if (oct.length !== 4) return null;
+  return `${oct[0]}.${oct[1]}.${oct[2]}.0`;
+}
+
 function classifyDevice(uaString: string | null): { device: string | null; platform: string | null } {
   if (!uaString) return { device: null, platform: null };
   try {
@@ -112,6 +125,9 @@ export class UsageController {
     const uaString = body.userAgent || headerStr(req, "user-agent");
     const { device, platform } = classifyDevice(uaString);
 
+    // Anonymized client IP (last IPv4 octet zeroed, IPv6 truncated to /64)
+    const ip = anonymizeIp(headerStr(req, "cf-connecting-ip") || headerStr(req, "x-forwarded-for"));
+
     // Skip events from admin impersonation — admin browsing as client must
     // not pollute target's metrics nor surface as anonymous traffic.
     if (
@@ -146,6 +162,7 @@ export class UsageController {
         platform,
         gclid,
         companyId,
+        ip,
       },
     });
   }

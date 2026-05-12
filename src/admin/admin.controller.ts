@@ -1047,7 +1047,7 @@ export class AdminController {
     const STATUS_MAP: Record<string, "ENABLED" | "PAUSED"> = { ENABLED: "ENABLED", PAUSED: "PAUSED" };
     const MT_LABEL: Record<string, string> = { EXACT: "E", PHRASE: "P", BROAD: "B" };
 
-    const [campRows, allCampRows, agRows, allAgRows, adRows, kwRows, negCampRows, negAgRows, tlRows, assetRows, stRows] = await Promise.all([
+    const [campRows, allCampRows, agRows, allAgRows, adRows, kwRows, negCampRows, negAgRows, tlRows, assetRows, stRows, targetingRows] = await Promise.all([
       search(`SELECT campaign.id, campaign.name, campaign.status, campaign_budget.amount_micros, campaign_budget.explicitly_shared, metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros FROM campaign WHERE campaign.status != 'REMOVED' AND segments.date DURING ${dateDuring}`),
       search(`SELECT campaign.id, campaign.name, campaign.status, campaign_budget.amount_micros, campaign_budget.explicitly_shared FROM campaign WHERE campaign.status != 'REMOVED'`),
       search(`SELECT ad_group.id, ad_group.name, ad_group.status, ad_group.final_url_suffix, campaign.id, metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros FROM ad_group WHERE ad_group.status != 'REMOVED' AND campaign.status != 'REMOVED' AND segments.date DURING ${dateDuring}`),
@@ -1059,7 +1059,57 @@ export class AdminController {
       search(`SELECT segments.date${filterDateRange !== "last7days" ? ", segments.hour" : ""}, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions FROM campaign WHERE segments.date DURING ${dateDuring} AND metrics.impressions > 0`),
       search(`SELECT campaign.id, asset.id, asset.type, asset.name, asset.sitelink_asset.link_text, asset.sitelink_asset.description1, asset.sitelink_asset.description2, campaign_asset.field_type, campaign_asset.status FROM campaign_asset WHERE campaign_asset.status = 'ENABLED'`),
       search(`SELECT ad_group.id, search_term_view.search_term, search_term_view.status, segments.keyword.info.text, segments.keyword.info.match_type, metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros FROM search_term_view WHERE segments.date DURING ${dateDuring}`),
+      search(`SELECT campaign.id, campaign_criterion.type, campaign_criterion.location.geo_target_constant, campaign_criterion.language.language_constant, campaign_criterion.negative FROM campaign_criterion WHERE campaign.status != 'REMOVED' AND campaign_criterion.status != 'REMOVED'`),
     ]);
+
+    // Resolve campaign targeting (geo + language) with display names — single round-trip per type
+    const campaignTargeting: Record<string, { geos: Array<{ name: string; code: string | null }>; languages: Array<{ name: string; code: string | null }> }> = {};
+    {
+      const geoSet = new Set<string>();
+      const langSet = new Set<string>();
+      const byCamp: Record<string, { geoRes: string[]; langRes: string[] }> = {};
+      for (const r of targetingRows as any[]) {
+        const c = r.campaignCriterion;
+        const cId = String(r.campaign?.id ?? "");
+        if (!c || !cId || c.negative === true) continue;
+        const slot = byCamp[cId] ?? (byCamp[cId] = { geoRes: [], langRes: [] });
+        if (c.type === "LOCATION" && c.location?.geoTargetConstant) {
+          slot.geoRes.push(c.location.geoTargetConstant);
+          geoSet.add(c.location.geoTargetConstant);
+        } else if (c.type === "LANGUAGE" && c.language?.languageConstant) {
+          slot.langRes.push(c.language.languageConstant);
+          langSet.add(c.language.languageConstant);
+        }
+      }
+      const geoMap: Record<string, { name: string; code: string | null }> = {};
+      const langMap: Record<string, { name: string; code: string | null }> = {};
+      if (geoSet.size) {
+        const inList = Array.from(geoSet).map((g) => `'${g}'`).join(",");
+        const rows = await search(`SELECT geo_target_constant.resource_name, geo_target_constant.name, geo_target_constant.country_code FROM geo_target_constant WHERE geo_target_constant.resource_name IN (${inList})`);
+        for (const r of rows as any[]) {
+          const g = r.geoTargetConstant;
+          if (!g?.resourceName) continue;
+          geoMap[g.resourceName] = { name: g.name ?? g.resourceName, code: g.countryCode ?? null };
+        }
+      }
+      if (langSet.size) {
+        const ids = Array.from(langSet).map((l) => l.split("/")[1]).filter(Boolean).join(",");
+        if (ids) {
+          const rows = await search(`SELECT language_constant.resource_name, language_constant.name, language_constant.code FROM language_constant WHERE language_constant.id IN (${ids})`);
+          for (const r of rows as any[]) {
+            const l = r.languageConstant;
+            if (!l?.resourceName) continue;
+            langMap[l.resourceName] = { name: l.name ?? l.resourceName, code: l.code ?? null };
+          }
+        }
+      }
+      for (const [cId, slot] of Object.entries(byCamp)) {
+        campaignTargeting[cId] = {
+          geos: slot.geoRes.map((g) => geoMap[g]).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name)),
+          languages: slot.langRes.map((l) => langMap[l]).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name)),
+        };
+      }
+    }
 
     const stByAdGroup: Record<string, any[]> = {};
     {
@@ -1269,7 +1319,7 @@ export class AdminController {
       campaignAssets[cId] = a;
     }
 
-    return { campaigns, adGroups, ads, keywords, negatives, timeline, campaignAssets, searchTermsByAdGroup: stByAdGroup };
+    return { campaigns, adGroups, ads, keywords, negatives, timeline, campaignAssets, campaignTargeting, searchTermsByAdGroup: stByAdGroup };
   }
 
   /** Detail endpoints — pull max fields for modal display. Always fresh. */
@@ -1912,6 +1962,326 @@ export class AdminController {
       timeline,
       campaignAssets,
     };
+  }
+
+  /** Keyword Planner stats for an arbitrary phrase with explicit geo + language. */
+  @Get("google-ads/planner")
+  async planner(
+    @Query("phrase") phrase?: string,
+    @Query("geo") geo?: string,
+    @Query("language") language?: string,
+  ) {
+    const phraseTrim = (phrase ?? "").trim();
+    if (!phraseTrim) throw new BadRequestException("phrase is required");
+    const geos = geo ? geo.split(",").map((s) => s.trim()).filter(Boolean) : [];
+    const lang = language && language.trim() ? language.trim() : null;
+
+    const idea = await this.fetchKeywordIdea(phraseTrim, geos, lang);
+    const metrics = idea?.keywordIdeaMetrics ?? null;
+
+    const MONTH_NUM: Record<string, number> = {
+      JANUARY: 1, FEBRUARY: 2, MARCH: 3, APRIL: 4, MAY: 5, JUNE: 6,
+      JULY: 7, AUGUST: 8, SEPTEMBER: 9, OCTOBER: 10, NOVEMBER: 11, DECEMBER: 12,
+    };
+    const rawVols: Array<{ year?: string; month?: string; monthlySearches?: string }> = metrics?.monthlySearchVolumes ?? [];
+    const vols = rawVols
+      .map((v) => ({
+        year: Number(v.year ?? 0),
+        monthName: v.month ?? "",
+        monthNum: MONTH_NUM[v.month ?? ""] ?? 0,
+        searches: Number(v.monthlySearches ?? 0),
+      }))
+      .filter((v) => v.year > 0 && v.monthNum > 0)
+      .sort((a, b) => (a.year - b.year) || (a.monthNum - b.monthNum));
+
+    let minMonth: typeof vols[number] | null = null;
+    let maxMonth: typeof vols[number] | null = null;
+    if (vols.length) {
+      minMonth = vols.reduce((a, b) => (a.searches <= b.searches ? a : b));
+      maxMonth = vols.reduce((a, b) => (a.searches >= b.searches ? a : b));
+    }
+
+    let yoyPct: number | null = null;
+    if (vols.length >= 12) {
+      const last3 = vols.slice(-3).reduce((s, v) => s + v.searches, 0);
+      const prev3 = vols.slice(-12, -9).reduce((s, v) => s + v.searches, 0);
+      if (prev3 > 0) yoyPct = ((last3 - prev3) / prev3) * 100;
+    }
+
+    return {
+      keyword: phraseTrim,
+      geoTargets: geos,
+      language: lang,
+      avgMonthlySearches: metrics?.avgMonthlySearches != null ? Number(metrics.avgMonthlySearches) : null,
+      competition: metrics?.competition ?? null,
+      competitionIndex: metrics?.competitionIndex != null ? Number(metrics.competitionIndex) : null,
+      lowTopOfPageBidMicros: metrics?.lowTopOfPageBidMicros != null ? Number(metrics.lowTopOfPageBidMicros) : null,
+      highTopOfPageBidMicros: metrics?.highTopOfPageBidMicros != null ? Number(metrics.highTopOfPageBidMicros) : null,
+      monthlySearchVolumes: vols,
+      minMonth,
+      maxMonth,
+      yoyPct,
+      foundExactMatch: idea ? (idea.text ?? "").toLowerCase() === phraseTrim.toLowerCase() : false,
+    };
+  }
+
+  /** Get manual sort order for keywords in an ad group. */
+  @Get("google-ads/keyword-sort/:adGroupId")
+  async getKeywordSort(@Param("adGroupId") adGroupId: string) {
+    const rows = await this.prisma.gadsKeywordSort.findMany({
+      where: { adGroupId },
+      select: { critId: true, sortIndex: true },
+      orderBy: { sortIndex: "asc" },
+    });
+    const map: Record<string, number> = {};
+    for (const r of rows) map[r.critId] = r.sortIndex;
+    return { map };
+  }
+
+  /** Save manual sort order for keywords in an ad group. */
+  @Post("google-ads/keyword-sort/:adGroupId")
+  @HttpCode(HttpStatus.OK)
+  async setKeywordSort(
+    @Param("adGroupId") adGroupId: string,
+    @Body() body: { order?: string[] },
+  ) {
+    const order = Array.isArray(body?.order) ? body.order : null;
+    if (!order) throw new BadRequestException("order array required");
+    await this.prisma.$transaction([
+      this.prisma.gadsKeywordSort.deleteMany({ where: { adGroupId } }),
+      ...order.map((critId, i) =>
+        this.prisma.gadsKeywordSort.create({
+          data: { id: `${adGroupId}:${critId}`, adGroupId, critId, sortIndex: i },
+        }),
+      ),
+    ]);
+    return { ok: true, count: order.length };
+  }
+
+  /** Add a new keyword to an ad group (or a campaign-level negative). */
+  @Post("google-ads/keyword/:adGroupId")
+  @HttpCode(HttpStatus.OK)
+  async addKeyword(
+    @Param("adGroupId") adGroupId: string,
+    @Body() body: { text?: string; matchType?: string; negative?: boolean },
+  ) {
+    const text = (body?.text ?? "").trim();
+    const matchType = (body?.matchType ?? "").trim().toUpperCase();
+    const negative = body?.negative === true;
+    if (!text) throw new BadRequestException("text is required");
+    if (!["EXACT", "PHRASE", "BROAD"].includes(matchType)) {
+      throw new BadRequestException("matchType must be EXACT, PHRASE or BROAD");
+    }
+    const clientId = this.config.get<string>("GOOGLE_ADS_CLIENT_ID");
+    const clientSecret = this.config.get<string>("GOOGLE_ADS_CLIENT_SECRET");
+    const refreshToken = this.config.get<string>("GOOGLE_ADS_REFRESH_TOKEN");
+    const developerToken = this.config.get<string>("GOOGLE_ADS_DEVELOPER_TOKEN");
+    const loginCustomerId = this.config.get<string>("GOOGLE_ADS_LOGIN_CUSTOMER_ID");
+    if (!clientId || !clientSecret || !refreshToken || !developerToken) {
+      throw new BadRequestException("Google Ads env vars not configured");
+    }
+    const oauth = new OAuth2Client(clientId, clientSecret);
+    oauth.setCredentials({ refresh_token: refreshToken });
+    const { token } = await oauth.getAccessToken();
+    const CUST = "6803239831";
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      "developer-token": developerToken,
+      ...(loginCustomerId ? { "login-customer-id": loginCustomerId } : {}),
+      "Content-Type": "application/json",
+    };
+
+    if (negative) {
+      const { search } = await this.gadsClient();
+      const [agRow] = await search(`SELECT campaign.id FROM ad_group WHERE ad_group.id = ${adGroupId}`);
+      const campaignId: string = agRow?.campaign?.id ?? "";
+      if (!campaignId) throw new NotFoundException("Campaign not found for ad group");
+      const res = await fetch(
+        `https://googleads.googleapis.com/v23/customers/${CUST}/campaignCriteria:mutate`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            operations: [{
+              create: {
+                campaign: `customers/${CUST}/campaigns/${campaignId}`,
+                negative: true,
+                keyword: { text, matchType },
+              },
+            }],
+          }),
+        },
+      );
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new BadRequestException(`Add negative failed: ${txt.slice(0, 500)}`);
+      }
+      const j = await res.json();
+      return { ok: true, scope: "campaign_negative", result: j };
+    }
+
+    const res = await fetch(
+      `https://googleads.googleapis.com/v23/customers/${CUST}/adGroupCriteria:mutate`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          operations: [{
+            create: {
+              adGroup: `customers/${CUST}/adGroups/${adGroupId}`,
+              status: "ENABLED",
+              keyword: { text, matchType },
+            },
+          }],
+        }),
+      },
+    );
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new BadRequestException(`Add keyword failed: ${txt.slice(0, 500)}`);
+    }
+    const j = await res.json();
+    return { ok: true, scope: "ad_group", result: j };
+  }
+
+  /** Delete a keyword (remove ad_group_criterion). */
+  @Delete("google-ads/keyword/:adGroupId/:critId")
+  async deleteKeyword(
+    @Param("adGroupId") adGroupId: string,
+    @Param("critId") critId: string,
+  ) {
+    const clientId = this.config.get<string>("GOOGLE_ADS_CLIENT_ID");
+    const clientSecret = this.config.get<string>("GOOGLE_ADS_CLIENT_SECRET");
+    const refreshToken = this.config.get<string>("GOOGLE_ADS_REFRESH_TOKEN");
+    const developerToken = this.config.get<string>("GOOGLE_ADS_DEVELOPER_TOKEN");
+    const loginCustomerId = this.config.get<string>("GOOGLE_ADS_LOGIN_CUSTOMER_ID");
+    if (!clientId || !clientSecret || !refreshToken || !developerToken) {
+      throw new BadRequestException("Google Ads env vars not configured");
+    }
+    const oauth = new OAuth2Client(clientId, clientSecret);
+    oauth.setCredentials({ refresh_token: refreshToken });
+    const { token } = await oauth.getAccessToken();
+    const CUST = "6803239831";
+    const resourceName = `customers/${CUST}/adGroupCriteria/${adGroupId}~${critId}`;
+    const res = await fetch(
+      `https://googleads.googleapis.com/v23/customers/${CUST}/adGroupCriteria:mutate`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "developer-token": developerToken,
+          ...(loginCustomerId ? { "login-customer-id": loginCustomerId } : {}),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ operations: [{ remove: resourceName }] }),
+      },
+    );
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new BadRequestException(`Delete keyword failed: ${txt.slice(0, 500)}`);
+    }
+    // Also clean up sort entry
+    await this.prisma.gadsKeywordSort.deleteMany({ where: { adGroupId, critId } }).catch(() => undefined);
+    return { ok: true };
+  }
+
+  /** Update a keyword's CPC bid. */
+  @Post("google-ads/keyword/:adGroupId/:critId/bid")
+  @HttpCode(HttpStatus.OK)
+  async updateKeywordBid(
+    @Param("adGroupId") adGroupId: string,
+    @Param("critId") critId: string,
+    @Body() body: { bidMicros?: number },
+  ) {
+    const bidMicros = Number(body?.bidMicros);
+    if (!Number.isFinite(bidMicros) || bidMicros <= 0) {
+      throw new BadRequestException("bidMicros must be positive number");
+    }
+    const clientId = this.config.get<string>("GOOGLE_ADS_CLIENT_ID");
+    const clientSecret = this.config.get<string>("GOOGLE_ADS_CLIENT_SECRET");
+    const refreshToken = this.config.get<string>("GOOGLE_ADS_REFRESH_TOKEN");
+    const developerToken = this.config.get<string>("GOOGLE_ADS_DEVELOPER_TOKEN");
+    const loginCustomerId = this.config.get<string>("GOOGLE_ADS_LOGIN_CUSTOMER_ID");
+    if (!clientId || !clientSecret || !refreshToken || !developerToken) {
+      throw new BadRequestException("Google Ads env vars not configured");
+    }
+    const oauth = new OAuth2Client(clientId, clientSecret);
+    oauth.setCredentials({ refresh_token: refreshToken });
+    const { token } = await oauth.getAccessToken();
+    const CUST = "6803239831";
+    const resourceName = `customers/${CUST}/adGroupCriteria/${adGroupId}~${critId}`;
+    const res = await fetch(
+      `https://googleads.googleapis.com/v23/customers/${CUST}/adGroupCriteria:mutate`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "developer-token": developerToken,
+          ...(loginCustomerId ? { "login-customer-id": loginCustomerId } : {}),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          operations: [{
+            updateMask: "cpc_bid_micros",
+            update: { resourceName, cpcBidMicros: Math.round(bidMicros) },
+          }],
+        }),
+      },
+    );
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new BadRequestException(`Bid update failed: ${txt.slice(0, 500)}`);
+    }
+    return { ok: true, bidMicros: Math.round(bidMicros) };
+  }
+
+  private async fetchKeywordIdea(
+    keyword: string,
+    geoTargets: string[],
+    language: string | null,
+  ): Promise<any | null> {
+    const clientId = this.config.get<string>("GOOGLE_ADS_CLIENT_ID");
+    const clientSecret = this.config.get<string>("GOOGLE_ADS_CLIENT_SECRET");
+    const refreshToken = this.config.get<string>("GOOGLE_ADS_REFRESH_TOKEN");
+    const developerToken = this.config.get<string>("GOOGLE_ADS_DEVELOPER_TOKEN");
+    const loginCustomerId = this.config.get<string>("GOOGLE_ADS_LOGIN_CUSTOMER_ID");
+    if (!clientId || !clientSecret || !refreshToken || !developerToken) {
+      throw new BadRequestException("Google Ads env vars not configured");
+    }
+    const oauth = new OAuth2Client(clientId, clientSecret);
+    oauth.setCredentials({ refresh_token: refreshToken });
+    const { token } = await oauth.getAccessToken();
+    const CUST = "6803239831";
+    const body: Record<string, unknown> = {
+      keywordPlanNetwork: "GOOGLE_SEARCH",
+      keywordSeed: { keywords: [keyword] },
+      includeAdultKeywords: false,
+      pageSize: 100,
+    };
+    if (geoTargets.length) body.geoTargetConstants = geoTargets;
+    if (language) body.language = language;
+
+    const res = await fetch(
+      `https://googleads.googleapis.com/v23/customers/${CUST}:generateKeywordIdeas`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "developer-token": developerToken,
+          ...(loginCustomerId ? { "login-customer-id": loginCustomerId } : {}),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      },
+    );
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new BadRequestException(`Keyword ideas failed: ${txt.slice(0, 500)}`);
+    }
+    const j = (await res.json()) as { results?: any[] };
+    const lower = keyword.toLowerCase();
+    const exact = (j.results ?? []).find((r) => (r.text ?? "").toLowerCase() === lower);
+    return exact ?? j.results?.[0] ?? null;
   }
 
 }

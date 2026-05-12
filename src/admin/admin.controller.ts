@@ -723,6 +723,25 @@ export class AdminController {
 
   // ────────────────── GOOGLE ADS ──────────────────
 
+  /** Berlin-date-anchored BETWEEN clause for GAQL.
+   *  today | yesterday | last7days | last30days — all include today (except yesterday). */
+  private dateRangeSql(range?: string): string {
+    const RANGES: Record<string, { startDaysAgo: number; endDaysAgo: number }> = {
+      today: { startDaysAgo: 0, endDaysAgo: 0 },
+      yesterday: { startDaysAgo: 1, endDaysAgo: 1 },
+      last7days: { startDaysAgo: 6, endDaysAgo: 0 },
+      last30days: { startDaysAgo: 29, endDaysAgo: 0 },
+    };
+    const r = RANGES[range ?? "today"] ?? RANGES.today;
+    // Berlin = UTC+2 in May 2026 (CEST). Shift now to Berlin to get correct calendar date.
+    const berlinNow = new Date(Date.now() + 2 * 60 * 60 * 1000);
+    const fmt = (offsetDays: number) => {
+      const d = new Date(berlinNow.getTime() - offsetDays * 24 * 60 * 60 * 1000);
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+    };
+    return `BETWEEN '${fmt(r.startDaysAgo)}' AND '${fmt(r.endDaysAgo)}'`;
+  }
+
   private async gadsClient() {
     const clientId = this.config.get<string>("GOOGLE_ADS_CLIENT_ID");
     const clientSecret = this.config.get<string>("GOOGLE_ADS_CLIENT_SECRET");
@@ -766,8 +785,7 @@ export class AdminController {
     @Query("status") filterStatus?: string,
     @Query("dateRange") filterDateRange?: string,
   ) {
-    const DATE_DURING: Record<string, string> = { today: "TODAY", yesterday: "YESTERDAY", last7days: "LAST_7_DAYS" };
-    const dateDuring = DATE_DURING[filterDateRange ?? "today"] ?? "TODAY";
+    const dateSql = this.dateRangeSql(filterDateRange);
     const { search } = await this.gadsClient();
     const STATUS_MAP: Record<string, "ENABLED" | "PAUSED"> = { ENABLED: "ENABLED", PAUSED: "PAUSED" };
 
@@ -775,7 +793,7 @@ export class AdminController {
     const campRows = await search(`
       SELECT campaign.id, campaign.name, campaign.status,
         metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros
-      FROM campaign WHERE campaign.status != 'REMOVED' AND segments.date DURING ${dateDuring}
+      FROM campaign WHERE campaign.status != 'REMOVED' AND segments.date ${dateSql}
     `);
     const campaigns: Array<any> = [];
     const seen = new Set<string>();
@@ -803,18 +821,17 @@ export class AdminController {
       campaigns.push({ id, name: String(r.campaign.name), status: st, impressions: 0, clicks: 0, conversions: 0, cost: 0 });
     }
 
-    // Timeline (aggregated across all campaigns)
-    const useHour = filterDateRange !== "last7days";
+    // Timeline (aggregated across all campaigns) — always grouped by hour-of-day,
+    // summed across the selected date range. 24 buckets, "00:00".."23:00".
     const tlRows = await search(`
-      SELECT segments.date${useHour ? ", segments.hour" : ""},
-        metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions
-      FROM campaign WHERE segments.date DURING ${dateDuring} AND metrics.impressions > 0
+      SELECT segments.hour, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions
+      FROM campaign WHERE segments.date ${dateSql} AND metrics.impressions > 0
     `);
     const tlMap = new Map<string, any>();
     for (const r of tlRows) {
-      const date = r.segments?.date;
       const hour = r.segments?.hour;
-      const time = useHour ? `${date} ${String(hour).padStart(2, "0")}:00` : String(date);
+      if (hour == null) continue;
+      const time = `${String(hour).padStart(2, "0")}:00`;
       const b = tlMap.get(time) ?? { time, impressions: 0, clicks: 0, conversions: 0, cost: 0 };
       b.impressions += Number(r.metrics?.impressions ?? 0);
       b.clicks += Number(r.metrics?.clicks ?? 0);
@@ -834,8 +851,7 @@ export class AdminController {
     @Query("status") filterStatus?: string,
     @Query("dateRange") filterDateRange?: string,
   ) {
-    const DATE_DURING: Record<string, string> = { today: "TODAY", yesterday: "YESTERDAY", last7days: "LAST_7_DAYS" };
-    const dateDuring = DATE_DURING[filterDateRange ?? "today"] ?? "TODAY";
+    const dateSql = this.dateRangeSql(filterDateRange);
     const { search } = await this.gadsClient();
     const STATUS_MAP: Record<string, "ENABLED" | "PAUSED"> = { ENABLED: "ENABLED", PAUSED: "PAUSED" };
 
@@ -847,7 +863,7 @@ export class AdminController {
       SELECT ad_group.id, ad_group.name, ad_group.status, ad_group.final_url_suffix,
         metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros
       FROM ad_group WHERE ad_group.status != 'REMOVED' AND campaign.id = ${campaignId}
-        AND segments.date DURING ${dateDuring}
+        AND segments.date ${dateSql}
     `);
     const seen = new Set<string>();
     const adGroups: any[] = [];
@@ -900,8 +916,7 @@ export class AdminController {
     @Query("status") filterStatus?: string,
     @Query("dateRange") filterDateRange?: string,
   ) {
-    const DATE_DURING: Record<string, string> = { today: "TODAY", yesterday: "YESTERDAY", last7days: "LAST_7_DAYS" };
-    const dateDuring = DATE_DURING[filterDateRange ?? "today"] ?? "TODAY";
+    const dateSql = this.dateRangeSql(filterDateRange);
     const { search } = await this.gadsClient();
     const STATUS_MAP: Record<string, "ENABLED" | "PAUSED"> = { ENABLED: "ENABLED", PAUSED: "PAUSED" };
     const MT_LABEL: Record<string, string> = { EXACT: "E", PHRASE: "P", BROAD: "B" };
@@ -927,7 +942,7 @@ export class AdminController {
         ad_group_criterion.final_urls, ad_group_criterion.final_url_suffix, ad_group_criterion.quality_info.quality_score,
         metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros
       FROM keyword_view WHERE ad_group.id = ${adGroupId} AND ad_group_criterion.status != 'REMOVED'
-        AND segments.date DURING ${dateDuring}
+        AND segments.date ${dateSql}
     `);
     const keywords: any[] = [];
     for (const r of kwRows) {
@@ -1061,26 +1076,81 @@ export class AdminController {
   async googleAdsAll(
     @Query("dateRange") filterDateRange?: string,
   ) {
-    const DATE_DURING: Record<string, string> = { today: "TODAY", yesterday: "YESTERDAY", last7days: "LAST_7_DAYS" };
-    const dateDuring = DATE_DURING[filterDateRange ?? "today"] ?? "TODAY";
+    const dateSql = this.dateRangeSql(filterDateRange);
     const { search } = await this.gadsClient();
     const STATUS_MAP: Record<string, "ENABLED" | "PAUSED"> = { ENABLED: "ENABLED", PAUSED: "PAUSED" };
     const MT_LABEL: Record<string, string> = { EXACT: "E", PHRASE: "P", BROAD: "B" };
 
-    const [campRows, allCampRows, agRows, allAgRows, adRows, kwRows, negCampRows, negAgRows, tlRows, assetRows, stRows, targetingRows] = await Promise.all([
-      search(`SELECT campaign.id, campaign.name, campaign.status, campaign_budget.amount_micros, campaign_budget.explicitly_shared, metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros FROM campaign WHERE campaign.status != 'REMOVED' AND segments.date DURING ${dateDuring}`),
+    const T2_ACTION = "customers/6803239831/conversionActions/7499129024";
+    const T3_ACTION = "customers/6803239831/conversionActions/7596477518";
+    const CONV_FILTER = `segments.conversion_action IN ('${T2_ACTION}','${T3_ACTION}')`;
+
+    const [campRows, allCampRows, agRows, allAgRows, adRows, kwRows, negCampRows, negAgRows, tlRows, assetRows, stRows, targetingRows, campConvRows, agConvRows, kwConvRows, stConvRows, tlConvRows] = await Promise.all([
+      search(`SELECT campaign.id, campaign.name, campaign.status, campaign_budget.amount_micros, campaign_budget.explicitly_shared, metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros FROM campaign WHERE campaign.status != 'REMOVED' AND segments.date ${dateSql}`),
       search(`SELECT campaign.id, campaign.name, campaign.status, campaign_budget.amount_micros, campaign_budget.explicitly_shared FROM campaign WHERE campaign.status != 'REMOVED'`),
-      search(`SELECT ad_group.id, ad_group.name, ad_group.status, ad_group.final_url_suffix, campaign.id, metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros FROM ad_group WHERE ad_group.status != 'REMOVED' AND campaign.status != 'REMOVED' AND segments.date DURING ${dateDuring}`),
+      search(`SELECT ad_group.id, ad_group.name, ad_group.status, ad_group.final_url_suffix, campaign.id, metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros FROM ad_group WHERE ad_group.status != 'REMOVED' AND campaign.status != 'REMOVED' AND segments.date ${dateSql}`),
       search(`SELECT ad_group.id, ad_group.name, ad_group.status, ad_group.final_url_suffix, campaign.id FROM ad_group WHERE ad_group.status != 'REMOVED' AND campaign.status != 'REMOVED'`),
       search(`SELECT ad_group_ad.ad.id, ad_group_ad.ad.final_urls, ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.ad.responsive_search_ad.descriptions, ad_group_ad.ad.responsive_search_ad.path1, ad_group_ad.ad.responsive_search_ad.path2, ad_group_ad.ad_strength, ad_group_ad.status, ad_group.id, campaign.id FROM ad_group_ad WHERE ad_group_ad.status != 'REMOVED' AND campaign.status != 'REMOVED'`),
-      search(`SELECT ad_group_criterion.criterion_id, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.status, ad_group_criterion.cpc_bid_micros, ad_group_criterion.effective_cpc_bid_micros, ad_group_criterion.final_urls, ad_group_criterion.quality_info.quality_score, ad_group.id, campaign.id, metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros FROM keyword_view WHERE ad_group_criterion.status != 'REMOVED' AND campaign.status != 'REMOVED' AND segments.date DURING ${dateDuring}`),
+      search(`SELECT ad_group_criterion.criterion_id, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.status, ad_group_criterion.cpc_bid_micros, ad_group_criterion.effective_cpc_bid_micros, ad_group_criterion.final_urls, ad_group_criterion.quality_info.quality_score, ad_group.id, campaign.id, metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros FROM keyword_view WHERE ad_group_criterion.status != 'REMOVED' AND campaign.status != 'REMOVED' AND segments.date ${dateSql}`),
       search(`SELECT campaign_criterion.criterion_id, campaign_criterion.keyword.text, campaign_criterion.keyword.match_type, campaign_criterion.status, campaign.id FROM campaign_criterion WHERE campaign_criterion.type = 'KEYWORD' AND campaign_criterion.negative = TRUE AND campaign_criterion.status != 'REMOVED' AND campaign.status != 'REMOVED'`),
       search(`SELECT ad_group_criterion.criterion_id, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.status, ad_group.id, ad_group.name, campaign.id FROM ad_group_criterion WHERE ad_group_criterion.type = 'KEYWORD' AND ad_group_criterion.negative = TRUE AND ad_group_criterion.status != 'REMOVED' AND campaign.status != 'REMOVED'`),
-      search(`SELECT segments.date${filterDateRange !== "last7days" ? ", segments.hour" : ""}, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions FROM campaign WHERE segments.date DURING ${dateDuring} AND metrics.impressions > 0`),
+      search(`SELECT segments.hour, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions FROM campaign WHERE segments.date ${dateSql} AND metrics.impressions > 0`),
       search(`SELECT campaign.id, asset.id, asset.type, asset.name, asset.sitelink_asset.link_text, asset.sitelink_asset.description1, asset.sitelink_asset.description2, campaign_asset.field_type, campaign_asset.status FROM campaign_asset WHERE campaign_asset.status = 'ENABLED'`),
-      search(`SELECT ad_group.id, search_term_view.search_term, search_term_view.status, segments.keyword.info.text, segments.keyword.info.match_type, metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros FROM search_term_view WHERE segments.date DURING ${dateDuring}`),
+      search(`SELECT ad_group.id, search_term_view.search_term, search_term_view.status, segments.keyword.info.text, segments.keyword.info.match_type, metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros FROM search_term_view WHERE segments.date ${dateSql}`),
       search(`SELECT campaign.id, campaign_criterion.type, campaign_criterion.location.geo_target_constant, campaign_criterion.language.language_constant, campaign_criterion.negative FROM campaign_criterion WHERE campaign.status != 'REMOVED' AND campaign_criterion.status != 'REMOVED'`),
+      search(`SELECT campaign.id, segments.conversion_action, metrics.conversions FROM campaign WHERE campaign.status != 'REMOVED' AND segments.date ${dateSql} AND ${CONV_FILTER}`),
+      search(`SELECT ad_group.id, segments.conversion_action, metrics.conversions FROM ad_group WHERE ad_group.status != 'REMOVED' AND campaign.status != 'REMOVED' AND segments.date ${dateSql} AND ${CONV_FILTER}`),
+      search(`SELECT ad_group_criterion.criterion_id, ad_group.id, segments.conversion_action, metrics.conversions FROM keyword_view WHERE ad_group_criterion.status != 'REMOVED' AND campaign.status != 'REMOVED' AND segments.date ${dateSql} AND ${CONV_FILTER}`),
+      search(`SELECT ad_group.id, search_term_view.search_term, segments.keyword.info.text, segments.keyword.info.match_type, segments.conversion_action, metrics.conversions FROM search_term_view WHERE segments.date ${dateSql} AND ${CONV_FILTER}`),
+      search(`SELECT segments.hour, segments.conversion_action, metrics.conversions FROM campaign WHERE segments.date ${dateSql} AND ${CONV_FILTER}`),
     ]);
+
+    // Build per-entity T2/T3 conversion breakdowns
+    const convByCampaign = new Map<string, { t2: number; t3: number }>();
+    for (const r of campConvRows) {
+      const cId = String(r.campaign?.id ?? "");
+      if (!cId) continue;
+      const action = r.segments?.conversionAction;
+      const v = Number(r.metrics?.conversions ?? 0);
+      const cur = convByCampaign.get(cId) ?? { t2: 0, t3: 0 };
+      if (action === T2_ACTION) cur.t2 += v;
+      else if (action === T3_ACTION) cur.t3 += v;
+      convByCampaign.set(cId, cur);
+    }
+    const convByAdGroup = new Map<string, { t2: number; t3: number }>();
+    for (const r of agConvRows) {
+      const agId = String(r.adGroup?.id ?? "");
+      if (!agId) continue;
+      const action = r.segments?.conversionAction;
+      const v = Number(r.metrics?.conversions ?? 0);
+      const cur = convByAdGroup.get(agId) ?? { t2: 0, t3: 0 };
+      if (action === T2_ACTION) cur.t2 += v;
+      else if (action === T3_ACTION) cur.t3 += v;
+      convByAdGroup.set(agId, cur);
+    }
+    const convByKeyword = new Map<string, { t2: number; t3: number }>();
+    for (const r of kwConvRows) {
+      const cId = String(r.adGroupCriterion?.criterionId ?? "");
+      if (!cId) continue;
+      const action = r.segments?.conversionAction;
+      const v = Number(r.metrics?.conversions ?? 0);
+      const cur = convByKeyword.get(cId) ?? { t2: 0, t3: 0 };
+      if (action === T2_ACTION) cur.t2 += v;
+      else if (action === T3_ACTION) cur.t3 += v;
+      convByKeyword.set(cId, cur);
+    }
+    const convBySt = new Map<string, { t2: number; t3: number }>();
+    for (const r of stConvRows) {
+      const agId = String(r.adGroup?.id ?? "");
+      if (!agId) continue;
+      const key = `${agId}|${r.searchTermView?.searchTerm ?? ""}|${r.segments?.keyword?.info?.text ?? ""}|${r.segments?.keyword?.info?.matchType ?? ""}`;
+      const action = r.segments?.conversionAction;
+      const v = Number(r.metrics?.conversions ?? 0);
+      const cur = convBySt.get(key) ?? { t2: 0, t3: 0 };
+      if (action === T2_ACTION) cur.t2 += v;
+      else if (action === T3_ACTION) cur.t3 += v;
+      convBySt.set(key, cur);
+    }
 
     // Resolve campaign targeting (geo + language) with display names — single round-trip per type
     const campaignTargeting: Record<string, { geos: Array<{ name: string; code: string | null }>; languages: Array<{ name: string; code: string | null }> }> = {};
@@ -1138,16 +1208,23 @@ export class AdminController {
       for (const r of stRows as any[]) {
         const agId = String(r.adGroup?.id ?? "");
         if (!agId) continue;
+        const term = r.searchTermView?.searchTerm ?? "";
+        const kwText = r.segments?.keyword?.info?.text ?? "";
+        const kwMt = r.segments?.keyword?.info?.matchType ?? "";
+        const key = `${agId}|${term}|${kwText}|${kwMt}`;
+        const conv = convBySt.get(key) ?? { t2: 0, t3: 0 };
         const arr = stByAdGroup[agId] ?? [];
         arr.push({
-          searchTerm: r.searchTermView?.searchTerm ?? "",
+          searchTerm: term,
           status: ST_LABEL[r.searchTermView?.status] ?? r.searchTermView?.status,
-          matchedKwText: r.segments?.keyword?.info?.text ?? "",
-          matchedKwMt: r.segments?.keyword?.info?.matchType ?? "",
-          matchedKeyword: `[${MT_LABEL[r.segments?.keyword?.info?.matchType] ?? "?"}] "${r.segments?.keyword?.info?.text ?? ""}"`,
+          matchedKwText: kwText,
+          matchedKwMt: kwMt,
+          matchedKeyword: `[${MT_LABEL[kwMt] ?? "?"}] "${kwText}"`,
           impressions: Number(r.metrics?.impressions ?? 0),
           clicks: Number(r.metrics?.clicks ?? 0),
           conversions: Number(r.metrics?.conversions ?? 0),
+          convT2: conv.t2,
+          convT3: conv.t3,
           cost: Number(r.metrics?.costMicros ?? 0) / 1e6,
         });
         stByAdGroup[agId] = arr;
@@ -1166,6 +1243,7 @@ export class AdminController {
       if (!st) continue;
       const m = r.metrics ?? {};
       const cb = r.campaignBudget ?? {};
+      const conv = convByCampaign.get(id) ?? { t2: 0, t3: 0 };
       campaigns.push({
         id, name: String(r.campaign.name), status: st,
         budget: cb.amountMicros ? Number(cb.amountMicros) / 1e6 : undefined,
@@ -1173,6 +1251,8 @@ export class AdminController {
         impressions: Number(m.impressions ?? 0),
         clicks: Number(m.clicks ?? 0),
         conversions: Number(m.conversions ?? 0),
+        convT2: conv.t2,
+        convT3: conv.t3,
         cost: Number(m.costMicros ?? 0) / 1e6,
       });
       seen.add(id);
@@ -1187,7 +1267,7 @@ export class AdminController {
         id, name: String(r.campaign.name), status: st,
         budget: cb.amountMicros ? Number(cb.amountMicros) / 1e6 : undefined,
         budgetShared: Boolean(cb.explicitlyShared),
-        impressions: 0, clicks: 0, conversions: 0, cost: 0,
+        impressions: 0, clicks: 0, conversions: 0, convT2: 0, convT3: 0, cost: 0,
       });
     }
 
@@ -1198,16 +1278,20 @@ export class AdminController {
       const st = STATUS_MAP[r.adGroup.status];
       if (!st) continue;
       const m = r.metrics ?? {};
+      const agId = String(r.adGroup.id);
+      const conv = convByAdGroup.get(agId) ?? { t2: 0, t3: 0 };
       adGroups.push({
-        id: String(r.adGroup.id), name: String(r.adGroup.name), status: st,
+        id: agId, name: String(r.adGroup.name), status: st,
         campaignId: String(r.campaign.id),
         suffix: r.adGroup.finalUrlSuffix || undefined,
         impressions: Number(m.impressions ?? 0),
         clicks: Number(m.clicks ?? 0),
         conversions: Number(m.conversions ?? 0),
+        convT2: conv.t2,
+        convT3: conv.t3,
         cost: Number(m.costMicros ?? 0) / 1e6,
       });
-      agSeen.add(String(r.adGroup.id));
+      agSeen.add(agId);
     }
     for (const r of allAgRows) {
       const id = String(r.adGroup.id);
@@ -1218,7 +1302,7 @@ export class AdminController {
         id, name: String(r.adGroup.name), status: st,
         campaignId: String(r.campaign.id),
         suffix: r.adGroup.finalUrlSuffix || undefined,
-        impressions: 0, clicks: 0, conversions: 0, cost: 0,
+        impressions: 0, clicks: 0, conversions: 0, convT2: 0, convT3: 0, cost: 0,
       });
     }
 
@@ -1252,8 +1336,10 @@ export class AdminController {
       const m = r.metrics ?? {};
       const bidMicros = r.adGroupCriterion.cpcBidMicros ?? r.adGroupCriterion.effectiveCpcBidMicros;
       const qs = r.adGroupCriterion.qualityInfo?.qualityScore;
+      const kwId = String(r.adGroupCriterion.criterionId);
+      const conv = convByKeyword.get(kwId) ?? { t2: 0, t3: 0 };
       keywords.push({
-        id: String(r.adGroupCriterion.criterionId),
+        id: kwId,
         title: `[${mt}] "${r.adGroupCriterion.keyword.text}"`,
         text: r.adGroupCriterion.keyword.text,
         matchType: r.adGroupCriterion.keyword.matchType,
@@ -1263,6 +1349,8 @@ export class AdminController {
         impressions: Number(m.impressions ?? 0),
         clicks: Number(m.clicks ?? 0),
         conversions: Number(m.conversions ?? 0),
+        convT2: conv.t2,
+        convT3: conv.t3,
         cost: Number(m.costMicros ?? 0) / 1e6,
         qualityScore: typeof qs === "number" ? qs : undefined,
         bid: bidMicros ? Number(bidMicros) / 1e6 : undefined,
@@ -1301,18 +1389,28 @@ export class AdminController {
       });
     }
 
-    // Timeline
-    const useHour = filterDateRange !== "last7days";
+    // Timeline — hour-of-day aggregation summed across date range.
     const tlMap = new Map<string, any>();
     for (const r of tlRows) {
-      const date = r.segments?.date;
       const hour = r.segments?.hour;
-      const time = useHour ? `${date} ${String(hour).padStart(2, "0")}:00` : String(date);
-      const b = tlMap.get(time) ?? { time, impressions: 0, clicks: 0, conversions: 0, cost: 0 };
+      if (hour == null) continue;
+      const time = `${String(hour).padStart(2, "0")}:00`;
+      const b = tlMap.get(time) ?? { time, impressions: 0, clicks: 0, conversions: 0, convT2: 0, convT3: 0, cost: 0 };
       b.impressions += Number(r.metrics?.impressions ?? 0);
       b.clicks += Number(r.metrics?.clicks ?? 0);
       b.conversions += Number(r.metrics?.conversions ?? 0);
       b.cost += Number(r.metrics?.costMicros ?? 0) / 1e6;
+      tlMap.set(time, b);
+    }
+    for (const r of tlConvRows) {
+      const hour = r.segments?.hour;
+      if (hour == null) continue;
+      const time = `${String(hour).padStart(2, "0")}:00`;
+      const action = r.segments?.conversionAction;
+      const v = Number(r.metrics?.conversions ?? 0);
+      const b = tlMap.get(time) ?? { time, impressions: 0, clicks: 0, conversions: 0, convT2: 0, convT3: 0, cost: 0 };
+      if (action === T2_ACTION) b.convT2 += v;
+      else if (action === T3_ACTION) b.convT3 += v;
       tlMap.set(time, b);
     }
     const timeline = Array.from(tlMap.values()).sort((a, b) => (a.time > b.time ? -1 : 1));
@@ -1466,8 +1564,7 @@ export class AdminController {
     @Param("critId") critId: string,
     @Query("dateRange") filterDateRange?: string,
   ) {
-    const DATE_DURING: Record<string, string> = { today: "TODAY", yesterday: "YESTERDAY", last7days: "LAST_7_DAYS" };
-    const dateDuring = DATE_DURING[filterDateRange ?? "today"] ?? "TODAY";
+    const dateSql = this.dateRangeSql(filterDateRange);
     const { search } = await this.gadsClient();
     // search_term_view filtered by ad_group + matched keyword criterion
     const rows = await search(`
@@ -1479,7 +1576,7 @@ export class AdminController {
         metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros
       FROM search_term_view
       WHERE ad_group.id = ${adGroupId}
-        AND segments.date DURING ${dateDuring}
+        AND segments.date ${dateSql}
     `);
     const MT_LABEL: Record<string, string> = { EXACT: "E", PHRASE: "P", BROAD: "B" };
     const ST_LABEL: Record<string, string> = { ADDED: "added", EXCLUDED: "excluded", NONE: "none", ADDED_EXCLUDED: "added_excluded", UNKNOWN: "unknown" };
@@ -1514,8 +1611,7 @@ export class AdminController {
     @Param("adGroupId") adGroupId: string,
     @Query("dateRange") filterDateRange?: string,
   ) {
-    const DATE_DURING: Record<string, string> = { today: "TODAY", yesterday: "YESTERDAY", last7days: "LAST_7_DAYS" };
-    const dateDuring = DATE_DURING[filterDateRange ?? "today"] ?? "TODAY";
+    const dateSql = this.dateRangeSql(filterDateRange);
     const { search } = await this.gadsClient();
     const rows = await search(`
       SELECT
@@ -1526,7 +1622,7 @@ export class AdminController {
         metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros
       FROM search_term_view
       WHERE ad_group.id = ${adGroupId}
-        AND segments.date DURING ${dateDuring}
+        AND segments.date ${dateSql}
     `);
     const MT_LABEL: Record<string, string> = { EXACT: "E", PHRASE: "P", BROAD: "B" };
     const ST_LABEL: Record<string, string> = { ADDED: "added", EXCLUDED: "excluded", NONE: "none", ADDED_EXCLUDED: "added_excluded", UNKNOWN: "unknown" };
@@ -1551,12 +1647,7 @@ export class AdminController {
     @Query("type") filterType?: string,
     @Query("dateRange") filterDateRange?: string,
   ) {
-    const DATE_DURING: Record<string, string> = {
-      today: "TODAY",
-      yesterday: "YESTERDAY",
-      last7days: "LAST_7_DAYS",
-    };
-    const dateDuring = DATE_DURING[filterDateRange ?? "today"] ?? "TODAY";
+    const dateSql = this.dateRangeSql(filterDateRange);
     const clientId = this.config.get<string>("GOOGLE_ADS_CLIENT_ID");
     const clientSecret = this.config.get<string>("GOOGLE_ADS_CLIENT_SECRET");
     const refreshToken = this.config.get<string>("GOOGLE_ADS_REFRESH_TOKEN");
@@ -1611,7 +1702,7 @@ export class AdminController {
         metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros
       FROM campaign
       WHERE campaign.status != 'REMOVED'
-        AND segments.date DURING ${dateDuring}
+        AND segments.date ${dateSql}
     `);
     type CampMetrics = { impressions: number; clicks: number; conversions: number; cost: number };
     const campaigns: Array<{ id: string; name: string; status: "ENABLED" | "PAUSED"; metrics: CampMetrics }> = [];
@@ -1664,7 +1755,7 @@ export class AdminController {
         metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros
       FROM ad_group
       WHERE ad_group.status != 'REMOVED' AND campaign.status != 'REMOVED'
-        AND segments.date DURING ${dateDuring}
+        AND segments.date ${dateSql}
     `);
 
     // 3) Ads (RSA only) — full details
@@ -1705,7 +1796,7 @@ export class AdminController {
       FROM keyword_view
       WHERE ad_group_criterion.status != 'REMOVED'
         AND campaign.status != 'REMOVED'
-        AND segments.date DURING ${dateDuring}
+        AND segments.date ${dateSql}
     `);
 
     // 5) Negatives — campaign-level
@@ -1907,7 +1998,7 @@ export class AdminController {
         segments.date${useHour ? ", segments.hour" : ""},
         metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions
       FROM campaign
-      WHERE segments.date DURING ${dateDuring}
+      WHERE segments.date ${dateSql}
         AND metrics.impressions > 0
     `);
 

@@ -179,8 +179,7 @@ export class AdminController {
 
     const menuOrigin = process.env.PUBLIC_MENU_URL || "https://iq-rest.com";
 
-    // Most-recent gclid across this company's usage events — drives conversion
-    // upload buttons in the admin company-detail UI.
+    // Saved gclid drives conversion upload UI. Last usage event gclid suggested as fallback.
     const lastGclidEvent = await this.prisma.usageEvent.findFirst({
       where: { companyId: id, gclid: { not: null } },
       orderBy: { at: "desc" },
@@ -191,7 +190,8 @@ export class AdminController {
       id: company.id,
       name: company.name,
       createdAt: company.createdAt,
-      gclid: lastGclidEvent?.gclid ?? null,
+      googleClickId: company.googleClickId,
+      suggestedGclid: lastGclidEvent?.gclid ?? null,
       plan: company.plan,
       subscriptionStatus: company.subscriptionStatus,
       billingCycle: company.billingCycle,
@@ -629,19 +629,37 @@ export class AdminController {
 
   // ────────────────── CONVERSION UPLOAD ──────────────────
 
-  @Post("usage/upload-conversion")
+  /** Set/update gclid linked to a company. */
+  @Post("companies/:id/gclid")
   @HttpCode(HttpStatus.OK)
-  async uploadConversion(@Body() body: { gclid?: string; type?: string }) {
-    const { gclid, type } = body;
+  async setCompanyGclid(@Param("id") id: string, @Body() body: { gclid?: string }) {
+    const gclid = (body?.gclid ?? "").trim();
     if (!gclid) throw new BadRequestException("gclid required");
+    const company = await this.prisma.company.findUnique({ where: { id }, select: { id: true } });
+    if (!company) throw new NotFoundException("Company not found");
+    await this.prisma.company.update({ where: { id }, data: { googleClickId: gclid } });
+    return { ok: true, googleClickId: gclid };
+  }
 
+  /** Send a conversion (T2 registration or T3 purchase) using company's saved gclid. */
+  @Post("companies/:id/send-conversion")
+  @HttpCode(HttpStatus.OK)
+  async sendCompanyConversion(@Param("id") id: string, @Body() body: { type?: string }) {
+    const type = (body?.type ?? "").trim().toUpperCase();
     const CONVERSIONS: Record<string, { id: string }> = {
-      T1: { id: "7596477974" },
-      T2: { id: "7499129024" },
-      T3: { id: "7596477518" },
+      T2: { id: "7499129024" }, // registration
+      T3: { id: "7596477518" }, // purchase
     };
-    const conv = CONVERSIONS[type ?? ""];
-    if (!conv) throw new BadRequestException("type must be T1, T2 or T3");
+    const conv = CONVERSIONS[type];
+    if (!conv) throw new BadRequestException("type must be T2 or T3");
+
+    const company = await this.prisma.company.findUnique({
+      where: { id },
+      select: { id: true, googleClickId: true },
+    });
+    if (!company) throw new NotFoundException("Company not found");
+    const gclid = company.googleClickId;
+    if (!gclid) throw new BadRequestException("Company has no linked gclid");
 
     const clientId = this.config.get<string>("GOOGLE_ADS_CLIENT_ID")!;
     const clientSecret = this.config.get<string>("GOOGLE_ADS_CLIENT_SECRET")!;

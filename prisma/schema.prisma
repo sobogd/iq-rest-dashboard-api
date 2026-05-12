@@ -86,6 +86,9 @@ model Company {
   // Admin
   reminderSentAt DateTime?
 
+  // Google Ads — gclid linked to this company for conversion uploads
+  googleClickId String?
+
   users           UserCompany[]
   categories      Category[]
   items           Item[]

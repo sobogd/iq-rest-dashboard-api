@@ -443,6 +443,7 @@ export class AdminController {
     @Query("cursor") cursor?: string,
     @Query("from") from?: string,
     @Query("to") to?: string,
+    @Query("sort") sort?: "asc" | "desc",
   ) {
     const where: Prisma.UsageEventWhereInput = {};
     if (companyId) {
@@ -467,9 +468,10 @@ export class AdminController {
     if (atRange.gte || atRange.lt) where.at = atRange;
 
     const PAGE_SIZE = 20;
+    const dir: "asc" | "desc" = sort === "asc" ? "asc" : "desc";
     const rows = await this.prisma.usageEvent.findMany({
       where,
-      orderBy: [{ at: "desc" }, { id: "desc" }],
+      orderBy: [{ at: dir }, { id: dir }],
       take: PAGE_SIZE,
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       select: {

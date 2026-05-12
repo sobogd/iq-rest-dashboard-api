@@ -401,18 +401,6 @@ model GoogleAdsExclusion {
   @@map("google_ads_exclusions")
 }
 
-model GadsKeywordSort {
-  id        String   @id // "{adGroupId}:{critId}"
-  adGroupId String
-  critId    String
-  sortIndex Int
-  updatedAt DateTime @updatedAt
-  createdAt DateTime @default(now())
-
-  @@unique([adGroupId, critId])
-  @@index([adGroupId, sortIndex])
-  @@map("gads_keyword_sort")
-}
 
 // Multi-currency pricing for Stripe
 model CurrencyPrice {

@@ -2045,49 +2045,20 @@ export class AdminController {
     };
   }
 
-  /** Get manual sort order for keywords in an ad group. */
-  @Get("google-ads/keyword-sort/:adGroupId")
-  async getKeywordSort(@Param("adGroupId") adGroupId: string) {
-    const rows = await this.prisma.gadsKeywordSort.findMany({
-      where: { adGroupId },
-      select: { critId: true, sortIndex: true },
-      orderBy: { sortIndex: "asc" },
-    });
-    const map: Record<string, number> = {};
-    for (const r of rows) map[r.critId] = r.sortIndex;
-    return { map };
-  }
-
-  /** Save manual sort order for keywords in an ad group. */
-  @Post("google-ads/keyword-sort/:adGroupId")
-  @HttpCode(HttpStatus.OK)
-  async setKeywordSort(
-    @Param("adGroupId") adGroupId: string,
-    @Body() body: { order?: string[] },
-  ) {
-    const order = Array.isArray(body?.order) ? body.order : null;
-    if (!order) throw new BadRequestException("order array required");
-    await this.prisma.$transaction([
-      this.prisma.gadsKeywordSort.deleteMany({ where: { adGroupId } }),
-      ...order.map((critId, i) =>
-        this.prisma.gadsKeywordSort.create({
-          data: { id: `${adGroupId}:${critId}`, adGroupId, critId, sortIndex: i },
-        }),
-      ),
-    ]);
-    return { ok: true, count: order.length };
-  }
-
   /** Add a new keyword to an ad group (or a campaign-level negative). */
   @Post("google-ads/keyword/:adGroupId")
   @HttpCode(HttpStatus.OK)
   async addKeyword(
     @Param("adGroupId") adGroupId: string,
-    @Body() body: { text?: string; matchType?: string; negative?: boolean },
+    @Body() body: { text?: string; matchType?: string; negative?: boolean; bidMicros?: number },
   ) {
     const text = (body?.text ?? "").trim();
     const matchType = (body?.matchType ?? "").trim().toUpperCase();
     const negative = body?.negative === true;
+    const bidMicrosRaw = body?.bidMicros;
+    const bidMicros = typeof bidMicrosRaw === "number" && Number.isFinite(bidMicrosRaw) && bidMicrosRaw > 0
+      ? Math.round(bidMicrosRaw)
+      : null;
     if (!text) throw new BadRequestException("text is required");
     if (!["EXACT", "PHRASE", "BROAD"].includes(matchType)) {
       throw new BadRequestException("matchType must be EXACT, PHRASE or BROAD");
@@ -2140,20 +2111,18 @@ export class AdminController {
       return { ok: true, scope: "campaign_negative", result: j };
     }
 
+    const create: Record<string, unknown> = {
+      adGroup: `customers/${CUST}/adGroups/${adGroupId}`,
+      status: "ENABLED",
+      keyword: { text, matchType },
+    };
+    if (bidMicros != null) create.cpcBidMicros = bidMicros;
     const res = await fetch(
       `https://googleads.googleapis.com/v23/customers/${CUST}/adGroupCriteria:mutate`,
       {
         method: "POST",
         headers,
-        body: JSON.stringify({
-          operations: [{
-            create: {
-              adGroup: `customers/${CUST}/adGroups/${adGroupId}`,
-              status: "ENABLED",
-              keyword: { text, matchType },
-            },
-          }],
-        }),
+        body: JSON.stringify({ operations: [{ create }] }),
       },
     );
     if (!res.ok) {
@@ -2200,8 +2169,6 @@ export class AdminController {
       const txt = await res.text();
       throw new BadRequestException(`Delete keyword failed: ${txt.slice(0, 500)}`);
     }
-    // Also clean up sort entry
-    await this.prisma.gadsKeywordSort.deleteMany({ where: { adGroupId, critId } }).catch(() => undefined);
     return { ok: true };
   }
 

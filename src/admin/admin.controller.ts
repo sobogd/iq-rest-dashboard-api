@@ -1097,7 +1097,7 @@ export class AdminController {
       search(`SELECT ad_group_criterion.criterion_id, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.status, ad_group.id, ad_group.name, campaign.id FROM ad_group_criterion WHERE ad_group_criterion.type = 'KEYWORD' AND ad_group_criterion.negative = TRUE AND ad_group_criterion.status != 'REMOVED' AND campaign.status != 'REMOVED'`),
       search(`SELECT segments.hour, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions FROM campaign WHERE segments.date ${dateSql} AND metrics.impressions > 0`),
       search(`SELECT campaign.id, asset.id, asset.type, asset.name, asset.sitelink_asset.link_text, asset.sitelink_asset.description1, asset.sitelink_asset.description2, campaign_asset.field_type, campaign_asset.status FROM campaign_asset WHERE campaign_asset.status = 'ENABLED'`),
-      search(`SELECT ad_group.id, asset.id, asset.type, asset.sitelink_asset.link_text, asset.sitelink_asset.description1, asset.sitelink_asset.description2, asset.final_urls, ad_group_asset.field_type, ad_group_asset.status FROM ad_group_asset WHERE ad_group_asset.status = 'ENABLED' AND ad_group_asset.field_type = 'SITELINK'`),
+      search(`SELECT ad_group.id, asset.id, asset.type, asset.sitelink_asset.link_text, asset.sitelink_asset.description1, asset.sitelink_asset.description2, asset.callout_asset.callout_text, asset.final_urls, ad_group_asset.field_type, ad_group_asset.status FROM ad_group_asset WHERE ad_group_asset.status = 'ENABLED' AND ad_group_asset.field_type IN ('SITELINK', 'CALLOUT')`),
       search(`SELECT ad_group.id, search_term_view.search_term, search_term_view.status, segments.keyword.info.text, segments.keyword.info.match_type, metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros FROM search_term_view WHERE segments.date ${dateSql}`),
       search(`SELECT campaign.id, campaign_criterion.type, campaign_criterion.location.geo_target_constant, campaign_criterion.language.language_constant, campaign_criterion.negative FROM campaign_criterion WHERE campaign.status != 'REMOVED' AND campaign_criterion.status != 'REMOVED'`),
       search(`SELECT campaign.id, segments.conversion_action, metrics.conversions FROM campaign WHERE campaign.status != 'REMOVED' AND segments.date ${dateSql} AND ${CONV_FILTER}`),
@@ -1441,23 +1441,32 @@ export class AdminController {
       campaignAssets[cId] = a;
     }
 
-    // Ad-group-level sitelink assets — keyed by adGroupId.
+    // Ad-group-level assets — keyed by adGroupId, split by field type.
     const adGroupSitelinks: Record<string, Array<{ assetId: string; text: string; desc1?: string; desc2?: string; url: string }>> = {};
+    const adGroupCallouts: Record<string, Array<{ assetId: string; text: string }>> = {};
     for (const r of agAssetRows as any[]) {
       const agId = String(r.adGroup?.id ?? "");
       const a = r.asset;
       const aga = r.adGroupAsset;
-      if (!agId || !a || aga?.fieldType !== "SITELINK") continue;
-      const arr = adGroupSitelinks[agId] ?? (adGroupSitelinks[agId] = []);
-      arr.push({
-        assetId: String(a.id),
-        text: String(a.sitelinkAsset?.linkText ?? ""),
-        desc1: a.sitelinkAsset?.description1 ? String(a.sitelinkAsset.description1) : undefined,
-        desc2: a.sitelinkAsset?.description2 ? String(a.sitelinkAsset.description2) : undefined,
-        url: String((a.finalUrls ?? [])[0] ?? ""),
-      });
+      if (!agId || !a) continue;
+      if (aga?.fieldType === "SITELINK") {
+        const arr = adGroupSitelinks[agId] ?? (adGroupSitelinks[agId] = []);
+        arr.push({
+          assetId: String(a.id),
+          text: String(a.sitelinkAsset?.linkText ?? ""),
+          desc1: a.sitelinkAsset?.description1 ? String(a.sitelinkAsset.description1) : undefined,
+          desc2: a.sitelinkAsset?.description2 ? String(a.sitelinkAsset.description2) : undefined,
+          url: String((a.finalUrls ?? [])[0] ?? ""),
+        });
+      } else if (aga?.fieldType === "CALLOUT") {
+        const arr = adGroupCallouts[agId] ?? (adGroupCallouts[agId] = []);
+        arr.push({
+          assetId: String(a.id),
+          text: String(a.calloutAsset?.calloutText ?? ""),
+        });
+      }
     }
-    return { campaigns, adGroups, ads, keywords, negatives, timeline, campaignAssets, campaignTargeting, searchTermsByAdGroup: stByAdGroup, adGroupSitelinks };
+    return { campaigns, adGroups, ads, keywords, negatives, timeline, campaignAssets, campaignTargeting, searchTermsByAdGroup: stByAdGroup, adGroupSitelinks, adGroupCallouts };
   }
 
   /** Detail endpoints — pull max fields for modal display. Always fresh. */
@@ -2790,6 +2799,145 @@ export class AdminController {
       );
     } catch {
       // best-effort cleanup, don't fail if the asset can't be removed
+    }
+    return { ok: true };
+  }
+
+  /**
+   * Create a callout asset and attach it to the given ad group.
+   * Body: { calloutText }
+   */
+  @Post("google-ads/ad-group/:adGroupId/callout")
+  @HttpCode(HttpStatus.OK)
+  async createAdGroupCallout(
+    @Param("adGroupId") adGroupId: string,
+    @Body() body: { calloutText?: string },
+  ) {
+    const cleanId = String(adGroupId).trim();
+    if (!/^\d+$/.test(cleanId)) throw new BadRequestException("adGroupId must be numeric");
+    const calloutText = (body?.calloutText ?? "").trim();
+    if (!calloutText) throw new BadRequestException("calloutText required");
+    if (calloutText.length > 25) throw new BadRequestException("calloutText max 25 chars");
+    const clientId = this.config.get<string>("GOOGLE_ADS_CLIENT_ID");
+    const clientSecret = this.config.get<string>("GOOGLE_ADS_CLIENT_SECRET");
+    const refreshToken = this.config.get<string>("GOOGLE_ADS_REFRESH_TOKEN");
+    const developerToken = this.config.get<string>("GOOGLE_ADS_DEVELOPER_TOKEN");
+    const loginCustomerId = this.config.get<string>("GOOGLE_ADS_LOGIN_CUSTOMER_ID");
+    if (!clientId || !clientSecret || !refreshToken || !developerToken) {
+      throw new BadRequestException("Google Ads env vars not configured");
+    }
+    const oauth = new OAuth2Client(clientId, clientSecret);
+    oauth.setCredentials({ refresh_token: refreshToken });
+    const { token } = await oauth.getAccessToken();
+    if (!token) throw new BadRequestException("Failed to obtain OAuth token");
+    const CUST = "6803239831";
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      "developer-token": developerToken,
+      ...(loginCustomerId ? { "login-customer-id": loginCustomerId } : {}),
+      "Content-Type": "application/json",
+    };
+    // 1. Create callout asset.
+    const assetRes = await fetch(
+      `https://googleads.googleapis.com/v23/customers/${CUST}/assets:mutate`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          operations: [{ create: { calloutAsset: { calloutText } } }],
+        }),
+      },
+    );
+    if (!assetRes.ok) {
+      const txt = await assetRes.text();
+      throw new BadRequestException(`Callout asset create failed: ${txt.slice(0, 500)}`);
+    }
+    const assetJson = (await assetRes.json()) as { results?: Array<{ resourceName?: string }> };
+    const assetResource = assetJson.results?.[0]?.resourceName ?? "";
+    const assetId = assetResource.split("/").pop() ?? "";
+    // 2. Attach to ad-group.
+    const linkRes = await fetch(
+      `https://googleads.googleapis.com/v23/customers/${CUST}/adGroupAssets:mutate`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          operations: [{
+            create: {
+              adGroup: `customers/${CUST}/adGroups/${cleanId}`,
+              asset: assetResource,
+              fieldType: "CALLOUT",
+            },
+          }],
+        }),
+      },
+    );
+    if (!linkRes.ok) {
+      const txt = await linkRes.text();
+      throw new BadRequestException(`Callout attach failed: ${txt.slice(0, 500)}`);
+    }
+    return { ok: true, assetId };
+  }
+
+  /** Detach + delete a callout asset from an ad group. */
+  @Delete("google-ads/ad-group/:adGroupId/callout/:assetId")
+  @HttpCode(HttpStatus.OK)
+  async deleteAdGroupCallout(
+    @Param("adGroupId") adGroupId: string,
+    @Param("assetId") assetId: string,
+  ) {
+    const cleanAg = String(adGroupId).trim();
+    const cleanAsset = String(assetId).trim();
+    if (!/^\d+$/.test(cleanAg)) throw new BadRequestException("adGroupId must be numeric");
+    if (!/^\d+$/.test(cleanAsset)) throw new BadRequestException("assetId must be numeric");
+    const clientId = this.config.get<string>("GOOGLE_ADS_CLIENT_ID");
+    const clientSecret = this.config.get<string>("GOOGLE_ADS_CLIENT_SECRET");
+    const refreshToken = this.config.get<string>("GOOGLE_ADS_REFRESH_TOKEN");
+    const developerToken = this.config.get<string>("GOOGLE_ADS_DEVELOPER_TOKEN");
+    const loginCustomerId = this.config.get<string>("GOOGLE_ADS_LOGIN_CUSTOMER_ID");
+    if (!clientId || !clientSecret || !refreshToken || !developerToken) {
+      throw new BadRequestException("Google Ads env vars not configured");
+    }
+    const oauth = new OAuth2Client(clientId, clientSecret);
+    oauth.setCredentials({ refresh_token: refreshToken });
+    const { token } = await oauth.getAccessToken();
+    if (!token) throw new BadRequestException("Failed to obtain OAuth token");
+    const CUST = "6803239831";
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      "developer-token": developerToken,
+      ...(loginCustomerId ? { "login-customer-id": loginCustomerId } : {}),
+      "Content-Type": "application/json",
+    };
+    const linkRes = await fetch(
+      `https://googleads.googleapis.com/v23/customers/${CUST}/adGroupAssets:mutate`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          operations: [{
+            remove: `customers/${CUST}/adGroupAssets/${cleanAg}~${cleanAsset}~CALLOUT`,
+          }],
+        }),
+      },
+    );
+    if (!linkRes.ok) {
+      const txt = await linkRes.text();
+      throw new BadRequestException(`Callout detach failed: ${txt.slice(0, 500)}`);
+    }
+    try {
+      await fetch(
+        `https://googleads.googleapis.com/v23/customers/${CUST}/assets:mutate`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            operations: [{ remove: `customers/${CUST}/assets/${cleanAsset}` }],
+          }),
+        },
+      );
+    } catch {
+      // best-effort
     }
     return { ok: true };
   }

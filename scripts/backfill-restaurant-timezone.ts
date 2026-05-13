@@ -34,8 +34,10 @@ async function main() {
   let lookupFailed = 0;
 
   for (const r of rows) {
-    const lat = parseCoord(r.x);
-    const lon = parseCoord(r.y);
+    // Restaurant.x stores longitude, Restaurant.y stores latitude (Cartesian
+    // convention used by the dashboard map picker).
+    const lat = parseCoord(r.y);
+    const lon = parseCoord(r.x);
     if (lat === null || lon === null) {
       noCoords++;
       console.log(`  [skip ] ${r.id} (${r.title}) — no coords`);

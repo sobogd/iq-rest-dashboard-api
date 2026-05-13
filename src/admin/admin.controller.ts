@@ -1097,7 +1097,7 @@ export class AdminController {
       search(`SELECT ad_group_criterion.criterion_id, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.status, ad_group.id, ad_group.name, campaign.id FROM ad_group_criterion WHERE ad_group_criterion.type = 'KEYWORD' AND ad_group_criterion.negative = TRUE AND ad_group_criterion.status != 'REMOVED' AND campaign.status != 'REMOVED'`),
       search(`SELECT segments.hour, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions FROM campaign WHERE segments.date ${dateSql} AND metrics.impressions > 0`),
       search(`SELECT campaign.id, asset.id, asset.type, asset.name, asset.sitelink_asset.link_text, asset.sitelink_asset.description1, asset.sitelink_asset.description2, campaign_asset.field_type, campaign_asset.status FROM campaign_asset WHERE campaign_asset.status = 'ENABLED'`),
-      search(`SELECT ad_group.id, asset.id, asset.type, asset.sitelink_asset.link_text, asset.sitelink_asset.description1, asset.sitelink_asset.description2, asset.callout_asset.callout_text, asset.final_urls, ad_group_asset.field_type, ad_group_asset.status FROM ad_group_asset WHERE ad_group_asset.status = 'ENABLED' AND ad_group_asset.field_type IN ('SITELINK', 'CALLOUT')`),
+      search(`SELECT ad_group.id, asset.id, asset.type, asset.sitelink_asset.link_text, asset.sitelink_asset.description1, asset.sitelink_asset.description2, asset.callout_asset.callout_text, asset.structured_snippet_asset.header, asset.structured_snippet_asset.values, asset.image_asset.full_size.url_640, asset.image_asset.full_size.width_pixels, asset.image_asset.full_size.height_pixels, asset.final_urls, ad_group_asset.field_type, ad_group_asset.status FROM ad_group_asset WHERE ad_group_asset.status = 'ENABLED' AND ad_group_asset.field_type IN ('SITELINK', 'CALLOUT', 'STRUCTURED_SNIPPET', 'MARKETING_IMAGE', 'SQUARE_MARKETING_IMAGE', 'LOGO', 'LANDSCAPE_LOGO')`),
       search(`SELECT ad_group.id, search_term_view.search_term, search_term_view.status, segments.keyword.info.text, segments.keyword.info.match_type, metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros FROM search_term_view WHERE segments.date ${dateSql}`),
       search(`SELECT campaign.id, campaign_criterion.type, campaign_criterion.location.geo_target_constant, campaign_criterion.language.language_constant, campaign_criterion.negative FROM campaign_criterion WHERE campaign.status != 'REMOVED' AND campaign_criterion.status != 'REMOVED'`),
       search(`SELECT campaign.id, segments.conversion_action, metrics.conversions FROM campaign WHERE campaign.status != 'REMOVED' AND segments.date ${dateSql} AND ${CONV_FILTER}`),
@@ -1444,6 +1444,9 @@ export class AdminController {
     // Ad-group-level assets — keyed by adGroupId, split by field type.
     const adGroupSitelinks: Record<string, Array<{ assetId: string; text: string; desc1?: string; desc2?: string; url: string }>> = {};
     const adGroupCallouts: Record<string, Array<{ assetId: string; text: string }>> = {};
+    const adGroupSnippets: Record<string, Array<{ assetId: string; header: string; values: string[] }>> = {};
+    const adGroupImages: Record<string, Array<{ assetId: string; fieldType: string; url?: string; width?: number; height?: number }>> = {};
+    const IMAGE_FIELD_TYPES = new Set(["MARKETING_IMAGE", "SQUARE_MARKETING_IMAGE", "LOGO", "LANDSCAPE_LOGO"]);
     for (const r of agAssetRows as any[]) {
       const agId = String(r.adGroup?.id ?? "");
       const a = r.asset;
@@ -1464,9 +1467,25 @@ export class AdminController {
           assetId: String(a.id),
           text: String(a.calloutAsset?.calloutText ?? ""),
         });
+      } else if (aga?.fieldType === "STRUCTURED_SNIPPET") {
+        const arr = adGroupSnippets[agId] ?? (adGroupSnippets[agId] = []);
+        arr.push({
+          assetId: String(a.id),
+          header: String(a.structuredSnippetAsset?.header ?? ""),
+          values: Array.isArray(a.structuredSnippetAsset?.values) ? (a.structuredSnippetAsset.values as unknown[]).map((v) => String(v)) : [],
+        });
+      } else if (IMAGE_FIELD_TYPES.has(aga?.fieldType)) {
+        const arr = adGroupImages[agId] ?? (adGroupImages[agId] = []);
+        arr.push({
+          assetId: String(a.id),
+          fieldType: String(aga.fieldType),
+          url: a.imageAsset?.fullSize?.url_640 ? String(a.imageAsset.fullSize.url_640) : undefined,
+          width: a.imageAsset?.fullSize?.widthPixels ? Number(a.imageAsset.fullSize.widthPixels) : undefined,
+          height: a.imageAsset?.fullSize?.heightPixels ? Number(a.imageAsset.fullSize.heightPixels) : undefined,
+        });
       }
     }
-    return { campaigns, adGroups, ads, keywords, negatives, timeline, campaignAssets, campaignTargeting, searchTermsByAdGroup: stByAdGroup, adGroupSitelinks, adGroupCallouts };
+    return { campaigns, adGroups, ads, keywords, negatives, timeline, campaignAssets, campaignTargeting, searchTermsByAdGroup: stByAdGroup, adGroupSitelinks, adGroupCallouts, adGroupSnippets, adGroupImages };
   }
 
   /** Detail endpoints — pull max fields for modal display. Always fresh. */
@@ -2939,6 +2958,301 @@ export class AdminController {
     } catch {
       // best-effort
     }
+    return { ok: true };
+  }
+
+  /**
+   * Create a structured-snippet asset and attach it to the given ad group.
+   * Body: { header, values: string[] }
+   * header must be a Google Ads SnippetHeader enum value (e.g. TYPES,
+   * STYLES, SERVICE_CATALOG, BRANDS, MODELS, AMENITIES, COURSES, ...).
+   */
+  @Post("google-ads/ad-group/:adGroupId/snippet")
+  @HttpCode(HttpStatus.OK)
+  async createAdGroupSnippet(
+    @Param("adGroupId") adGroupId: string,
+    @Body() body: { header?: string; values?: string[] },
+  ) {
+    const cleanId = String(adGroupId).trim();
+    if (!/^\d+$/.test(cleanId)) throw new BadRequestException("adGroupId must be numeric");
+    const VALID_HEADERS = new Set([
+      "AMENITIES", "BRANDS", "COURSES", "DEGREE_PROGRAMS", "DESTINATIONS",
+      "FEATURED_HOTELS", "INSURANCE_COVERAGE", "MODELS", "NEIGHBORHOODS",
+      "SERVICE_CATALOG", "SHOW_TYPES", "STYLES", "TYPES",
+    ]);
+    const header = String(body?.header ?? "").trim().toUpperCase();
+    if (!VALID_HEADERS.has(header)) {
+      throw new BadRequestException(`header must be one of: ${[...VALID_HEADERS].join(", ")}`);
+    }
+    const valuesRaw = Array.isArray(body?.values) ? body.values : [];
+    const values = valuesRaw
+      .map((v) => String(v ?? "").trim())
+      .filter((v) => v.length > 0 && v.length <= 25);
+    if (values.length < 3 || values.length > 10) {
+      throw new BadRequestException(`values must be 3-10 strings ≤25 chars (got ${values.length})`);
+    }
+    const clientId = this.config.get<string>("GOOGLE_ADS_CLIENT_ID");
+    const clientSecret = this.config.get<string>("GOOGLE_ADS_CLIENT_SECRET");
+    const refreshToken = this.config.get<string>("GOOGLE_ADS_REFRESH_TOKEN");
+    const developerToken = this.config.get<string>("GOOGLE_ADS_DEVELOPER_TOKEN");
+    const loginCustomerId = this.config.get<string>("GOOGLE_ADS_LOGIN_CUSTOMER_ID");
+    if (!clientId || !clientSecret || !refreshToken || !developerToken) {
+      throw new BadRequestException("Google Ads env vars not configured");
+    }
+    const oauth = new OAuth2Client(clientId, clientSecret);
+    oauth.setCredentials({ refresh_token: refreshToken });
+    const { token } = await oauth.getAccessToken();
+    if (!token) throw new BadRequestException("Failed to obtain OAuth token");
+    const CUST = "6803239831";
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      "developer-token": developerToken,
+      ...(loginCustomerId ? { "login-customer-id": loginCustomerId } : {}),
+      "Content-Type": "application/json",
+    };
+    const assetRes = await fetch(
+      `https://googleads.googleapis.com/v23/customers/${CUST}/assets:mutate`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          operations: [{ create: { structuredSnippetAsset: { header, values } } }],
+        }),
+      },
+    );
+    if (!assetRes.ok) {
+      const txt = await assetRes.text();
+      throw new BadRequestException(`Snippet asset create failed: ${txt.slice(0, 500)}`);
+    }
+    const assetJson = (await assetRes.json()) as { results?: Array<{ resourceName?: string }> };
+    const assetResource = assetJson.results?.[0]?.resourceName ?? "";
+    const assetId = assetResource.split("/").pop() ?? "";
+    const linkRes = await fetch(
+      `https://googleads.googleapis.com/v23/customers/${CUST}/adGroupAssets:mutate`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          operations: [{
+            create: {
+              adGroup: `customers/${CUST}/adGroups/${cleanId}`,
+              asset: assetResource,
+              fieldType: "STRUCTURED_SNIPPET",
+            },
+          }],
+        }),
+      },
+    );
+    if (!linkRes.ok) {
+      const txt = await linkRes.text();
+      throw new BadRequestException(`Snippet attach failed: ${txt.slice(0, 500)}`);
+    }
+    return { ok: true, assetId };
+  }
+
+  /** Detach + delete a structured-snippet asset from an ad group. */
+  @Delete("google-ads/ad-group/:adGroupId/snippet/:assetId")
+  @HttpCode(HttpStatus.OK)
+  async deleteAdGroupSnippet(
+    @Param("adGroupId") adGroupId: string,
+    @Param("assetId") assetId: string,
+  ) {
+    const cleanAg = String(adGroupId).trim();
+    const cleanAsset = String(assetId).trim();
+    if (!/^\d+$/.test(cleanAg)) throw new BadRequestException("adGroupId must be numeric");
+    if (!/^\d+$/.test(cleanAsset)) throw new BadRequestException("assetId must be numeric");
+    const clientId = this.config.get<string>("GOOGLE_ADS_CLIENT_ID");
+    const clientSecret = this.config.get<string>("GOOGLE_ADS_CLIENT_SECRET");
+    const refreshToken = this.config.get<string>("GOOGLE_ADS_REFRESH_TOKEN");
+    const developerToken = this.config.get<string>("GOOGLE_ADS_DEVELOPER_TOKEN");
+    const loginCustomerId = this.config.get<string>("GOOGLE_ADS_LOGIN_CUSTOMER_ID");
+    if (!clientId || !clientSecret || !refreshToken || !developerToken) {
+      throw new BadRequestException("Google Ads env vars not configured");
+    }
+    const oauth = new OAuth2Client(clientId, clientSecret);
+    oauth.setCredentials({ refresh_token: refreshToken });
+    const { token } = await oauth.getAccessToken();
+    if (!token) throw new BadRequestException("Failed to obtain OAuth token");
+    const CUST = "6803239831";
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      "developer-token": developerToken,
+      ...(loginCustomerId ? { "login-customer-id": loginCustomerId } : {}),
+      "Content-Type": "application/json",
+    };
+    const linkRes = await fetch(
+      `https://googleads.googleapis.com/v23/customers/${CUST}/adGroupAssets:mutate`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          operations: [{
+            remove: `customers/${CUST}/adGroupAssets/${cleanAg}~${cleanAsset}~STRUCTURED_SNIPPET`,
+          }],
+        }),
+      },
+    );
+    if (!linkRes.ok) {
+      const txt = await linkRes.text();
+      throw new BadRequestException(`Snippet detach failed: ${txt.slice(0, 500)}`);
+    }
+    try {
+      await fetch(
+        `https://googleads.googleapis.com/v23/customers/${CUST}/assets:mutate`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            operations: [{ remove: `customers/${CUST}/assets/${cleanAsset}` }],
+          }),
+        },
+      );
+    } catch {
+      // best-effort
+    }
+    return { ok: true };
+  }
+
+  /**
+   * Upload an image asset (base64-encoded) and attach it to the given ad group.
+   * Body: { data: base64, fieldType: "MARKETING_IMAGE" | "SQUARE_MARKETING_IMAGE" | "LOGO" | "LANDSCAPE_LOGO" }
+   */
+  @Post("google-ads/ad-group/:adGroupId/image")
+  @HttpCode(HttpStatus.OK)
+  async createAdGroupImage(
+    @Param("adGroupId") adGroupId: string,
+    @Body() body: { data?: string; fieldType?: string; name?: string },
+  ) {
+    const cleanId = String(adGroupId).trim();
+    if (!/^\d+$/.test(cleanId)) throw new BadRequestException("adGroupId must be numeric");
+    const VALID_FIELDS = new Set(["MARKETING_IMAGE", "SQUARE_MARKETING_IMAGE", "LOGO", "LANDSCAPE_LOGO"]);
+    const fieldType = String(body?.fieldType ?? "").trim().toUpperCase();
+    if (!VALID_FIELDS.has(fieldType)) {
+      throw new BadRequestException(`fieldType must be one of: ${[...VALID_FIELDS].join(", ")}`);
+    }
+    const data = String(body?.data ?? "").trim();
+    if (!data) throw new BadRequestException("data (base64) required");
+    // 5 MB cap (Google's per-asset limit is 5120 KB).
+    if (data.length > 7 * 1024 * 1024) {
+      throw new BadRequestException("image too large (max ~5 MB)");
+    }
+    const name = (body?.name ?? `image-${Date.now()}`).slice(0, 100);
+    const clientId = this.config.get<string>("GOOGLE_ADS_CLIENT_ID");
+    const clientSecret = this.config.get<string>("GOOGLE_ADS_CLIENT_SECRET");
+    const refreshToken = this.config.get<string>("GOOGLE_ADS_REFRESH_TOKEN");
+    const developerToken = this.config.get<string>("GOOGLE_ADS_DEVELOPER_TOKEN");
+    const loginCustomerId = this.config.get<string>("GOOGLE_ADS_LOGIN_CUSTOMER_ID");
+    if (!clientId || !clientSecret || !refreshToken || !developerToken) {
+      throw new BadRequestException("Google Ads env vars not configured");
+    }
+    const oauth = new OAuth2Client(clientId, clientSecret);
+    oauth.setCredentials({ refresh_token: refreshToken });
+    const { token } = await oauth.getAccessToken();
+    if (!token) throw new BadRequestException("Failed to obtain OAuth token");
+    const CUST = "6803239831";
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      "developer-token": developerToken,
+      ...(loginCustomerId ? { "login-customer-id": loginCustomerId } : {}),
+      "Content-Type": "application/json",
+    };
+    const assetRes = await fetch(
+      `https://googleads.googleapis.com/v23/customers/${CUST}/assets:mutate`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          operations: [{
+            create: {
+              name,
+              type: "IMAGE",
+              imageAsset: { data },
+            },
+          }],
+        }),
+      },
+    );
+    if (!assetRes.ok) {
+      const txt = await assetRes.text();
+      throw new BadRequestException(`Image asset upload failed: ${txt.slice(0, 500)}`);
+    }
+    const assetJson = (await assetRes.json()) as { results?: Array<{ resourceName?: string }> };
+    const assetResource = assetJson.results?.[0]?.resourceName ?? "";
+    const assetId = assetResource.split("/").pop() ?? "";
+    const linkRes = await fetch(
+      `https://googleads.googleapis.com/v23/customers/${CUST}/adGroupAssets:mutate`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          operations: [{
+            create: {
+              adGroup: `customers/${CUST}/adGroups/${cleanId}`,
+              asset: assetResource,
+              fieldType,
+            },
+          }],
+        }),
+      },
+    );
+    if (!linkRes.ok) {
+      const txt = await linkRes.text();
+      throw new BadRequestException(`Image attach failed: ${txt.slice(0, 500)}`);
+    }
+    return { ok: true, assetId };
+  }
+
+  /** Detach an image asset from an ad group. Asset is left in the account (it may be referenced elsewhere). */
+  @Delete("google-ads/ad-group/:adGroupId/image/:assetId/:fieldType")
+  @HttpCode(HttpStatus.OK)
+  async deleteAdGroupImage(
+    @Param("adGroupId") adGroupId: string,
+    @Param("assetId") assetId: string,
+    @Param("fieldType") fieldType: string,
+  ) {
+    const cleanAg = String(adGroupId).trim();
+    const cleanAsset = String(assetId).trim();
+    const VALID_FIELDS = new Set(["MARKETING_IMAGE", "SQUARE_MARKETING_IMAGE", "LOGO", "LANDSCAPE_LOGO"]);
+    const ft = String(fieldType ?? "").trim().toUpperCase();
+    if (!/^\d+$/.test(cleanAg)) throw new BadRequestException("adGroupId must be numeric");
+    if (!/^\d+$/.test(cleanAsset)) throw new BadRequestException("assetId must be numeric");
+    if (!VALID_FIELDS.has(ft)) throw new BadRequestException("invalid fieldType");
+    const clientId = this.config.get<string>("GOOGLE_ADS_CLIENT_ID");
+    const clientSecret = this.config.get<string>("GOOGLE_ADS_CLIENT_SECRET");
+    const refreshToken = this.config.get<string>("GOOGLE_ADS_REFRESH_TOKEN");
+    const developerToken = this.config.get<string>("GOOGLE_ADS_DEVELOPER_TOKEN");
+    const loginCustomerId = this.config.get<string>("GOOGLE_ADS_LOGIN_CUSTOMER_ID");
+    if (!clientId || !clientSecret || !refreshToken || !developerToken) {
+      throw new BadRequestException("Google Ads env vars not configured");
+    }
+    const oauth = new OAuth2Client(clientId, clientSecret);
+    oauth.setCredentials({ refresh_token: refreshToken });
+    const { token } = await oauth.getAccessToken();
+    if (!token) throw new BadRequestException("Failed to obtain OAuth token");
+    const CUST = "6803239831";
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      "developer-token": developerToken,
+      ...(loginCustomerId ? { "login-customer-id": loginCustomerId } : {}),
+      "Content-Type": "application/json",
+    };
+    const linkRes = await fetch(
+      `https://googleads.googleapis.com/v23/customers/${CUST}/adGroupAssets:mutate`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          operations: [{
+            remove: `customers/${CUST}/adGroupAssets/${cleanAg}~${cleanAsset}~${ft}`,
+          }],
+        }),
+      },
+    );
+    if (!linkRes.ok) {
+      const txt = await linkRes.text();
+      throw new BadRequestException(`Image detach failed: ${txt.slice(0, 500)}`);
+    }
+    // Image assets are typically reused — don't auto-delete the asset itself.
     return { ok: true };
   }
 

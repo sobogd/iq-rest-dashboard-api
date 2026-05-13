@@ -25,6 +25,21 @@ export class RestaurantController {
     if (!existing && !body.currency) {
       body = { ...body, currency: await getRequestCurrency(req) };
     }
+    // On first-time create, derive the restaurant's IANA timezone from the
+    // visitor's IP (cf-timezone header set by nginx's geoip2 module, which
+    // reads `location.time_zone` from GeoLite2-City.mmdb). Falls back to the
+    // schema default "UTC" if the header is missing or invalid.
+    if (!existing && !body.timezone) {
+      const tz = String(req.headers["cf-timezone"] ?? "").trim();
+      if (tz) {
+        try {
+          new Intl.DateTimeFormat("en-US", { timeZone: tz });
+          body = { ...body, timezone: tz };
+        } catch {
+          // invalid header value, fall through to schema default
+        }
+      }
+    }
     return this.svc.upsert(companyId, body);
   }
 

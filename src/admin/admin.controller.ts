@@ -2266,7 +2266,172 @@ export class AdminController {
     return { ok: true };
   }
 
-  /** Update a keyword's CPC bid. */
+  /**
+   * Validate + normalise the `ad` sub-payload of POST/PATCH ad-group.
+   * Returns a `responsive_search_ad` body fragment ready for adGroupAds:mutate.
+   */
+  private normalizeAdPayload(ad: unknown): {
+    finalUrl: string;
+    headlines: Array<{ text: string; pinnedField?: string }>;
+    descriptions: Array<{ text: string; pinnedField?: string }>;
+    path1?: string;
+    path2?: string;
+  } {
+    if (!ad || typeof ad !== "object") {
+      throw new BadRequestException("ad payload invalid");
+    }
+    const a = ad as Record<string, unknown>;
+    const finalUrl = String(a.finalUrl ?? "").trim();
+    if (!finalUrl || !/^https?:\/\//.test(finalUrl)) {
+      throw new BadRequestException("ad.finalUrl required, must be http(s) URL");
+    }
+    if (finalUrl.length > 2048) {
+      throw new BadRequestException("ad.finalUrl too long (max 2048)");
+    }
+    const headlinesRaw = Array.isArray(a.headlines) ? a.headlines : null;
+    if (!headlinesRaw) throw new BadRequestException("ad.headlines required");
+    const headlines: Array<{ text: string; pinnedField?: string }> = [];
+    for (const h of headlinesRaw as Array<Record<string, unknown>>) {
+      const text = String(h?.text ?? "").trim();
+      if (!text) continue;
+      if (text.length > 30) {
+        throw new BadRequestException(`headline >30 chars: "${text}"`);
+      }
+      const pin = h?.pin;
+      const entry: { text: string; pinnedField?: string } = { text };
+      if (pin === "HEADLINE_1" || pin === "HEADLINE_2" || pin === "HEADLINE_3") {
+        entry.pinnedField = pin;
+      }
+      headlines.push(entry);
+    }
+    if (headlines.length < 3 || headlines.length > 15) {
+      throw new BadRequestException(`headlines must be 3-15 (got ${headlines.length})`);
+    }
+    const descriptionsRaw = Array.isArray(a.descriptions) ? a.descriptions : null;
+    if (!descriptionsRaw) throw new BadRequestException("ad.descriptions required");
+    const descriptions: Array<{ text: string; pinnedField?: string }> = [];
+    for (const d of descriptionsRaw as Array<Record<string, unknown>>) {
+      const text = String(d?.text ?? "").trim();
+      if (!text) continue;
+      if (text.length > 90) {
+        throw new BadRequestException(`description >90 chars: "${text}"`);
+      }
+      const pin = d?.pin;
+      const entry: { text: string; pinnedField?: string } = { text };
+      if (pin === "DESCRIPTION_1" || pin === "DESCRIPTION_2") {
+        entry.pinnedField = pin;
+      }
+      descriptions.push(entry);
+    }
+    if (descriptions.length < 2 || descriptions.length > 4) {
+      throw new BadRequestException(`descriptions must be 2-4 (got ${descriptions.length})`);
+    }
+    const path1Raw = typeof a.path1 === "string" ? a.path1.trim() : "";
+    const path2Raw = typeof a.path2 === "string" ? a.path2.trim() : "";
+    if (path1Raw.length > 15) throw new BadRequestException("path1 max 15 chars");
+    if (path2Raw.length > 15) throw new BadRequestException("path2 max 15 chars");
+    return {
+      finalUrl,
+      headlines,
+      descriptions,
+      path1: path1Raw || undefined,
+      path2: path2Raw || undefined,
+    };
+  }
+
+  /** Pause every ENABLED ad inside the given ad-group via adGroupAds:mutate. */
+  private async pauseEnabledAdsInGroup(
+    adGroupId: string,
+    token: string,
+    developerToken: string,
+    loginCustomerId: string | undefined,
+    customerId: string,
+  ): Promise<void> {
+    const { search } = await this.gadsClient();
+    const rows = await search(
+      `SELECT ad_group_ad.resource_name FROM ad_group_ad WHERE ad_group.id = ${adGroupId} AND ad_group_ad.status = 'ENABLED'`,
+    );
+    if (rows.length === 0) return;
+    const operations = rows.map((r) => ({
+      updateMask: "status",
+      update: {
+        resourceName: (r as { adGroupAd: { resourceName: string } }).adGroupAd.resourceName,
+        status: "PAUSED",
+      },
+    }));
+    const res = await fetch(
+      `https://googleads.googleapis.com/v23/customers/${customerId}/adGroupAds:mutate`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "developer-token": developerToken,
+          ...(loginCustomerId ? { "login-customer-id": loginCustomerId } : {}),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ operations }),
+      },
+    );
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new BadRequestException(`Pause existing ads failed: ${txt.slice(0, 500)}`);
+    }
+  }
+
+  /** Create a new ENABLED RSA in the given ad-group. Returns the new ad id. */
+  private async createRsaInAdGroup(
+    adGroupId: string,
+    normalized: ReturnType<AdminController["normalizeAdPayload"]>,
+    token: string,
+    developerToken: string,
+    loginCustomerId: string | undefined,
+    customerId: string,
+  ): Promise<string> {
+    const adGroupResource = `customers/${customerId}/adGroups/${adGroupId}`;
+    const responsiveSearchAd: Record<string, unknown> = {
+      headlines: normalized.headlines,
+      descriptions: normalized.descriptions,
+    };
+    if (normalized.path1) responsiveSearchAd.path1 = normalized.path1;
+    if (normalized.path2) responsiveSearchAd.path2 = normalized.path2;
+    const res = await fetch(
+      `https://googleads.googleapis.com/v23/customers/${customerId}/adGroupAds:mutate`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "developer-token": developerToken,
+          ...(loginCustomerId ? { "login-customer-id": loginCustomerId } : {}),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          operations: [{
+            create: {
+              adGroup: adGroupResource,
+              status: "ENABLED",
+              ad: {
+                finalUrls: [normalized.finalUrl],
+                responsiveSearchAd,
+              },
+            },
+          }],
+        }),
+      },
+    );
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new BadRequestException(`Ad create failed: ${txt.slice(0, 500)}`);
+    }
+    const j = (await res.json()) as { results?: Array<{ resourceName?: string }> };
+    const resourceName = j.results?.[0]?.resourceName ?? "";
+    return resourceName.split("/").pop() ?? "";
+  }
+
+  /**
+   * Create an ad group inside a campaign. Optionally also create a single
+   * RSA inside the new group (when `ad` is present in the body) — used by
+   * the merged "ad group + ad" UI flow.
+   */
   @Post("google-ads/ad-group/:campaignId")
   @HttpCode(HttpStatus.OK)
   async createAdGroup(
@@ -2276,6 +2441,7 @@ export class AdminController {
       name?: string;
       defaultBidMicros?: number;
       finalUrlSuffix?: string;
+      ad?: unknown;
     },
   ) {
     const name = (body?.name ?? "").trim();
@@ -2284,6 +2450,10 @@ export class AdminController {
     if (!/^\d+$/.test(cleanCampaignId)) {
       throw new BadRequestException("campaignId must be numeric");
     }
+    // Validate ad payload up-front (fail-fast before creating ad-group).
+    const normalizedAd = body?.ad !== undefined && body.ad !== null
+      ? this.normalizeAdPayload(body.ad)
+      : null;
     const clientId = this.config.get<string>("GOOGLE_ADS_CLIENT_ID");
     const clientSecret = this.config.get<string>("GOOGLE_ADS_CLIENT_SECRET");
     const refreshToken = this.config.get<string>("GOOGLE_ADS_REFRESH_TOKEN");
@@ -2295,6 +2465,7 @@ export class AdminController {
     const oauth = new OAuth2Client(clientId, clientSecret);
     oauth.setCredentials({ refresh_token: refreshToken });
     const { token } = await oauth.getAccessToken();
+    if (!token) throw new BadRequestException("Failed to obtain OAuth token");
     const CUST = "6803239831";
     const create: Record<string, unknown> = {
       campaign: `customers/${CUST}/campaigns/${cleanCampaignId}`,
@@ -2308,7 +2479,7 @@ export class AdminController {
     if (typeof body?.finalUrlSuffix === "string" && body.finalUrlSuffix.length > 0) {
       create.finalUrlSuffix = body.finalUrlSuffix.slice(0, 2048);
     }
-    const res = await fetch(
+    const agRes = await fetch(
       `https://googleads.googleapis.com/v23/customers/${CUST}/adGroups:mutate`,
       {
         method: "POST",
@@ -2321,16 +2492,33 @@ export class AdminController {
         body: JSON.stringify({ operations: [{ create }] }),
       },
     );
-    if (!res.ok) {
-      const txt = await res.text();
+    if (!agRes.ok) {
+      const txt = await agRes.text();
       throw new BadRequestException(`Ad group create failed: ${txt.slice(0, 500)}`);
     }
-    const j = (await res.json()) as { results?: Array<{ resourceName?: string }> };
-    const resourceName = j.results?.[0]?.resourceName ?? "";
-    const adGroupId = resourceName.split("/").pop() ?? "";
-    return { ok: true, adGroupId };
+    const agJson = (await agRes.json()) as { results?: Array<{ resourceName?: string }> };
+    const adGroupResource = agJson.results?.[0]?.resourceName ?? "";
+    const adGroupId = adGroupResource.split("/").pop() ?? "";
+
+    let adId: string | undefined;
+    if (normalizedAd) {
+      adId = await this.createRsaInAdGroup(
+        adGroupId,
+        normalizedAd,
+        token,
+        developerToken,
+        loginCustomerId,
+        CUST,
+      );
+    }
+    return { ok: true, adGroupId, adId };
   }
 
+  /**
+   * Update an ad group's name / status / default bid / suffix. Optional
+   * `ad` block triggers replace-pattern: all ENABLED ads in the group are
+   * PAUSED and a fresh RSA is created (RSAs are immutable in Google Ads).
+   */
   @Patch("google-ads/ad-group/:adGroupId")
   @HttpCode(HttpStatus.OK)
   async updateAdGroup(
@@ -2341,12 +2529,17 @@ export class AdminController {
       defaultBidMicros?: number | null;
       finalUrlSuffix?: string | null;
       status?: "ENABLED" | "PAUSED";
+      ad?: unknown;
     },
   ) {
     const cleanId = String(adGroupId).trim();
     if (!/^\d+$/.test(cleanId)) {
       throw new BadRequestException("adGroupId must be numeric");
     }
+    // Validate ad payload up-front (fail-fast before mutating anything).
+    const normalizedAd = body?.ad !== undefined && body.ad !== null
+      ? this.normalizeAdPayload(body.ad)
+      : null;
     const clientId = this.config.get<string>("GOOGLE_ADS_CLIENT_ID");
     const clientSecret = this.config.get<string>("GOOGLE_ADS_CLIENT_SECRET");
     const refreshToken = this.config.get<string>("GOOGLE_ADS_REFRESH_TOKEN");
@@ -2356,6 +2549,12 @@ export class AdminController {
       throw new BadRequestException("Google Ads env vars not configured");
     }
     const CUST = "6803239831";
+    const oauth = new OAuth2Client(clientId, clientSecret);
+    oauth.setCredentials({ refresh_token: refreshToken });
+    const { token } = await oauth.getAccessToken();
+    if (!token) throw new BadRequestException("Failed to obtain OAuth token");
+
+    // Update ad-group-level fields if any were provided.
     const resourceName = `customers/${CUST}/adGroups/${cleanId}`;
     const update: Record<string, unknown> = { resourceName };
     const maskFields: string[] = [];
@@ -2383,32 +2582,46 @@ export class AdminController {
       update.status = body.status;
       maskFields.push("status");
     }
-    if (maskFields.length === 0) {
+    if (maskFields.length > 0) {
+      const res = await fetch(
+        `https://googleads.googleapis.com/v23/customers/${CUST}/adGroups:mutate`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "developer-token": developerToken,
+            ...(loginCustomerId ? { "login-customer-id": loginCustomerId } : {}),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            operations: [{ updateMask: maskFields.join(","), update }],
+          }),
+        },
+      );
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new BadRequestException(`Ad group update failed: ${txt.slice(0, 500)}`);
+      }
+    }
+
+    // Replace ad: pause existing ENABLED ads, create a fresh RSA.
+    let newAdId: string | undefined;
+    if (normalizedAd) {
+      await this.pauseEnabledAdsInGroup(cleanId, token, developerToken, loginCustomerId, CUST);
+      newAdId = await this.createRsaInAdGroup(
+        cleanId,
+        normalizedAd,
+        token,
+        developerToken,
+        loginCustomerId,
+        CUST,
+      );
+    }
+
+    if (maskFields.length === 0 && !normalizedAd) {
       throw new BadRequestException("no fields to update");
     }
-    const oauth = new OAuth2Client(clientId, clientSecret);
-    oauth.setCredentials({ refresh_token: refreshToken });
-    const { token } = await oauth.getAccessToken();
-    const res = await fetch(
-      `https://googleads.googleapis.com/v23/customers/${CUST}/adGroups:mutate`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "developer-token": developerToken,
-          ...(loginCustomerId ? { "login-customer-id": loginCustomerId } : {}),
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          operations: [{ updateMask: maskFields.join(","), update }],
-        }),
-      },
-    );
-    if (!res.ok) {
-      const txt = await res.text();
-      throw new BadRequestException(`Ad group update failed: ${txt.slice(0, 500)}`);
-    }
-    return { ok: true };
+    return { ok: true, newAdId };
   }
 
   @Post("google-ads/keyword/:adGroupId/:critId/bid")

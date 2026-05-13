@@ -9,6 +9,7 @@ import {
   HttpStatus,
   NotFoundException,
   Param,
+  Patch,
   Post,
   Query,
   Req,
@@ -1088,8 +1089,8 @@ export class AdminController {
     const [campRows, allCampRows, agRows, allAgRows, adRows, kwRows, negCampRows, negAgRows, tlRows, assetRows, stRows, targetingRows, campConvRows, agConvRows, kwConvRows, stConvRows, tlConvRows] = await Promise.all([
       search(`SELECT campaign.id, campaign.name, campaign.status, campaign_budget.amount_micros, campaign_budget.explicitly_shared, metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros FROM campaign WHERE campaign.status != 'REMOVED' AND segments.date ${dateSql}`),
       search(`SELECT campaign.id, campaign.name, campaign.status, campaign_budget.amount_micros, campaign_budget.explicitly_shared FROM campaign WHERE campaign.status != 'REMOVED'`),
-      search(`SELECT ad_group.id, ad_group.name, ad_group.status, ad_group.final_url_suffix, campaign.id, metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros FROM ad_group WHERE ad_group.status != 'REMOVED' AND campaign.status != 'REMOVED' AND segments.date ${dateSql}`),
-      search(`SELECT ad_group.id, ad_group.name, ad_group.status, ad_group.final_url_suffix, campaign.id FROM ad_group WHERE ad_group.status != 'REMOVED' AND campaign.status != 'REMOVED'`),
+      search(`SELECT ad_group.id, ad_group.name, ad_group.status, ad_group.final_url_suffix, ad_group.cpc_bid_micros, campaign.id, metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros FROM ad_group WHERE ad_group.status != 'REMOVED' AND campaign.status != 'REMOVED' AND segments.date ${dateSql}`),
+      search(`SELECT ad_group.id, ad_group.name, ad_group.status, ad_group.final_url_suffix, ad_group.cpc_bid_micros, campaign.id FROM ad_group WHERE ad_group.status != 'REMOVED' AND campaign.status != 'REMOVED'`),
       search(`SELECT ad_group_ad.ad.id, ad_group_ad.ad.final_urls, ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.ad.responsive_search_ad.descriptions, ad_group_ad.ad.responsive_search_ad.path1, ad_group_ad.ad.responsive_search_ad.path2, ad_group_ad.ad_strength, ad_group_ad.status, ad_group.id, campaign.id FROM ad_group_ad WHERE ad_group_ad.status != 'REMOVED' AND campaign.status != 'REMOVED'`),
       search(`SELECT ad_group_criterion.criterion_id, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.status, ad_group_criterion.cpc_bid_micros, ad_group_criterion.effective_cpc_bid_micros, ad_group_criterion.final_urls, ad_group_criterion.quality_info.quality_score, ad_group.id, campaign.id, metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros FROM keyword_view WHERE ad_group_criterion.status != 'REMOVED' AND campaign.status != 'REMOVED' AND segments.date ${dateSql}`),
       search(`SELECT campaign_criterion.criterion_id, campaign_criterion.keyword.text, campaign_criterion.keyword.match_type, campaign_criterion.status, campaign.id FROM campaign_criterion WHERE campaign_criterion.type = 'KEYWORD' AND campaign_criterion.negative = TRUE AND campaign_criterion.status != 'REMOVED' AND campaign.status != 'REMOVED'`),
@@ -1284,6 +1285,7 @@ export class AdminController {
         id: agId, name: String(r.adGroup.name), status: st,
         campaignId: String(r.campaign.id),
         suffix: r.adGroup.finalUrlSuffix || undefined,
+        defaultBid: r.adGroup.cpcBidMicros ? Number(r.adGroup.cpcBidMicros) / 1e6 : undefined,
         impressions: Number(m.impressions ?? 0),
         clicks: Number(m.clicks ?? 0),
         conversions: Number(m.conversions ?? 0),
@@ -1302,6 +1304,7 @@ export class AdminController {
         id, name: String(r.adGroup.name), status: st,
         campaignId: String(r.campaign.id),
         suffix: r.adGroup.finalUrlSuffix || undefined,
+        defaultBid: r.adGroup.cpcBidMicros ? Number(r.adGroup.cpcBidMicros) / 1e6 : undefined,
         impressions: 0, clicks: 0, conversions: 0, convT2: 0, convT3: 0, cost: 0,
       });
     }
@@ -2264,6 +2267,150 @@ export class AdminController {
   }
 
   /** Update a keyword's CPC bid. */
+  @Post("google-ads/ad-group/:campaignId")
+  @HttpCode(HttpStatus.OK)
+  async createAdGroup(
+    @Param("campaignId") campaignId: string,
+    @Body()
+    body: {
+      name?: string;
+      defaultBidMicros?: number;
+      finalUrlSuffix?: string;
+    },
+  ) {
+    const name = (body?.name ?? "").trim();
+    if (!name) throw new BadRequestException("name required");
+    const cleanCampaignId = String(campaignId).trim();
+    if (!/^\d+$/.test(cleanCampaignId)) {
+      throw new BadRequestException("campaignId must be numeric");
+    }
+    const clientId = this.config.get<string>("GOOGLE_ADS_CLIENT_ID");
+    const clientSecret = this.config.get<string>("GOOGLE_ADS_CLIENT_SECRET");
+    const refreshToken = this.config.get<string>("GOOGLE_ADS_REFRESH_TOKEN");
+    const developerToken = this.config.get<string>("GOOGLE_ADS_DEVELOPER_TOKEN");
+    const loginCustomerId = this.config.get<string>("GOOGLE_ADS_LOGIN_CUSTOMER_ID");
+    if (!clientId || !clientSecret || !refreshToken || !developerToken) {
+      throw new BadRequestException("Google Ads env vars not configured");
+    }
+    const oauth = new OAuth2Client(clientId, clientSecret);
+    oauth.setCredentials({ refresh_token: refreshToken });
+    const { token } = await oauth.getAccessToken();
+    const CUST = "6803239831";
+    const create: Record<string, unknown> = {
+      campaign: `customers/${CUST}/campaigns/${cleanCampaignId}`,
+      name,
+      status: "ENABLED",
+      type: "SEARCH_STANDARD",
+    };
+    if (Number.isFinite(body?.defaultBidMicros) && Number(body!.defaultBidMicros) > 0) {
+      create.cpcBidMicros = Math.round(Number(body!.defaultBidMicros));
+    }
+    if (typeof body?.finalUrlSuffix === "string" && body.finalUrlSuffix.length > 0) {
+      create.finalUrlSuffix = body.finalUrlSuffix.slice(0, 2048);
+    }
+    const res = await fetch(
+      `https://googleads.googleapis.com/v23/customers/${CUST}/adGroups:mutate`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "developer-token": developerToken,
+          ...(loginCustomerId ? { "login-customer-id": loginCustomerId } : {}),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ operations: [{ create }] }),
+      },
+    );
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new BadRequestException(`Ad group create failed: ${txt.slice(0, 500)}`);
+    }
+    const j = (await res.json()) as { results?: Array<{ resourceName?: string }> };
+    const resourceName = j.results?.[0]?.resourceName ?? "";
+    const adGroupId = resourceName.split("/").pop() ?? "";
+    return { ok: true, adGroupId };
+  }
+
+  @Patch("google-ads/ad-group/:adGroupId")
+  @HttpCode(HttpStatus.OK)
+  async updateAdGroup(
+    @Param("adGroupId") adGroupId: string,
+    @Body()
+    body: {
+      name?: string;
+      defaultBidMicros?: number | null;
+      finalUrlSuffix?: string | null;
+      status?: "ENABLED" | "PAUSED";
+    },
+  ) {
+    const cleanId = String(adGroupId).trim();
+    if (!/^\d+$/.test(cleanId)) {
+      throw new BadRequestException("adGroupId must be numeric");
+    }
+    const clientId = this.config.get<string>("GOOGLE_ADS_CLIENT_ID");
+    const clientSecret = this.config.get<string>("GOOGLE_ADS_CLIENT_SECRET");
+    const refreshToken = this.config.get<string>("GOOGLE_ADS_REFRESH_TOKEN");
+    const developerToken = this.config.get<string>("GOOGLE_ADS_DEVELOPER_TOKEN");
+    const loginCustomerId = this.config.get<string>("GOOGLE_ADS_LOGIN_CUSTOMER_ID");
+    if (!clientId || !clientSecret || !refreshToken || !developerToken) {
+      throw new BadRequestException("Google Ads env vars not configured");
+    }
+    const CUST = "6803239831";
+    const resourceName = `customers/${CUST}/adGroups/${cleanId}`;
+    const update: Record<string, unknown> = { resourceName };
+    const maskFields: string[] = [];
+    if (typeof body?.name === "string") {
+      const n = body.name.trim();
+      if (!n) throw new BadRequestException("name cannot be empty");
+      update.name = n;
+      maskFields.push("name");
+    }
+    if (body?.defaultBidMicros === null) {
+      update.cpcBidMicros = 0;
+      maskFields.push("cpc_bid_micros");
+    } else if (Number.isFinite(body?.defaultBidMicros) && Number(body!.defaultBidMicros) > 0) {
+      update.cpcBidMicros = Math.round(Number(body!.defaultBidMicros));
+      maskFields.push("cpc_bid_micros");
+    }
+    if (body?.finalUrlSuffix === null) {
+      update.finalUrlSuffix = "";
+      maskFields.push("final_url_suffix");
+    } else if (typeof body?.finalUrlSuffix === "string") {
+      update.finalUrlSuffix = body.finalUrlSuffix.slice(0, 2048);
+      maskFields.push("final_url_suffix");
+    }
+    if (body?.status === "ENABLED" || body?.status === "PAUSED") {
+      update.status = body.status;
+      maskFields.push("status");
+    }
+    if (maskFields.length === 0) {
+      throw new BadRequestException("no fields to update");
+    }
+    const oauth = new OAuth2Client(clientId, clientSecret);
+    oauth.setCredentials({ refresh_token: refreshToken });
+    const { token } = await oauth.getAccessToken();
+    const res = await fetch(
+      `https://googleads.googleapis.com/v23/customers/${CUST}/adGroups:mutate`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "developer-token": developerToken,
+          ...(loginCustomerId ? { "login-customer-id": loginCustomerId } : {}),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          operations: [{ updateMask: maskFields.join(","), update }],
+        }),
+      },
+    );
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new BadRequestException(`Ad group update failed: ${txt.slice(0, 500)}`);
+    }
+    return { ok: true };
+  }
+
   @Post("google-ads/keyword/:adGroupId/:critId/bid")
   @HttpCode(HttpStatus.OK)
   async updateKeywordBid(

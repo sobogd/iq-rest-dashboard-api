@@ -55,6 +55,8 @@
     "@types/multer": "^2.1.0",
     "@types/node": "^22.10.2",
     "@types/nodemailer": "^6.4.17",
+    "@types/tz-lookup": "^6.1.2",
+    "@types/ua-parser-js": "^0.7.39",
     "@typescript-eslint/eslint-plugin": "^8.18.0",
     "@typescript-eslint/parser": "^8.18.0",
     "dotenv": "^17.4.2",
@@ -70,6 +72,6 @@
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.7.2",
-    "@types/ua-parser-js": "^0.7.39"
+    "tz-lookup": "^6.1.25"
   }
 }

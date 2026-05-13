@@ -176,6 +176,13 @@ model Restaurant {
   // [{ closed, from, to, lunchFrom, lunchTo }]. Null = legacy single-window
   // mode driven by workingHoursStart/End.
   reservationSchedule    Json?
+  // IANA timezone identifier (e.g. "Europe/Rome", "America/New_York"). Used
+  // by the public booking flow to interpret workingHours / reservationSchedule
+  // strings and the "is slot in the past" check against the restaurant's
+  // local clock instead of the server's UTC clock. New restaurants set this
+  // from `Intl.DateTimeFormat().resolvedOptions().timeZone`; existing rows
+  // are backfilled from the lat/lon stored in (x, y).
+  timezone               String  @default("UTC")
 
   // WhatsApp orders
   ordersEnabled          Boolean @default(false)

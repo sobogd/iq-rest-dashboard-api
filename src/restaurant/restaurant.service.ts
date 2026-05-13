@@ -60,6 +60,7 @@ interface RestaurantInput {
   workingHoursStart?: string;
   workingHoursEnd?: string;
   reservationSchedule?: ReservationSchedule | null;
+  timezone?: string;
   ordersEnabled?: boolean;
   orderNameEnabled?: boolean;
   orderPhoneEnabled?: boolean;
@@ -72,9 +73,19 @@ const FIELDS: (keyof RestaurantInput)[] = [
   "accentColor", "address", "x", "y", "googlePlaceId", "phone", "instagram", "whatsapp", "languages",
   "defaultLanguage", "hideTitle", "reservationsEnabled", "reservationMode",
   "reservationSlotMinutes", "workingHoursStart", "workingHoursEnd",
-  "reservationSchedule", "ordersEnabled",
+  "reservationSchedule", "timezone", "ordersEnabled",
   "orderNameEnabled", "orderPhoneEnabled", "orderAddressEnabled", "orderMode",
 ];
+
+/** Returns true if `tz` is a valid IANA timezone identifier (e.g. "Europe/Rome"). */
+function isValidTimezone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function pickFields(raw: Record<string, unknown>): RestaurantInput {
   const out: Record<string, unknown> = {};
@@ -87,6 +98,13 @@ function pickFields(raw: Record<string, unknown>): RestaurantInput {
       );
     }
     out.reservationSchedule = parsed.data;
+  }
+  if (out.timezone !== undefined) {
+    const tz = String(out.timezone).trim();
+    if (!tz || !isValidTimezone(tz)) {
+      throw new BadRequestException("Invalid timezone: must be IANA identifier (e.g. Europe/Rome)");
+    }
+    out.timezone = tz;
   }
   return out as RestaurantInput;
 }

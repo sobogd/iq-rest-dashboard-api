@@ -10,6 +10,7 @@ import {
 import { Throttle, seconds, minutes } from "@nestjs/throttler";
 import type { Request } from "express";
 import { UAParser } from "ua-parser-js";
+import { isbot } from "isbot";
 import { AuthService } from "../auth/auth.service";
 import { PrismaService } from "../prisma/prisma.service";
 
@@ -53,6 +54,20 @@ function anonymizeIp(raw: string | null): string | null {
   const oct = ip.split(".");
   if (oct.length !== 4) return null;
   return `${oct[0]}.${oct[1]}.${oct[2]}.0`;
+}
+
+/** Mirrors the middleware-side detector in soqrmenuweb/middleware.ts. Both
+ *  write paths (SSR land_page_* and JS-fired land_*_section_show_*) must
+ *  classify bots identically; otherwise AdsBot (which renders JS) flips
+ *  is_bot=false on the JS rows while the SSR row says true. */
+const EXTRA_BOT_UA_REGEX =
+  /AdsBot|Google-InspectionTool|GoogleOther|APIs-Google|FeedFetcher-Google|Storebot-Google|GoogleProducer|ChromeOS-Default-Bot|HeadlessChrome|PhantomJS|Screaming Frog|Sitebulb|axios\/|node-fetch|got\/|http_request|httpclient|java\/|okhttp|libwww|lwp-trivial|HttpClient|Apache-HttpClient/i;
+
+function detectBot(ua: string | null): boolean {
+  if (!ua) return true;
+  if (isbot(ua)) return true;
+  if (EXTRA_BOT_UA_REGEX.test(ua)) return true;
+  return false;
 }
 
 function classifyDevice(uaString: string | null): { device: string | null; platform: string | null } {
@@ -124,6 +139,7 @@ export class UsageController {
     // direct browser requests use the request's own UA header.
     const uaString = body.userAgent || headerStr(req, "user-agent");
     const { device, platform } = classifyDevice(uaString);
+    const isBot = detectBot(uaString);
 
     // Anonymized client IP (last IPv4 octet zeroed, IPv6 truncated to /64)
     const ip = anonymizeIp(headerStr(req, "cf-connecting-ip") || headerStr(req, "x-forwarded-for"));
@@ -163,6 +179,7 @@ export class UsageController {
         gclid,
         companyId,
         ip,
+        is_bot: isBot,
       },
     });
   }

@@ -3229,7 +3229,9 @@ export class AdminController {
     );
     if (!linkRes.ok) {
       const txt = await linkRes.text();
-      throw new BadRequestException(`Image attach failed: ${txt.slice(0, 500)}`);
+      console.error("[gads-image-attach] adGroupId:", cleanId, "fieldType:", fieldType, "assetResource:", assetResource);
+      console.error("[gads-image-attach] response:", txt);
+      throw new BadRequestException(`Image attach failed: ${txt.slice(0, 4000)}`);
     }
     return { ok: true, assetId };
   }

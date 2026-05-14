@@ -2982,14 +2982,31 @@ export class AdminController {
   ) {
     const cleanId = String(adGroupId).trim();
     if (!/^\d+$/.test(cleanId)) throw new BadRequestException("adGroupId must be numeric");
-    const VALID_HEADERS = new Set([
-      "AMENITIES", "BRANDS", "COURSES", "DEGREE_PROGRAMS", "DESTINATIONS",
-      "FEATURED_HOTELS", "INSURANCE_COVERAGE", "MODELS", "NEIGHBORHOODS",
-      "SERVICE_CATALOG", "SHOW_TYPES", "STYLES", "TYPES",
-    ]);
-    const header = String(body?.header ?? "").trim().toUpperCase();
-    if (!VALID_HEADERS.has(header)) {
-      throw new BadRequestException(`header must be one of: ${[...VALID_HEADERS].join(", ")}`);
+    // StructuredSnippetAsset.header is a free-form string in the REST schema,
+    // but Google validates it against a fixed list of localized display values
+    // (https://developers.google.com/google-ads/api/reference/data/structured-snippet-headers).
+    // The UI sends the proto-enum code (e.g. "SERVICE_CATALOG"); translate to
+    // the English display string before forwarding — sending the enum code as
+    // header yields INVALID_ARGUMENT 400.
+    const HEADER_BY_CODE: Record<string, string> = {
+      AMENITIES: "Amenities",
+      BRANDS: "Brands",
+      COURSES: "Courses",
+      DEGREE_PROGRAMS: "Degree programs",
+      DESTINATIONS: "Destinations",
+      FEATURED_HOTELS: "Featured hotels",
+      INSURANCE_COVERAGE: "Insurance coverage",
+      MODELS: "Models",
+      NEIGHBORHOODS: "Neighborhoods",
+      SERVICE_CATALOG: "Service catalog",
+      SHOW_TYPES: "Shows",
+      STYLES: "Styles",
+      TYPES: "Types",
+    };
+    const code = String(body?.header ?? "").trim().toUpperCase();
+    const header = HEADER_BY_CODE[code];
+    if (!header) {
+      throw new BadRequestException(`header must be one of: ${Object.keys(HEADER_BY_CODE).join(", ")}`);
     }
     const valuesRaw = Array.isArray(body?.values) ? body.values : [];
     // NFC-normalize to fold any smart quotes / combined diacritics into the

@@ -1103,7 +1103,7 @@ export class AdminController {
       search(`SELECT campaign_criterion.criterion_id, campaign_criterion.keyword.text, campaign_criterion.keyword.match_type, campaign_criterion.status, campaign.id FROM campaign_criterion WHERE campaign_criterion.type = 'KEYWORD' AND campaign_criterion.negative = TRUE AND campaign_criterion.status != 'REMOVED' AND campaign.status != 'REMOVED'`),
       search(`SELECT ad_group_criterion.criterion_id, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.status, ad_group.id, ad_group.name, campaign.id FROM ad_group_criterion WHERE ad_group_criterion.type = 'KEYWORD' AND ad_group_criterion.negative = TRUE AND ad_group_criterion.status != 'REMOVED' AND campaign.status != 'REMOVED'`),
       search(`SELECT segments.hour, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions FROM campaign WHERE segments.date ${dateSql} AND metrics.impressions > 0`),
-      search(`SELECT campaign.id, asset.id, asset.type, asset.name, asset.sitelink_asset.link_text, asset.sitelink_asset.description1, asset.sitelink_asset.description2, campaign_asset.field_type, campaign_asset.status FROM campaign_asset WHERE campaign_asset.status = 'ENABLED'`),
+      search(`SELECT campaign.id, asset.id, asset.type, asset.name, asset.sitelink_asset.link_text, asset.sitelink_asset.description1, asset.sitelink_asset.description2, asset.image_asset.full_size.url, asset.image_asset.full_size.width_pixels, asset.image_asset.full_size.height_pixels, campaign_asset.field_type, campaign_asset.status FROM campaign_asset WHERE campaign_asset.status = 'ENABLED'`),
       search(`SELECT ad_group.id, asset.id, asset.type, asset.sitelink_asset.link_text, asset.sitelink_asset.description1, asset.sitelink_asset.description2, asset.callout_asset.callout_text, asset.structured_snippet_asset.header, asset.structured_snippet_asset.values, asset.image_asset.full_size.url, asset.image_asset.full_size.width_pixels, asset.image_asset.full_size.height_pixels, asset.final_urls, ad_group_asset.field_type, ad_group_asset.status FROM ad_group_asset WHERE ad_group_asset.status = 'ENABLED' AND ad_group_asset.field_type IN ('SITELINK', 'CALLOUT', 'STRUCTURED_SNIPPET', 'MARKETING_IMAGE', 'SQUARE_MARKETING_IMAGE', 'LOGO', 'LANDSCAPE_LOGO')`),
       search(`SELECT ad_group.id, search_term_view.search_term, search_term_view.status, segments.keyword.info.text, segments.keyword.info.match_type, metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros FROM search_term_view WHERE segments.date ${dateSql}`),
       search(`SELECT campaign.id, campaign_criterion.type, campaign_criterion.location.geo_target_constant, campaign_criterion.language.language_constant, campaign_criterion.negative FROM campaign_criterion WHERE campaign.status != 'REMOVED' AND campaign_criterion.status != 'REMOVED'`),
@@ -1454,6 +1454,36 @@ export class AdminController {
     const adGroupSnippets: Record<string, Array<{ assetId: string; header: string; values: string[] }>> = {};
     const adGroupImages: Record<string, Array<{ assetId: string; fieldType: string; url?: string; width?: number; height?: number }>> = {};
     const IMAGE_FIELD_TYPES = new Set(["MARKETING_IMAGE", "SQUARE_MARKETING_IMAGE", "LOGO", "LANDSCAPE_LOGO"]);
+
+    // Image business-profile assets (MARKETING_IMAGE / SQUARE_MARKETING_IMAGE
+    // / LOGO / LANDSCAPE_LOGO) live at campaign level — Google's API rejects
+    // AdGroupAsset links for these types. Read them from campaign_asset and
+    // propagate per-campaign to each contained ad group so the UI can still
+    // render them on the per-ad-group tab.
+    const campaignImagesById: Record<string, Array<{ assetId: string; fieldType: string; url?: string; width?: number; height?: number }>> = {};
+    for (const r of assetRows as any[]) {
+      const cId = String(r.campaign?.id ?? "");
+      const ft = r.campaignAsset?.fieldType;
+      if (!cId || !ft || !IMAGE_FIELD_TYPES.has(ft)) continue;
+      const a = r.asset;
+      if (!a) continue;
+      const arr = campaignImagesById[cId] ?? (campaignImagesById[cId] = []);
+      arr.push({
+        assetId: String(a.id),
+        fieldType: String(ft),
+        url: a.imageAsset?.fullSize?.url ? String(a.imageAsset.fullSize.url) : undefined,
+        width: a.imageAsset?.fullSize?.widthPixels ? Number(a.imageAsset.fullSize.widthPixels) : undefined,
+        height: a.imageAsset?.fullSize?.heightPixels ? Number(a.imageAsset.fullSize.heightPixels) : undefined,
+      });
+    }
+    for (const r of allAgRows as any[]) {
+      const agId = String(r.adGroup?.id ?? "");
+      const cId = String(r.campaign?.id ?? "");
+      if (!agId || !cId) continue;
+      const imgs = campaignImagesById[cId];
+      if (imgs?.length) adGroupImages[agId] = imgs;
+    }
+
     for (const r of agAssetRows as any[]) {
       const agId = String(r.adGroup?.id ?? "");
       const a = r.asset;
@@ -3211,15 +3241,43 @@ export class AdminController {
     const assetJson = (await assetRes.json()) as { results?: Array<{ resourceName?: string }> };
     const assetResource = assetJson.results?.[0]?.resourceName ?? "";
     const assetId = assetResource.split("/").pop() ?? "";
+
+    // MARKETING_IMAGE / SQUARE_MARKETING_IMAGE / LOGO / LANDSCAPE_LOGO are
+    // business-profile asset types — Google rejects AdGroupAsset links with
+    // UNSUPPORTED_FIELD_TYPE for these. They must attach at campaign level
+    // (CampaignAsset). Resolve campaign from the ad group and link there.
+    const lookupRes = await fetch(
+      `https://googleads.googleapis.com/v23/customers/${CUST}/googleAds:search`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          query: `SELECT ad_group.campaign FROM ad_group WHERE ad_group.id = ${cleanId}`,
+        }),
+      },
+    );
+    if (!lookupRes.ok) {
+      const txt = await lookupRes.text();
+      console.error("[gads-image-attach] campaign lookup failed:", txt);
+      throw new BadRequestException(`Campaign lookup failed: ${txt.slice(0, 2000)}`);
+    }
+    const lookupJson = (await lookupRes.json()) as {
+      results?: Array<{ adGroup?: { campaign?: string } }>;
+    };
+    const campaignResource = lookupJson.results?.[0]?.adGroup?.campaign;
+    if (!campaignResource) {
+      throw new BadRequestException(`Ad group ${cleanId} has no campaign (not found?)`);
+    }
+
     const linkRes = await fetch(
-      `https://googleads.googleapis.com/v23/customers/${CUST}/adGroupAssets:mutate`,
+      `https://googleads.googleapis.com/v23/customers/${CUST}/campaignAssets:mutate`,
       {
         method: "POST",
         headers,
         body: JSON.stringify({
           operations: [{
             create: {
-              adGroup: `customers/${CUST}/adGroups/${cleanId}`,
+              campaign: campaignResource,
               asset: assetResource,
               fieldType,
             },
@@ -3229,11 +3287,11 @@ export class AdminController {
     );
     if (!linkRes.ok) {
       const txt = await linkRes.text();
-      console.error("[gads-image-attach] adGroupId:", cleanId, "fieldType:", fieldType, "assetResource:", assetResource);
+      console.error("[gads-image-attach] campaign:", campaignResource, "fieldType:", fieldType, "assetResource:", assetResource);
       console.error("[gads-image-attach] response:", txt);
       throw new BadRequestException(`Image attach failed: ${txt.slice(0, 4000)}`);
     }
-    return { ok: true, assetId };
+    return { ok: true, assetId, scope: "campaign" };
   }
 
   /** Detach an image asset from an ad group. Asset is left in the account (it may be referenced elsewhere). */
@@ -3270,21 +3328,46 @@ export class AdminController {
       ...(loginCustomerId ? { "login-customer-id": loginCustomerId } : {}),
       "Content-Type": "application/json",
     };
+    // Image business-profile field types live at campaign level (see create
+    // endpoint comment). Resolve the campaign from the ad group, then remove
+    // the CampaignAsset link.
+    const lookupRes = await fetch(
+      `https://googleads.googleapis.com/v23/customers/${CUST}/googleAds:search`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          query: `SELECT ad_group.campaign FROM ad_group WHERE ad_group.id = ${cleanAg}`,
+        }),
+      },
+    );
+    if (!lookupRes.ok) {
+      const txt = await lookupRes.text();
+      throw new BadRequestException(`Campaign lookup failed: ${txt.slice(0, 2000)}`);
+    }
+    const lookupJson = (await lookupRes.json()) as {
+      results?: Array<{ adGroup?: { campaign?: string } }>;
+    };
+    const campaignResource = lookupJson.results?.[0]?.adGroup?.campaign;
+    if (!campaignResource) {
+      throw new BadRequestException(`Ad group ${cleanAg} has no campaign`);
+    }
+    const campaignId = campaignResource.split("/").pop() ?? "";
     const linkRes = await fetch(
-      `https://googleads.googleapis.com/v23/customers/${CUST}/adGroupAssets:mutate`,
+      `https://googleads.googleapis.com/v23/customers/${CUST}/campaignAssets:mutate`,
       {
         method: "POST",
         headers,
         body: JSON.stringify({
           operations: [{
-            remove: `customers/${CUST}/adGroupAssets/${cleanAg}~${cleanAsset}~${ft}`,
+            remove: `customers/${CUST}/campaignAssets/${campaignId}~${cleanAsset}~${ft}`,
           }],
         }),
       },
     );
     if (!linkRes.ok) {
       const txt = await linkRes.text();
-      throw new BadRequestException(`Image detach failed: ${txt.slice(0, 500)}`);
+      throw new BadRequestException(`Image detach failed: ${txt.slice(0, 2000)}`);
     }
     // Image assets are typically reused — don't auto-delete the asset itself.
     return { ok: true };

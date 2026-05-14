@@ -487,6 +487,7 @@ export class AdminController {
         ad_params: true,
         companyId: true,
         ip: true,
+        is_bot: true,
       },
     });
 
@@ -535,6 +536,7 @@ export class AdminController {
         companyId: r.companyId,
         companyLabel: r.companyId ? labels.get(r.companyId) ?? null : null,
         ip: r.ip,
+        isBot: r.is_bot,
       })),
     };
   }
@@ -564,6 +566,7 @@ export class AdminController {
         id: true, at: true, event: true,
         country: true, region: true, device: true, platform: true,
         gclid: true, ad_params: true, companyId: true, ip: true,
+        is_bot: true,
       },
     });
 
@@ -599,6 +602,7 @@ export class AdminController {
         companyId: r.companyId,
         companyLabel: r.companyId ? labels.get(r.companyId) ?? null : null,
         ip: r.ip,
+        isBot: r.is_bot,
       })),
     };
   }

@@ -2989,9 +2989,18 @@ export class AdminController {
       throw new BadRequestException(`header must be one of: ${[...VALID_HEADERS].join(", ")}`);
     }
     const valuesRaw = Array.isArray(body?.values) ? body.values : [];
-    const values = valuesRaw
-      .map((v) => String(v ?? "").trim())
-      .filter((v) => v.length > 0 && v.length <= 25);
+    // NFC-normalize to fold any smart quotes / combined diacritics into the
+    // canonical form Google expects, then dedupe — Google rejects asset
+    // creation when the values array contains duplicates.
+    const seen = new Set<string>();
+    const values: string[] = [];
+    for (const v of valuesRaw) {
+      const s = String(v ?? "").normalize("NFC").trim();
+      if (!s || s.length > 25) continue;
+      if (seen.has(s)) continue;
+      seen.add(s);
+      values.push(s);
+    }
     if (values.length < 3 || values.length > 10) {
       throw new BadRequestException(`values must be 3-10 strings ≤25 chars (got ${values.length})`);
     }
@@ -3014,19 +3023,18 @@ export class AdminController {
       ...(loginCustomerId ? { "login-customer-id": loginCustomerId } : {}),
       "Content-Type": "application/json",
     };
+    const snippetBody = JSON.stringify({
+      operations: [{ create: { structuredSnippetAsset: { header, values } } }],
+    });
     const assetRes = await fetch(
       `https://googleads.googleapis.com/v23/customers/${CUST}/assets:mutate`,
-      {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          operations: [{ create: { structuredSnippetAsset: { header, values } } }],
-        }),
-      },
+      { method: "POST", headers, body: snippetBody },
     );
     if (!assetRes.ok) {
       const txt = await assetRes.text();
-      throw new BadRequestException(`Snippet asset create failed: ${txt.slice(0, 500)}`);
+      console.error("[snippet-create] payload:", snippetBody);
+      console.error("[snippet-create] response:", txt);
+      throw new BadRequestException(`Snippet asset create failed: ${txt.slice(0, 4000)}`);
     }
     const assetJson = (await assetRes.json()) as { results?: Array<{ resourceName?: string }> };
     const assetResource = assetJson.results?.[0]?.resourceName ?? "";

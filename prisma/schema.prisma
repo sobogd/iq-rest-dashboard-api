@@ -366,6 +366,7 @@ model UsageEvent {
   companyId String?  // server-side from iqr_session cookie when logged in
   ip        String?  // anonymized client IP (IPv4 last octet zeroed, IPv6 truncated to /64)
   is_bot          Boolean @default(false) // derived from User-Agent in middleware; raw UA never stored
+  is_google_ads   Boolean @default(false) // visit originated from a Google Ads click (gclid/gbraid/wbraid). Persisted across the session via a client-side flag so JS-fired events are not misclassified as organic search.
   referrer_source String? // coarse classifier of inbound Referer ("google_search", "bing", "social", "internal", "other", …); raw URL never stored
 
   @@index([at])
@@ -373,6 +374,7 @@ model UsageEvent {
   @@index([companyId, at])
   @@index([gclid])
   @@index([is_bot, at])
+  @@index([is_google_ads, at])
   @@index([referrer_source, at])
   @@map("usage_events")
 }

@@ -149,6 +149,7 @@ interface UsageEventBody {
   region?: string;
   userAgent?: string;   // SSR can forward user's UA (the API sees the SSR's UA otherwise)
   referrer?: string;    // browser sends document.referrer; classified server-side, raw URL not stored
+  isGoogleAds?: boolean; // client persists this boolean in localStorage once a gclid is observed on the URL; subsequent JS-fired events flip it on so they're not misclassified as organic search
 }
 
 @Controller("usage")
@@ -188,6 +189,11 @@ export class UsageController {
     // or social post. Fall back to the request Referer header for non-browser
     // callers, but it will usually be the page URL itself (not the search).
     const referrerSource = classifyReferrer(body.referrer || headerStr(req, "referer"));
+    // Promote to true if the client supplies the flag *or* the legacy gclid
+    // field is on this event. Never demote to false here — the SSR row may
+    // have set the flag for the same visit and we don't want a later JS event
+    // to clobber it.
+    const isGoogleAds = body.isGoogleAds === true || !!gclid;
 
     // Anonymized client IP (last IPv4 octet zeroed, IPv6 truncated to /64)
     const ip = anonymizeIp(headerStr(req, "cf-connecting-ip") || headerStr(req, "x-forwarded-for"));
@@ -229,6 +235,7 @@ export class UsageController {
         ip,
         is_bot: isBot,
         referrer_source: referrerSource,
+        is_google_ads: isGoogleAds,
       },
     });
   }

@@ -485,18 +485,18 @@ export class AdminController {
     );
     const orClauses: Prisma.UsageEventWhereInput[] = [];
     if (requested.has("bots")) orClauses.push({ is_bot: true });
-    if (requested.has("gads")) orClauses.push({ is_bot: false, gclid: { not: null } });
+    if (requested.has("gads")) orClauses.push({ is_bot: false, is_google_ads: true });
     if (requested.has("search")) {
       orClauses.push({
         is_bot: false,
-        gclid: null,
+        is_google_ads: false,
         referrer_source: { in: SEARCH_SOURCES_LIST },
       });
     }
     if (requested.has("other")) {
       orClauses.push({
         is_bot: false,
-        gclid: null,
+        is_google_ads: false,
         OR: [
           { referrer_source: null },
           { referrer_source: { notIn: SEARCH_SOURCES_LIST } },
@@ -530,6 +530,7 @@ export class AdminController {
         ip: true,
         is_bot: true,
         referrer_source: true,
+        is_google_ads: true,
       },
     });
 
@@ -580,6 +581,7 @@ export class AdminController {
         ip: r.ip,
         isBot: r.is_bot,
         referrerSource: r.referrer_source,
+        isGoogleAds: r.is_google_ads,
       })),
     };
   }
@@ -609,7 +611,7 @@ export class AdminController {
         id: true, at: true, event: true,
         country: true, region: true, device: true, platform: true,
         gclid: true, ad_params: true, companyId: true, ip: true,
-        is_bot: true, referrer_source: true,
+        is_bot: true, referrer_source: true, is_google_ads: true,
       },
     });
 
@@ -647,6 +649,7 @@ export class AdminController {
         ip: r.ip,
         isBot: r.is_bot,
         referrerSource: r.referrer_source,
+        isGoogleAds: r.is_google_ads,
       })),
     };
   }

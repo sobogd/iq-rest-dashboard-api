@@ -70,6 +70,48 @@ function detectBot(ua: string | null): boolean {
   return false;
 }
 
+/** Mirrors classifyReferrer in soqrmenuweb/middleware.ts. Both write paths
+ *  must agree so SSR rows and JS-fired rows from the same visit produce
+ *  identical referrer_source values. Hostname-only — raw URL never stored. */
+const OWN_HOST = "iq-rest.com";
+
+function classifyReferrer(referer: string | null | undefined): string | null {
+  if (!referer) return null;
+  let host: string;
+  let path: string;
+  try {
+    const u = new URL(referer);
+    host = u.hostname.toLowerCase();
+    path = u.pathname || "/";
+  } catch {
+    return null;
+  }
+  if (!host) return null;
+  if (host === OWN_HOST || host.endsWith(`.${OWN_HOST}`)) return "internal";
+  if (/^(www\.)?google\.[a-z.]{2,6}$/.test(host)) {
+    if (path.startsWith("/search") || path.startsWith("/url") || path === "/") return "google_search";
+    return "google_search";
+  }
+  if (host === "bing.com" || host.endsWith(".bing.com")) return "bing";
+  if (/^(www\.)?yandex\.[a-z.]{2,6}$/.test(host) || host.endsWith(".yandex.ru") || host.endsWith(".yandex.com")) return "yandex";
+  if (host === "duckduckgo.com" || host.endsWith(".duckduckgo.com")) return "duckduckgo";
+  if (host.endsWith("search.yahoo.com") || host === "yahoo.com" || host.endsWith(".yahoo.com")) return "yahoo";
+  if (host === "baidu.com" || host.endsWith(".baidu.com")) return "other_search";
+  if (host.endsWith("ecosia.org") || host.endsWith("qwant.com") || host.endsWith("startpage.com") || host.endsWith("mojeek.com") || host.endsWith("brave.com")) return "other_search";
+  if (
+    host === "facebook.com" || host.endsWith(".facebook.com") || host === "fb.com" || host.endsWith(".fb.com") ||
+    host === "instagram.com" || host.endsWith(".instagram.com") ||
+    host === "x.com" || host.endsWith(".x.com") || host === "twitter.com" || host.endsWith(".twitter.com") || host === "t.co" ||
+    host === "linkedin.com" || host.endsWith(".linkedin.com") ||
+    host === "tiktok.com" || host.endsWith(".tiktok.com") ||
+    host === "reddit.com" || host.endsWith(".reddit.com") ||
+    host === "pinterest.com" || host.endsWith(".pinterest.com") ||
+    host === "t.me" || host === "telegram.org" || host.endsWith(".telegram.org") ||
+    host.endsWith("whatsapp.com") || host.endsWith("youtube.com") || host === "youtu.be"
+  ) return "social";
+  return "other";
+}
+
 function classifyDevice(uaString: string | null): { device: string | null; platform: string | null } {
   if (!uaString) return { device: null, platform: null };
   try {
@@ -106,6 +148,7 @@ interface UsageEventBody {
   country?: string;     // SSR can forward user's geo cookie (nginx clobbers cf-* upstream)
   region?: string;
   userAgent?: string;   // SSR can forward user's UA (the API sees the SSR's UA otherwise)
+  referrer?: string;    // browser sends document.referrer; classified server-side, raw URL not stored
 }
 
 @Controller("usage")
@@ -140,6 +183,11 @@ export class UsageController {
     const uaString = body.userAgent || headerStr(req, "user-agent");
     const { device, platform } = classifyDevice(uaString);
     const isBot = detectBot(uaString);
+    // body.referrer is document.referrer captured by the browser at event
+    // time — for first-page-load events that's the originating Google search
+    // or social post. Fall back to the request Referer header for non-browser
+    // callers, but it will usually be the page URL itself (not the search).
+    const referrerSource = classifyReferrer(body.referrer || headerStr(req, "referer"));
 
     // Anonymized client IP (last IPv4 octet zeroed, IPv6 truncated to /64)
     const ip = anonymizeIp(headerStr(req, "cf-connecting-ip") || headerStr(req, "x-forwarded-for"));
@@ -180,6 +228,7 @@ export class UsageController {
         companyId,
         ip,
         is_bot: isBot,
+        referrer_source: referrerSource,
       },
     });
   }

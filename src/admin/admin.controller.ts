@@ -445,6 +445,7 @@ export class AdminController {
     @Query("from") from?: string,
     @Query("to") to?: string,
     @Query("sort") sort?: "asc" | "desc",
+    @Query("cats") cats?: string,
   ) {
     const where: Prisma.UsageEventWhereInput = {};
     if (companyId) {
@@ -468,7 +469,47 @@ export class AdminController {
     }
     if (atRange.gte || atRange.lt) where.at = atRange;
 
-    const PAGE_SIZE = 20;
+    // Category filter — same priority order the UI uses to pick the row badge:
+    // bot > gads (gclid) > search (referrer_source) > other. Each requested
+    // category becomes an OR branch, with later branches excluding earlier
+    // ones so a single row never matches two branches (a bot with a gclid is
+    // only counted under "bots", never under "gads").
+    const SEARCH_SOURCES_LIST = [
+      "google_search", "bing", "yandex", "duckduckgo", "yahoo", "other_search",
+    ];
+    const ALL_CATS = new Set(["bots", "gads", "search", "other"]);
+    const requested = new Set(
+      (cats ? cats.split(",") : Array.from(ALL_CATS))
+        .map((s) => s.trim().toLowerCase())
+        .filter((s) => ALL_CATS.has(s)),
+    );
+    const orClauses: Prisma.UsageEventWhereInput[] = [];
+    if (requested.has("bots")) orClauses.push({ is_bot: true });
+    if (requested.has("gads")) orClauses.push({ is_bot: false, gclid: { not: null } });
+    if (requested.has("search")) {
+      orClauses.push({
+        is_bot: false,
+        gclid: null,
+        referrer_source: { in: SEARCH_SOURCES_LIST },
+      });
+    }
+    if (requested.has("other")) {
+      orClauses.push({
+        is_bot: false,
+        gclid: null,
+        OR: [
+          { referrer_source: null },
+          { referrer_source: { notIn: SEARCH_SOURCES_LIST } },
+        ],
+      });
+    }
+    if (orClauses.length === 0) {
+      // All four categories disabled → nothing matches by construction.
+      return { total: 0, hasMore: false, nextCursor: null, events: [] };
+    }
+    if (orClauses.length < ALL_CATS.size) where.OR = orClauses;
+
+    const PAGE_SIZE = 50;
     const dir: "asc" | "desc" = sort === "asc" ? "asc" : "desc";
     const rows = await this.prisma.usageEvent.findMany({
       where,

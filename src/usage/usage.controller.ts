@@ -131,14 +131,16 @@ function classifyDevice(uaString: string | null): { device: string | null; platf
   }
 }
 
-function clampOccurredAt(raw: number | undefined): Date {
-  const now = Date.now();
-  if (typeof raw !== "number" || !Number.isFinite(raw)) return new Date(now);
-  // Clamp to ±5 min to ignore wildly off client clocks while still preserving
-  // sub-second source order for normal clients.
-  const drift = Math.abs(now - raw);
-  if (drift > 5 * 60 * 1000) return new Date(now);
-  return new Date(raw);
+/** Always stamp with server time so JS-fired events and SSR rows live on a
+ *  single monotonic clock. The body's `occurredAt` (client `Date.now()`) is
+ *  ignored — clients with skewed system clocks were producing rows that
+ *  sorted before / after the surrounding session by whole seconds, breaking
+ *  the admin timeline's per-second ordering. Network latency from the
+ *  client `track()` call to here is on the order of tens of milliseconds,
+ *  which keeps the order on a single user's session intact while erasing
+ *  the cross-client clock drift. */
+function serverNow(): Date {
+  return new Date();
 }
 
 interface UsageEventBody {
@@ -224,7 +226,7 @@ export class UsageController {
 
     await this.prisma.usageEvent.create({
       data: {
-        at: clampOccurredAt(body.occurredAt),
+        at: serverNow(),
         event: body.event,
         country,
         region,

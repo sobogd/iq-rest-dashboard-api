@@ -446,8 +446,27 @@ export class AdminController {
     @Query("to") to?: string,
     @Query("sort") sort?: "asc" | "desc",
     @Query("cats") cats?: string,
+    @Query("similarTo") similarTo?: string,
   ) {
     const where: Prisma.UsageEventWhereInput = {};
+
+    // similarTo: narrow the timeline to rows sharing the geo + device shape
+    // of one specific event (same heuristic as /usage/similar). Folds the
+    // base event's identifying tuple into `where` so the standard cursor
+    // pagination keeps working unchanged.
+    if (similarTo) {
+      const base = await this.prisma.usageEvent.findUnique({ where: { id: similarTo } });
+      if (!base) throw new BadRequestException("similarTo event not found");
+      where.country = base.country;
+      where.device = base.device;
+      where.platform = base.platform;
+      if (base.ip) {
+        where.ip = base.ip;
+      } else {
+        where.region = base.region;
+        where.ip = null;
+      }
+    }
     if (companyId) {
       where.companyId = companyId;
     } else if (scope === "anonymous") {

@@ -207,7 +207,8 @@ model Table {
   number       Int
   capacity     Int
   zone         String?
-  translations Json?    // { "en": { "zone": "..." }, "es": {...} }
+  description  String?  // Free-form note shown next to the name on the table form
+  translations Json?    // { "en": { "zone": "...", "description": "..." }, "es": {...} }
   imageUrl     String?
   // Hex color used on the dashboard floor map / table grid when set;
   // overrides imageUrl in dashboard rendering, ignored on the public menu.

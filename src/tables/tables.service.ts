@@ -6,13 +6,14 @@ interface TableUpsert {
   number: number;
   capacity: number;
   zone?: string | null;
+  description?: string | null;
   imageUrl?: string | null;
   color?: string | null;
   x?: number | null;
   y?: number | null;
   isActive?: boolean;
   sortOrder?: number;
-  translations?: Record<string, { zone?: string }> | null;
+  translations?: Record<string, { zone?: string; description?: string }> | null;
 }
 
 @Injectable()
@@ -45,6 +46,7 @@ export class TablesService {
         number: body.number,
         capacity: body.capacity,
         zone: body.zone ?? null,
+        description: body.description ?? null,
         imageUrl: body.imageUrl ?? null,
         color: body.color ?? null,
         x: body.x ?? null,
@@ -66,6 +68,7 @@ export class TablesService {
     if (body.number !== undefined) data.number = body.number;
     if (body.capacity !== undefined) data.capacity = body.capacity;
     if (body.zone !== undefined) data.zone = body.zone ?? null;
+    if (body.description !== undefined) data.description = body.description ?? null;
     if (body.imageUrl !== undefined) data.imageUrl = body.imageUrl ?? null;
     if (body.color !== undefined) data.color = body.color ?? null;
     if (body.x !== undefined) data.x = body.x ?? null;

@@ -151,15 +151,27 @@ export class OnboardingSeedService {
         createdItems.push(created);
       }
 
-      // Tables — three sample tables for the floor map.
+      // Tables — three sample tables for the floor map. Pre-position them
+      // so they don't pile up at (50,50) the way unplaced tables would, and
+      // pre-pick three contrasting colours from the same swatch the dashboard
+      // table form offers so the owner sees the colour-coding feature on
+      // first load instead of three identical pins.
+      const TABLE_SEEDS: Array<{ number: number; capacity: number; x: number; y: number; color: string }> = [
+        { number: 1, capacity: 2, x: 25, y: 30, color: "#C8102E" },
+        { number: 2, capacity: 4, x: 50, y: 55, color: "#1F5959" },
+        { number: 3, capacity: 6, x: 75, y: 30, color: "#D4A017" },
+      ];
       const tables: Array<{ id: string; number: number }> = [];
-      for (const number of [1, 2, 3]) {
+      for (const seed of TABLE_SEEDS) {
         const created = await tx.table.create({
           data: {
             restaurantId: restaurant.id,
-            number,
-            capacity: number === 1 ? 2 : number === 2 ? 4 : 6,
-            sortOrder: number - 1,
+            number: seed.number,
+            capacity: seed.capacity,
+            x: seed.x,
+            y: seed.y,
+            color: seed.color,
+            sortOrder: seed.number - 1,
             isExample: true,
           },
         });

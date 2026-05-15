@@ -1,10 +1,11 @@
 import {
   BadRequestException,
-  Body,
   Controller,
   HttpCode,
   HttpStatus,
+  Param,
   Post,
+  Query,
   Req,
 } from "@nestjs/common";
 import { Throttle, seconds, minutes } from "@nestjs/throttler";
@@ -15,7 +16,10 @@ import { AuthService } from "../auth/auth.service";
 import { PrismaService } from "../prisma/prisma.service";
 
 const EVENT_REGEX = /^[a-z0-9_]{1,64}$/;
-const COUNTRY_REGEX = /^[A-Z]{2}$/;
+const GCLID_PREFIX = "land_gclid_";
+const GCLID_VALUE_REGEX = /^[A-Za-z0-9_-]{1,256}$/;
+const REFERRER_HOST_REGEX =
+  /(?:^|\.)(google|bing|yandex|duckduckgo|yahoo|baidu|ecosia|qwant|startpage|mojeek|brave)\.[a-z.]+$/i;
 const SESSION_COOKIE = "iqr_session";
 const EMAIL_COOKIE = "iqr_email";
 
@@ -37,9 +41,13 @@ function headerStr(req: Request, name: string): string | null {
   return null;
 }
 
-function decodeCity(raw: string | null): string | null {
-  if (!raw) return null;
-  try { return decodeURIComponent(raw); } catch { return raw; }
+function decodeRegion(raw: string | null): string {
+  if (!raw) return "";
+  try {
+    return decodeURIComponent(raw).slice(0, 100);
+  } catch {
+    return raw.slice(0, 100);
+  }
 }
 
 function anonymizeIp(raw: string | null): string | null {
@@ -55,10 +63,6 @@ function anonymizeIp(raw: string | null): string | null {
   return `${oct[0]}.${oct[1]}.${oct[2]}.0`;
 }
 
-/** Mirrors the middleware-side detector in soqrmenuweb/middleware.ts. Both
- *  write paths (SSR land_page_* and JS-fired land_*_section_show_*) must
- *  classify bots identically; otherwise AdsBot (which renders JS) flips
- *  is_bot=false on the JS rows while the SSR row says true. */
 const EXTRA_BOT_UA_REGEX =
   /AdsBot|Google-InspectionTool|GoogleOther|APIs-Google|FeedFetcher-Google|Storebot-Google|GoogleProducer|ChromeOS-Default-Bot|HeadlessChrome|PhantomJS|Screaming Frog|Sitebulb|axios\/|node-fetch|got\/|http_request|httpclient|java\/|okhttp|libwww|lwp-trivial|HttpClient|Apache-HttpClient/i;
 
@@ -73,7 +77,7 @@ function classifyDevice(uaString: string | null): { device: string | null; platf
   if (!uaString) return { device: null, platform: null };
   try {
     const parser = new UAParser(uaString);
-    const dev = parser.getDevice().type; // "mobile" | "tablet" | "console" | "smarttv" | "wearable" | "embedded" | undefined
+    const dev = parser.getDevice().type;
     const os = (parser.getOS().name || "").toLowerCase();
     const device = dev === "mobile" || dev === "tablet" ? dev : "desktop";
     let platform: string | null = "other";
@@ -88,25 +92,7 @@ function classifyDevice(uaString: string | null): { device: string | null; platf
   }
 }
 
-/** Always stamp with server time so JS-fired events and SSR rows live on a
- *  single monotonic clock. Skewed client clocks were producing rows that
- *  sorted before / after the surrounding session by whole seconds, breaking
- *  the admin timeline's per-second ordering. Network latency from the
- *  client `track()` call to here is on the order of tens of milliseconds,
- *  which keeps the order on a single user's session intact while erasing
- *  the cross-client clock drift. */
-function serverNow(): Date {
-  return new Date();
-}
-
-interface UsageEventBody {
-  event?: string;
-  country?: string;     // SSR can forward user's geo cookie (nginx clobbers cf-* upstream)
-  region?: string;
-  userAgent?: string;   // SSR can forward user's UA (the API sees the SSR's UA otherwise)
-}
-
-@Controller("usage")
+@Controller()
 export class UsageController {
   constructor(
     private readonly prisma: PrismaService,
@@ -114,34 +100,64 @@ export class UsageController {
   ) {}
 
   @Throttle({
-    burst: { ttl: seconds(1), limit: 30 },
-    sustained: { ttl: minutes(1), limit: 1500 },
+    burst: { ttl: seconds(1), limit: 10 },
+    sustained: { ttl: minutes(1), limit: 200 },
   })
-  @Post("event")
+  @Post("track/:event")
   @HttpCode(HttpStatus.NO_CONTENT)
-  async event(@Req() req: Request, @Body() body: UsageEventBody) {
-    if (!body.event || !EVENT_REGEX.test(body.event)) {
+  async track(
+    @Param("event") rawEvent: string,
+    @Query("r") referrerHost: string | undefined,
+    @Req() req: Request,
+  ) {
+    // Parse event name. `land_gclid_<GCLID>` is a special form: the gclid
+    // value travels in the URL path so the server can split it off into the
+    // dedicated `gclid` column without ever needing a request body.
+    let event = rawEvent;
+    let gclid: string | null = null;
+    let gclidArrived = false;
+
+    if (rawEvent.startsWith(GCLID_PREFIX)) {
+      const candidate = rawEvent.slice(GCLID_PREFIX.length);
+      if (!GCLID_VALUE_REGEX.test(candidate)) throw new BadRequestException("gclid invalid");
+      gclid = candidate;
+      event = "land_gclid";
+      gclidArrived = true;
+    } else if (!EVENT_REGEX.test(rawEvent)) {
       throw new BadRequestException("event invalid");
     }
 
-    // Geo: prefer body override (SSR forwards user's geo cookie because
-    // intermediate nginx clobbers cf-* upstream), fall back to CF headers.
-    const bodyCountry = body.country && COUNTRY_REGEX.test(body.country) ? body.country : null;
-    const bodyRegion = body.region && body.region.length <= 100 ? body.region : null;
-    const country = bodyCountry || headerStr(req, "cf-ipcountry") || "XX";
-    const region = bodyRegion || decodeCity(headerStr(req, "cf-region")) || "";
+    const ua = headerStr(req, "user-agent");
+    const { device, platform } = classifyDevice(ua);
+    const isBot = detectBot(ua);
 
-    // Device + platform parsed from UA. SSR forwards the user's UA explicitly;
-    // direct browser requests use the request's own UA header.
-    const uaString = body.userAgent || headerStr(req, "user-agent");
-    const { device, platform } = classifyDevice(uaString);
-    const isBot = detectBot(uaString);
+    // Bot-vs-GoogleAds is a strict mutex: only non-bot arrivals from a Google
+    // Ads click get the conversion-eligible is_google_ads flag. Bot gclids
+    // remain in the row (useful for filtering ad fraud) but are excluded
+    // from conversion uploads by `WHERE is_google_ads = true`.
+    const isGoogleAds = gclidArrived && !isBot;
 
-    // Anonymized client IP (last IPv4 octet zeroed, IPv6 truncated to /64)
-    const ip = anonymizeIp(headerStr(req, "cf-connecting-ip") || headerStr(req, "x-forwarded-for"));
+    // Referrer detection happens client-side: a JS fetch always sends the
+    // current page URL as Referer, not the original document.referrer, so
+    // the only way to know whether the user arrived from a search engine is
+    // to have the client read `document.referrer` and forward its hostname.
+    let isSearch = false;
+    if (
+      referrerHost &&
+      referrerHost.length <= 253 &&
+      REFERRER_HOST_REGEX.test(referrerHost)
+    ) {
+      isSearch = true;
+    }
 
-    // Skip events from admin impersonation — admin browsing as client must
-    // not pollute target's metrics nor surface as anonymous traffic.
+    const ip = anonymizeIp(
+      headerStr(req, "cf-connecting-ip") || headerStr(req, "x-forwarded-for"),
+    );
+    const country = headerStr(req, "cf-ipcountry") || "XX";
+    const region = decodeRegion(headerStr(req, "cf-region"));
+
+    // Admin impersonation skip: an admin browsing as another user must not
+    // pollute that user's metrics nor surface as anonymous traffic.
     if (
       readCookie(req, "iqr_admin_original_session") &&
       readCookie(req, "iqr_admin_original_email")
@@ -149,7 +165,6 @@ export class UsageController {
       return;
     }
 
-    // companyId only for authenticated users; quietly skip if cookies absent
     let companyId: string | null = null;
     const sessionCookie = readCookie(req, SESSION_COOKIE);
     const emailCookie = readCookie(req, EMAIL_COOKIE);
@@ -158,7 +173,7 @@ export class UsageController {
         const user = await this.auth.resolveSession(sessionCookie, emailCookie, {});
         companyId = user.companyId;
       } catch {
-        // Invalid session — proceed anonymously
+        // Invalid session — record as anonymous.
       }
     }
 
@@ -166,15 +181,18 @@ export class UsageController {
 
     await this.prisma.usageEvent.create({
       data: {
-        at: serverNow(),
-        event: body.event,
+        at: new Date(),
+        event,
         country,
         region,
         device,
         platform,
+        gclid,
+        is_google_ads: isGoogleAds,
+        is_search: isSearch,
+        is_bot: isBot,
         companyId,
         ip,
-        is_bot: isBot,
       },
     });
   }

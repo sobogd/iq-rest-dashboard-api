@@ -209,6 +209,9 @@ model Table {
   zone         String?
   translations Json?    // { "en": { "zone": "..." }, "es": {...} }
   imageUrl     String?
+  // Hex color used on the dashboard floor map / table grid when set;
+  // overrides imageUrl in dashboard rendering, ignored on the public menu.
+  color        String?
   // Floor-map position in percent (0-100); null = unplaced
   x            Float?
   y            Float?

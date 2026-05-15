@@ -36,6 +36,11 @@ export class OrdersController {
     return this.svc.patch((req as AuthedRequest).authUser.companyId, id, body);
   }
 
+  @Post(":id/split")
+  split(@Req() req: Request, @Param("id") id: string, @Body() body: Parameters<OrdersService["split"]>[2]) {
+    return this.svc.split((req as AuthedRequest).authUser.companyId, id, body);
+  }
+
   @Delete(":id")
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@Req() req: Request, @Param("id") id: string) {

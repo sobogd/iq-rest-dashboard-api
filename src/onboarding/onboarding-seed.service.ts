@@ -180,6 +180,8 @@ export class OnboardingSeedService {
         { status: "completed", lines: [{ item: pickItem(0, 0), qty: 1 }, { item: pickItem(2, 1), qty: 1 }] },
       ];
 
+      const seedOrderDate = new Date();
+      seedOrderDate.setUTCHours(0, 0, 0, 0);
       for (let idx = 0; idx < orderSamples.length; idx++) {
         const sample = orderSamples[idx];
         const lines = sample.lines.filter((l) => l.item);
@@ -195,6 +197,8 @@ export class OnboardingSeedService {
             tableNumber: tables[idx % tables.length].number,
             status: sample.status,
             isExample: true,
+            orderDate: seedOrderDate,
+            dailyNumber: idx + 1,
           },
         });
       }

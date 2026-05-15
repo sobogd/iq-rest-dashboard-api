@@ -8,7 +8,7 @@ export class OrdersService {
 
   list(companyId: string, status?: string) {
     return this.prisma.order.findMany({
-      where: { companyId, ...(status ? { status } : {}) },
+      where: { companyId, deletedAt: null, ...(status ? { status } : {}) },
       orderBy: { createdAt: "desc" },
     });
   }
@@ -52,7 +52,7 @@ export class OrdersService {
   }
 
   async patch(companyId: string, id: string, body: { status?: string; items?: unknown[]; total?: number; tableNumber?: number | null }) {
-    const order = await this.prisma.order.findFirst({ where: { id, companyId } });
+    const order = await this.prisma.order.findFirst({ where: { id, companyId, deletedAt: null } });
     if (!order) throw new NotFoundException();
     return this.prisma.order.update({
       where: { id },
@@ -66,9 +66,9 @@ export class OrdersService {
   }
 
   async remove(companyId: string, id: string) {
-    const order = await this.prisma.order.findFirst({ where: { id, companyId } });
+    const order = await this.prisma.order.findFirst({ where: { id, companyId, deletedAt: null } });
     if (!order) throw new NotFoundException();
-    await this.prisma.order.delete({ where: { id } });
+    await this.prisma.order.update({ where: { id }, data: { deletedAt: new Date() } });
   }
 
   // Atomic split: создаёт новый Order с выбранными items, исходный обновляет (items без выбранных).
@@ -82,7 +82,7 @@ export class OrdersService {
     if (!Array.isArray(itemIds) || itemIds.length === 0) {
       throw new NotFoundException("No items selected");
     }
-    const order = await this.prisma.order.findFirst({ where: { id, companyId } });
+    const order = await this.prisma.order.findFirst({ where: { id, companyId, deletedAt: null } });
     if (!order) throw new NotFoundException();
 
     const allItems = Array.isArray(order.items) ? (order.items as Array<{ id: string }>) : [];

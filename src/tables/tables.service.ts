@@ -29,7 +29,7 @@ export class TablesService {
     const rid = await this.restaurantId(companyId);
     if (!rid) return [];
     return this.prisma.table.findMany({
-      where: { restaurantId: rid },
+      where: { restaurantId: rid, deletedAt: null },
       orderBy: { sortOrder: "asc" },
     });
   }
@@ -62,7 +62,7 @@ export class TablesService {
   async update(companyId: string, id: string, body: Partial<TableUpsert>) {
     const rid = await this.restaurantId(companyId);
     if (!rid) throw new NotFoundException();
-    const tbl = await this.prisma.table.findFirst({ where: { id, restaurantId: rid } });
+    const tbl = await this.prisma.table.findFirst({ where: { id, restaurantId: rid, deletedAt: null } });
     if (!tbl) throw new NotFoundException();
     const data: Prisma.TableUpdateInput = {};
     if (body.number !== undefined) data.number = body.number;
@@ -83,8 +83,8 @@ export class TablesService {
   async remove(companyId: string, id: string) {
     const rid = await this.restaurantId(companyId);
     if (!rid) throw new NotFoundException();
-    const tbl = await this.prisma.table.findFirst({ where: { id, restaurantId: rid } });
+    const tbl = await this.prisma.table.findFirst({ where: { id, restaurantId: rid, deletedAt: null } });
     if (!tbl) throw new NotFoundException();
-    await this.prisma.table.delete({ where: { id } });
+    await this.prisma.table.update({ where: { id }, data: { deletedAt: new Date() } });
   }
 }

@@ -219,6 +219,9 @@ model Table {
   isActive     Boolean  @default(true)
   sortOrder    Int      @default(0)
   isExample    Boolean  @default(false)
+  // Soft-delete marker. Hidden from active table lists but kept so older
+  // bookings / orders can still resolve their tableId and tableNumber.
+  deletedAt    DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -288,6 +291,9 @@ model Item {
   sortOrder    Int      @default(0)
   isActive     Boolean  @default(true)
   isExample    Boolean  @default(false)
+  // Soft-delete marker. Hidden from menu lists, but kept around so orders'
+  // dishId references and historical analytics can still resolve the row.
+  deletedAt    DateTime?
   categoryId   String
   companyId    String
   createdAt    DateTime @default(now())
@@ -395,6 +401,9 @@ model Order {
   tableNumber     Int?
   status          String   @default("new") // new | in_progress | completed | cancelled
   isExample       Boolean  @default(false)
+  // Soft-delete marker. Hidden from operational lists but preserved so
+  // analytics (revenue, top dishes, etc.) survive a delete.
+  deletedAt       DateTime?
   orderDate       DateTime @db.Date
   dailyNumber     Int
   createdAt       DateTime @default(now())

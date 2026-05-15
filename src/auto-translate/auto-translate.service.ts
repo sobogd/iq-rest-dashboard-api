@@ -78,7 +78,7 @@ export class AutoTranslateService {
    */
   async runMenuBackfill(companyId: string) {
     const [items, cats] = await Promise.all([
-      this.prisma.item.findMany({ where: { companyId }, select: { id: true } }),
+      this.prisma.item.findMany({ where: { companyId, deletedAt: null }, select: { id: true } }),
       this.prisma.category.findMany({ where: { companyId }, select: { id: true } }),
     ]);
     await parallelLimit(items, 5, async (it) => {
@@ -213,7 +213,7 @@ export class AutoTranslateService {
     if (targets.length === 0) return;
 
     const item = await this.prisma.item.findFirst({
-      where: { id: itemId, companyId },
+      where: { id: itemId, companyId, deletedAt: null },
       select: { id: true, name: true, description: true, translations: true },
     });
     if (!item) return;
@@ -244,7 +244,7 @@ export class AutoTranslateService {
     // the meantime (translations the user typed manually win — we only fill
     // the languages we actually translated).
     const fresh = await this.prisma.item.findFirst({
-      where: { id: itemId, companyId },
+      where: { id: itemId, companyId, deletedAt: null },
       select: { id: true, translations: true },
     });
     if (!fresh) return;

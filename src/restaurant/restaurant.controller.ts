@@ -73,7 +73,7 @@ export class RestaurantController {
       ].join("\n");
     } else {
       const items = await this.prisma.item.findMany({
-        where: { companyId, isActive: true },
+        where: { companyId, isActive: true, deletedAt: null },
         select: { name: true },
         take: 6,
       });

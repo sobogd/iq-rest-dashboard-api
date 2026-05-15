@@ -25,14 +25,14 @@ export class ItemsService {
 
   list(companyId: string) {
     return this.prisma.item.findMany({
-      where: { companyId },
+      where: { companyId, deletedAt: null },
       orderBy: { sortOrder: "asc" },
     });
   }
 
   async create(companyId: string, body: ItemUpsert) {
     const max = await this.prisma.item.aggregate({
-      where: { companyId, categoryId: body.categoryId },
+      where: { companyId, categoryId: body.categoryId, deletedAt: null },
       _max: { sortOrder: true },
     });
     const created = await this.prisma.item.create({
@@ -63,7 +63,7 @@ export class ItemsService {
   }
 
   async update(companyId: string, id: string, body: Partial<ItemUpsert>) {
-    const item = await this.prisma.item.findFirst({ where: { id, companyId } });
+    const item = await this.prisma.item.findFirst({ where: { id, companyId, deletedAt: null } });
     if (!item) throw new NotFoundException();
     const data: Prisma.ItemUpdateInput = {};
     if (body.name !== undefined) data.name = body.name;
@@ -106,7 +106,7 @@ export class ItemsService {
   }
 
   async patch(companyId: string, id: string, body: { isActive?: boolean }) {
-    const item = await this.prisma.item.findFirst({ where: { id, companyId } });
+    const item = await this.prisma.item.findFirst({ where: { id, companyId, deletedAt: null } });
     if (!item) throw new NotFoundException();
     return this.prisma.item.update({
       where: { id },
@@ -115,9 +115,9 @@ export class ItemsService {
   }
 
   async remove(companyId: string, id: string) {
-    const item = await this.prisma.item.findFirst({ where: { id, companyId } });
+    const item = await this.prisma.item.findFirst({ where: { id, companyId, deletedAt: null } });
     if (!item) throw new NotFoundException();
-    await this.prisma.item.delete({ where: { id } });
+    await this.prisma.item.update({ where: { id }, data: { deletedAt: new Date() } });
   }
 
   async reorderBulk(companyId: string, items: { id: string; sortOrder: number }[]) {
@@ -125,7 +125,7 @@ export class ItemsService {
     await this.prisma.$transaction(
       items.map((it) =>
         this.prisma.item.updateMany({
-          where: { id: it.id, companyId },
+          where: { id: it.id, companyId, deletedAt: null },
           data: { sortOrder: it.sortOrder },
         }),
       ),
@@ -137,7 +137,7 @@ export class ItemsService {
     const item = await this.prisma.item.findFirst({ where: { id: itemId, companyId } });
     if (!item) throw new NotFoundException();
     const siblings = await this.prisma.item.findMany({
-      where: { companyId, categoryId: item.categoryId },
+      where: { companyId, categoryId: item.categoryId, deletedAt: null },
       orderBy: { sortOrder: "asc" },
       select: { id: true, sortOrder: true },
     });

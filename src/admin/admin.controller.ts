@@ -506,7 +506,6 @@ export class AdminController {
         ad_params: true,
         companyId: true,
         ip: true,
-        is_bot: true,
         is_search: true,
         is_google_ads: true,
       },
@@ -557,7 +556,6 @@ export class AdminController {
         companyId: r.companyId,
         companyLabel: r.companyId ? labels.get(r.companyId) ?? null : null,
         ip: r.ip,
-        isBot: r.is_bot,
         isSearch: r.is_search,
         isGoogleAds: r.is_google_ads,
       })),
@@ -589,7 +587,7 @@ export class AdminController {
         id: true, at: true, event: true,
         country: true, region: true, device: true, platform: true,
         gclid: true, ad_params: true, companyId: true, ip: true,
-        is_bot: true, is_search: true, is_google_ads: true,
+        is_search: true, is_google_ads: true,
       },
     });
 
@@ -625,7 +623,6 @@ export class AdminController {
         companyId: r.companyId,
         companyLabel: r.companyId ? labels.get(r.companyId) ?? null : null,
         ip: r.ip,
-        isBot: r.is_bot,
         isSearch: r.is_search,
         isGoogleAds: r.is_google_ads,
       })),

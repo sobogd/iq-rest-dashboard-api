@@ -128,14 +128,14 @@ export class UsageController {
     }
 
     const ua = headerStr(req, "user-agent");
-    const { device, platform } = classifyDevice(ua);
-    const isBot = detectBot(ua);
 
-    // Bot-vs-GoogleAds is a strict mutex: only non-bot arrivals from a Google
-    // Ads click get the conversion-eligible is_google_ads flag. Bot gclids
-    // remain in the row (useful for filtering ad fraud) but are excluded
-    // from conversion uploads by `WHERE is_google_ads = true`.
-    const isGoogleAds = gclidArrived && !isBot;
+    // Bot arrivals are dropped before any DB write — we only want signal from
+    // real visitors. UA detection is the only gate; suspect rows never reach
+    // `usage_events`.
+    if (detectBot(ua)) return;
+
+    const { device, platform } = classifyDevice(ua);
+    const isGoogleAds = gclidArrived;
 
     // Referrer detection happens client-side: a JS fetch always sends the
     // current page URL as Referer, not the original document.referrer, so
@@ -190,7 +190,6 @@ export class UsageController {
         gclid,
         is_google_ads: isGoogleAds,
         is_search: isSearch,
-        is_bot: isBot,
         companyId,
         ip,
       },

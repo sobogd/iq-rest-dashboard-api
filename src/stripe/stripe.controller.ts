@@ -19,7 +19,6 @@ import {
   type PriceLookupKey,
   getLookupKeyWithCurrency,
 } from "../common/stripe";
-import { getRequestCurrency } from "../common/geo";
 
 interface SubscriptionData {
   id: string;
@@ -53,9 +52,9 @@ export class StripeController {
       throw new BadRequestException("Active subscription already exists");
     }
 
-    const currency = await getRequestCurrency(req);
+    // EU-only billing — Stripe checkout always uses the EUR price object.
     const baseLookupKey = body.priceLookupKey as PriceLookupKey;
-    const fullLookupKey = getLookupKeyWithCurrency(baseLookupKey, currency);
+    const fullLookupKey = getLookupKeyWithCurrency(baseLookupKey, "EUR");
 
     let customerId = company.stripeCustomerId;
     if (customerId) {

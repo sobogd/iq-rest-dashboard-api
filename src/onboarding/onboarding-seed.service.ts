@@ -131,10 +131,21 @@ export class OnboardingSeedService {
         createdCategories.push(created);
       }
 
-      // Items — keyed by categoryIndex into createdCategories.
-      const createdItems: Array<{ id: string; name: string; price: { toString(): string } }> = [];
+      // Items — keyed by categoryIndex into createdCategories. Also keep the
+      // full multilingual name on the in-memory item so the order-seeding
+      // step below can stamp the dashboard-expected dishNameSnapshot.
+      const createdItems: Array<{
+        id: string;
+        name: string;
+        price: { toString(): string };
+        nameMl: Record<string, string>;
+      }> = [];
       for (const item of template.items) {
         const category = createdCategories[item.categoryIndex];
+        const nameMl: Record<string, string> = {};
+        for (const [lang, value] of Object.entries(item.name)) {
+          if (typeof value === "string" && value.length > 0) nameMl[lang] = value;
+        }
         const created = await tx.item.create({
           data: {
             companyId,
@@ -148,7 +159,7 @@ export class OnboardingSeedService {
             ...(item.imageUrl ? { imageUrl: item.imageUrl } : {}),
           },
         });
-        createdItems.push(created);
+        createdItems.push({ ...created, nameMl });
       }
 
       // Tables — three sample tables for the floor map. Pre-position them
@@ -186,23 +197,50 @@ export class OnboardingSeedService {
       const pickItem = (catIdx: number, fallback: number) =>
         itemsByCategory[catIdx]?.[0] ?? createdItems[fallback];
 
-      const orderSamples: Array<{ status: string; lines: { item: typeof createdItems[number]; qty: number }[] }> = [
-        { status: "new", lines: [{ item: pickItem(0, 0), qty: 2 }, { item: pickItem(2, 1), qty: 2 }] },
-        { status: "in_progress", lines: [{ item: pickItem(1, 0), qty: 1 }, { item: pickItem(2, 0), qty: 1 }] },
-        { status: "completed", lines: [{ item: pickItem(0, 0), qty: 1 }, { item: pickItem(2, 1), qty: 1 }] },
+      const orderSamples: Array<{ status: string; itemStatus: "pending" | "cooking" | "ready" | "served"; lines: { item: typeof createdItems[number]; qty: number }[] }> = [
+        { status: "new", itemStatus: "pending", lines: [{ item: pickItem(0, 0), qty: 2 }, { item: pickItem(2, 1), qty: 2 }] },
+        { status: "in_progress", itemStatus: "cooking", lines: [{ item: pickItem(1, 0), qty: 1 }, { item: pickItem(2, 0), qty: 1 }] },
+        { status: "completed", itemStatus: "served", lines: [{ item: pickItem(0, 0), qty: 1 }, { item: pickItem(2, 1), qty: 1 }] },
       ];
 
       const seedOrderDate = new Date();
       seedOrderDate.setUTCHours(0, 0, 0, 0);
+      const nowIso = new Date().toISOString();
+      let itemSerial = 0;
       for (let idx = 0; idx < orderSamples.length; idx++) {
         const sample = orderSamples[idx];
         const lines = sample.lines.filter((l) => l.item);
         const total = lines.reduce((sum, l) => sum + Number(l.item.price) * l.qty, 0);
+        // The new dashboard renders the "fat" per-unit shape with dishNameSnapshot
+        // (Ml object), basePriceSnapshot, options[], and a per-unit status; the
+        // legacy soqrmenuweb dashboard still reads the flat { name, qty, price }
+        // tuple. Emit both shapes on the same row so either dashboard picks the
+        // sample order up correctly.
+        const items = lines.flatMap((l) =>
+          Array.from({ length: l.qty }, () => {
+            itemSerial++;
+            const localizedName = l.item.nameMl[seedLocale] || l.item.nameMl.en || l.item.name;
+            return {
+              id: `seed_${idx}_${itemSerial}`,
+              dishId: l.item.id,
+              dishNameSnapshot: l.item.nameMl,
+              basePriceSnapshot: String(Number(l.item.price)),
+              options: [],
+              notes: "",
+              status: sample.itemStatus,
+              createdAt: nowIso,
+              // Legacy fields for the old soqrmenuweb dashboard.
+              name: localizedName,
+              qty: 1,
+              price: Number(l.item.price),
+            };
+          }),
+        );
         await tx.order.create({
           data: {
             restaurantId: restaurant.id,
             companyId,
-            items: lines.map((l) => ({ id: l.item.id, name: l.item.name, qty: l.qty, price: Number(l.item.price) })),
+            items,
             total,
             currency,
             customerName: guests[idx % guests.length],

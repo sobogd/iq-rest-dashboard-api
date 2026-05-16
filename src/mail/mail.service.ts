@@ -253,6 +253,51 @@ export class MailService implements OnModuleDestroy {
     });
   }
 
+  /** Notify the IQ Rest support inbox when a customer sends a new
+   *  support message. Fire-and-forget from the support controller so
+   *  SMTP failures don't bubble back to the writer. Recipient address
+   *  comes from SUPPORT_INBOX_EMAIL (falls back to support@iq-rest.com).
+   */
+  async sendAdminSupportNewMessageNotification({
+    companyName,
+    userEmail,
+    message,
+  }: {
+    companyName: string;
+    userEmail: string;
+    message: string;
+  }): Promise<void> {
+    const cfg = this.smtpConfig();
+    if (!cfg) {
+      this.logger.warn("SMTP not configured — admin support notification skipped");
+      return;
+    }
+    const transporter = await this.getTransporter(cfg);
+    const to =
+      this.config.get<string>("SUPPORT_INBOX_EMAIL") || "support@iq-rest.com";
+    const appUrl = (this.config.get<string>("APP_URL") || "https://dashboard.iq-rest.com").replace(/\/$/, "");
+    const adminUrl = `${appUrl}/en/dashboard/admin`;
+    const safeMessage = message.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const subject = `[IQ Rest support] ${companyName} — new message`;
+
+    await transporter.sendMail({
+      from: this.cachedFrom ?? cfg.from,
+      to,
+      subject,
+      html: `
+        <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:520px;margin:0 auto;padding:32px 20px;color:#1a1a1a">
+          ${this.logoMark()}
+          <p style="font-size:15px;line-height:1.6;margin:0 0 8px;color:#666">From <strong>${userEmail}</strong> at <strong>${companyName}</strong></p>
+          <div style="margin:20px 0;padding:20px;background:#f5f5f5;border-radius:12px;font-size:15px;line-height:1.6;white-space:pre-wrap">${safeMessage}</div>
+          <p style="font-size:15px;line-height:1.7;margin:24px 0 0">
+            <a href="${adminUrl}" style="color:#0066cc">Open admin dashboard</a>
+          </p>
+        </div>
+      `,
+      text: `New support message from ${userEmail} at ${companyName}:\n\n${message}\n\nAdmin: ${adminUrl}`,
+    });
+  }
+
   async sendSupportReplyNotification(toEmail: string, locale = "en"): Promise<void> {
     const cfg = this.smtpConfig();
     if (!cfg) {

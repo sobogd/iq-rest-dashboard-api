@@ -79,7 +79,8 @@ export class AdminController {
     });
 
     const ids = companies.map((c) => c.id);
-    const [monthly, today, d45, d60, d85, lastVisits] = ids.length
+    const startOfMessagesLastDay = new Date(now.getTime() - DAY_MS);
+    const [monthly, today, d45, d60, d85, lastVisits, messagesLastDay] = ids.length
       ? await Promise.all([
           this.prisma.$queryRaw<{ companyId: string; count: bigint }[]>`
             SELECT "companyId", COUNT(DISTINCT "sessionId") AS count
@@ -126,14 +127,24 @@ export class AdminController {
             WHERE "companyId" = ANY(${ids}::text[])
             GROUP BY "companyId"
           `,
+          this.prisma.supportMessage.groupBy({
+            by: ["companyId"],
+            where: { companyId: { in: ids }, isAdmin: false, createdAt: { gte: startOfMessagesLastDay } },
+            _count: { _all: true },
+          }),
         ])
-      : [[], [], [], [], [], []];
+      : [[], [], [], [], [], [], []];
     const monthlyMap = new Map(monthly.map((r) => [r.companyId, Number(r.count)]));
     const todayMap = new Map(today.map((r) => [r.companyId, Number(r.count)]));
     const d45Map = new Map(d45.map((r) => [r.companyId, Number(r.count)]));
     const d60Map = new Map(d60.map((r) => [r.companyId, Number(r.count)]));
     const d85Map = new Map(d85.map((r) => [r.companyId, Number(r.count)]));
     const lastVisitMap = new Map(lastVisits.map((r) => [r.companyId, r.last]));
+    const messagesLastDayMap = new Map(
+      (messagesLastDay as Array<{ companyId: string; _count: { _all: number } }>).map(
+        (r) => [r.companyId, r._count._all] as const,
+      ),
+    );
 
     const items = companies.map((c) => ({
       id: c.id,
@@ -144,6 +155,7 @@ export class AdminController {
       categoriesCount: c._count.categories,
       itemsCount: c._count.items,
       messagesCount: c._count.supportMessages,
+      messagesLastDayCount: messagesLastDayMap.get(c.id) || 0,
       monthlyViews: monthlyMap.get(c.id) || 0,
       todayScans: todayMap.get(c.id) || 0,
       scans45d: d45Map.get(c.id) || 0,

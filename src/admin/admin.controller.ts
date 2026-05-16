@@ -1553,7 +1553,89 @@ export class AdminController {
         });
       }
     }
-    return { campaigns, adGroups, ads, keywords, negatives, timeline, campaignAssets, campaignTargeting, searchTermsByAdGroup: stByAdGroup, adGroupSitelinks, adGroupCallouts, adGroupSnippets, adGroupImages };
+    // ── Strategies summary for the selected date range ────────────────
+    // Aggregate metrics per bid strategy across every campaign that ran
+    // in the window. Portfolio strategies group by resource_name; inline
+    // (standard) strategies group by their bidding_strategy_type so a
+    // Manual-CPC / Maximize-Clicks campaign still shows up as a row.
+    const stratRows = await search(`
+      SELECT campaign.id, campaign.bidding_strategy, campaign.bidding_strategy_type,
+             metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions
+      FROM campaign
+      WHERE segments.date ${dateSql}
+    `);
+
+    type StrategyRow = {
+      key: string;
+      name: string;
+      type: string;
+      status: string | null;
+      isPortfolio: boolean;
+      campaignCount: number;
+      impressions: number;
+      clicks: number;
+      conversions: number;
+      cost: number;
+    };
+    const strategyByKey = new Map<string, StrategyRow & { campaignIds: Set<string> }>();
+    const portfolioResources = new Set<string>();
+    for (const r of stratRows) {
+      const portfolio: string = r.campaign?.biddingStrategy ?? r.campaign?.bidding_strategy ?? "";
+      const type: string = r.campaign?.biddingStrategyType ?? r.campaign?.bidding_strategy_type ?? "UNSPECIFIED";
+      const key = portfolio || `inline:${type}`;
+      const cur = strategyByKey.get(key) ?? {
+        key,
+        name: portfolio ? portfolio.split("/").pop() ?? portfolio : `Inline (${type})`,
+        type,
+        status: null,
+        isPortfolio: Boolean(portfolio),
+        campaignCount: 0,
+        impressions: 0,
+        clicks: 0,
+        conversions: 0,
+        cost: 0,
+        campaignIds: new Set<string>(),
+      };
+      cur.impressions += Number(r.metrics?.impressions ?? 0);
+      cur.clicks += Number(r.metrics?.clicks ?? 0);
+      cur.conversions += Number(r.metrics?.conversions ?? 0);
+      cur.cost += Number(r.metrics?.costMicros ?? 0) / 1e6;
+      const cId = String(r.campaign?.id ?? "");
+      if (cId) cur.campaignIds.add(cId);
+      cur.campaignCount = cur.campaignIds.size;
+      strategyByKey.set(key, cur);
+      if (portfolio) portfolioResources.add(portfolio);
+    }
+
+    if (portfolioResources.size > 0) {
+      const list = Array.from(portfolioResources)
+        .map((s) => `'${s.replace(/'/g, "\\'")}'`)
+        .join(",");
+      const nameRows = await search(`
+        SELECT bidding_strategy.resource_name, bidding_strategy.name,
+               bidding_strategy.type, bidding_strategy.status
+        FROM bidding_strategy
+        WHERE bidding_strategy.resource_name IN (${list})
+      `);
+      for (const r of nameRows) {
+        const rn: string = r.biddingStrategy?.resourceName ?? r.bidding_strategy?.resource_name ?? "";
+        if (!rn) continue;
+        const row = strategyByKey.get(rn);
+        if (!row) continue;
+        row.name = r.biddingStrategy?.name ?? r.bidding_strategy?.name ?? row.name;
+        row.type = r.biddingStrategy?.type ?? r.bidding_strategy?.type ?? row.type;
+        row.status = r.biddingStrategy?.status ?? r.bidding_strategy?.status ?? null;
+      }
+    }
+
+    const strategies = Array.from(strategyByKey.values())
+      .map((s) => {
+        const { campaignIds: _ignored, ...rest } = s;
+        return rest;
+      })
+      .sort((a, b) => b.cost - a.cost);
+
+    return { campaigns, adGroups, ads, keywords, negatives, timeline, strategies, campaignAssets, campaignTargeting, searchTermsByAdGroup: stByAdGroup, adGroupSitelinks, adGroupCallouts, adGroupSnippets, adGroupImages };
   }
 
   /** Detail endpoints — pull max fields for modal display. Always fresh. */

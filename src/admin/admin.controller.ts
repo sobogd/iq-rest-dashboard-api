@@ -1572,6 +1572,11 @@ export class AdminController {
       type: string;
       status: string | null;
       isPortfolio: boolean;
+      /** Portfolio Target CPA + Max CPC bid ceiling, in micros — null
+       *  when not applicable (inline strategies or non-TARGET_CPA
+       *  portfolios). Used by the dashboard's inline edit UI. */
+      targetCpaMicros: number | null;
+      cpcBidCeilingMicros: number | null;
     };
     const portfolioResources = new Set<string>();
     const campaignStrategies: Record<string, StrategyMeta> = {};
@@ -1586,6 +1591,8 @@ export class AdminController {
         type,
         status: null,
         isPortfolio: Boolean(portfolio),
+        targetCpaMicros: null,
+        cpcBidCeilingMicros: null,
       };
       metaByKey.set(key, meta);
       const cId = String(r.campaign?.id ?? "");
@@ -1599,7 +1606,9 @@ export class AdminController {
         .join(",");
       const nameRows = await search(`
         SELECT bidding_strategy.resource_name, bidding_strategy.name,
-               bidding_strategy.type, bidding_strategy.status
+               bidding_strategy.type, bidding_strategy.status,
+               bidding_strategy.target_cpa.target_cpa_micros,
+               bidding_strategy.target_cpa.cpc_bid_ceiling_micros
         FROM bidding_strategy
         WHERE bidding_strategy.resource_name IN (${list})
       `);
@@ -1611,6 +1620,10 @@ export class AdminController {
         meta.name = r.biddingStrategy?.name ?? r.bidding_strategy?.name ?? meta.name;
         meta.type = r.biddingStrategy?.type ?? r.bidding_strategy?.type ?? meta.type;
         meta.status = r.biddingStrategy?.status ?? r.bidding_strategy?.status ?? null;
+        const tcpaRaw = r.biddingStrategy?.targetCpa?.targetCpaMicros ?? r.bidding_strategy?.target_cpa?.target_cpa_micros;
+        const capRaw = r.biddingStrategy?.targetCpa?.cpcBidCeilingMicros ?? r.bidding_strategy?.target_cpa?.cpc_bid_ceiling_micros;
+        meta.targetCpaMicros = tcpaRaw != null ? Number(tcpaRaw) : null;
+        meta.cpcBidCeilingMicros = capRaw != null ? Number(capRaw) : null;
       }
     }
 
@@ -3512,6 +3525,74 @@ export class AdminController {
       throw new BadRequestException(`Bid update failed: ${txt.slice(0, 500)}`);
     }
     return { ok: true, bidMicros: Math.round(bidMicros) };
+  }
+
+  /** Update a portfolio Target CPA strategy's target CPA and / or the
+   *  Max CPC bid ceiling. Both fields are optional but at least one
+   *  must be present. Values are in EUR micros (1.50 EUR → 1_500_000). */
+  @Post("google-ads/strategy/:id/bid")
+  @HttpCode(HttpStatus.OK)
+  async updateStrategyBid(
+    @Param("id") id: string,
+    @Body() body: { targetCpaMicros?: number; cpcBidCeilingMicros?: number },
+  ) {
+    const tcpa = Number(body?.targetCpaMicros ?? 0);
+    const cap = Number(body?.cpcBidCeilingMicros ?? 0);
+    const haveTcpa = Number.isFinite(tcpa) && tcpa > 0;
+    const haveCap = Number.isFinite(cap) && cap > 0;
+    if (!haveTcpa && !haveCap) {
+      throw new BadRequestException("targetCpaMicros or cpcBidCeilingMicros required");
+    }
+    const clientId = this.config.get<string>("GOOGLE_ADS_CLIENT_ID");
+    const clientSecret = this.config.get<string>("GOOGLE_ADS_CLIENT_SECRET");
+    const refreshToken = this.config.get<string>("GOOGLE_ADS_REFRESH_TOKEN");
+    const developerToken = this.config.get<string>("GOOGLE_ADS_DEVELOPER_TOKEN");
+    const loginCustomerId = this.config.get<string>("GOOGLE_ADS_LOGIN_CUSTOMER_ID");
+    if (!clientId || !clientSecret || !refreshToken || !developerToken) {
+      throw new BadRequestException("Google Ads env vars not configured");
+    }
+    const oauth = new OAuth2Client(clientId, clientSecret);
+    oauth.setCredentials({ refresh_token: refreshToken });
+    const { token } = await oauth.getAccessToken();
+    const CUST = "6803239831";
+    const resourceName = `customers/${CUST}/biddingStrategies/${id}`;
+    const targetCpa: Record<string, number> = {};
+    const masks: string[] = [];
+    if (haveTcpa) {
+      targetCpa.targetCpaMicros = Math.round(tcpa);
+      masks.push("target_cpa.target_cpa_micros");
+    }
+    if (haveCap) {
+      targetCpa.cpcBidCeilingMicros = Math.round(cap);
+      masks.push("target_cpa.cpc_bid_ceiling_micros");
+    }
+    const res = await fetch(
+      `https://googleads.googleapis.com/v23/customers/${CUST}/biddingStrategies:mutate`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "developer-token": developerToken,
+          ...(loginCustomerId ? { "login-customer-id": loginCustomerId } : {}),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          operations: [{
+            updateMask: masks.join(","),
+            update: { resourceName, targetCpa },
+          }],
+        }),
+      },
+    );
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new BadRequestException(`Strategy bid update failed: ${txt.slice(0, 500)}`);
+    }
+    return {
+      ok: true,
+      targetCpaMicros: haveTcpa ? Math.round(tcpa) : null,
+      cpcBidCeilingMicros: haveCap ? Math.round(cap) : null,
+    };
   }
 
   private async fetchKeywordIdea(

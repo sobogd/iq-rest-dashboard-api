@@ -88,17 +88,32 @@ export class AnalyticsController {
   /** Public-menu analytics + order analytics for the authenticated user's
    *  company. Period is a calendar month (YYYY-MM); defaults to the current
    *  UTC month. The dashboard renders months from company.createdAt up to
-   *  the current month (descending) in the period dropdown. */
+   *  the current month (descending) in the period dropdown.
+   *
+   *  The order-metrics block is gated behind two checks:
+   *    - the requester is an IQ Rest admin (email @ admin domain), and
+   *    - at least one restaurant in the company has ordersEnabled = true.
+   *  Both conditions must hold; otherwise `orders` is null in the response
+   *  and the frontend skips the order sections. */
   @Get("stats")
   @UseGuards(AuthGuard)
   async stats(@Req() req: Request, @Query("period") periodRaw = "") {
-    const { companyId } = (req as AuthedRequest).authUser;
+    const { companyId, email } = (req as AuthedRequest).authUser;
     const { period, startDate, endDate, prevStartDate, prevEndDate } = monthWindow(periodRaw);
 
-    const company = await this.prisma.company.findUnique({
-      where: { id: companyId },
-      select: { createdAt: true },
-    });
+    const adminDomain = (process.env.ADMIN_EMAIL_DOMAIN || "iq-rest.com").toLowerCase();
+    const isAdmin = !!email && email.toLowerCase().endsWith("@" + adminDomain);
+
+    const [company, ordersEnabledCount] = await Promise.all([
+      this.prisma.company.findUnique({
+        where: { id: companyId },
+        select: { createdAt: true },
+      }),
+      this.prisma.restaurant.count({ where: { companyId, ordersEnabled: true } }),
+    ]);
+
+    const ordersFeatureOn = ordersEnabledCount > 0;
+    const showOrders = isAdmin && ordersFeatureOn;
 
     const [
       totalViews,
@@ -107,13 +122,6 @@ export class AnalyticsController {
       byDayPrevRaw,
       byLangRaw,
       byPageRaw,
-      ordersAgg,
-      ordersAggPrev,
-      ordersByDayRaw,
-      ordersByHourRaw,
-      ordersForItems,
-      ordersForSize,
-      statusCountsRaw,
     ] = await Promise.all([
       this.prisma.pageView.count({ where: { companyId, createdAt: { gte: startDate, lt: endDate } } }),
       this.prisma.pageView.groupBy({
@@ -152,157 +160,149 @@ export class AnalyticsController {
         GROUP BY page
         ORDER BY views DESC
       `,
-      // Order aggregates — exclude example orders + cancelled. Soft-deleted
-      // orders ARE kept (deletedAt is non-null but Order.items / total still
-      // reflect the real sale and we want them in revenue history).
-      this.prisma.$queryRaw<{ revenue: string | null; orders: bigint }[]>`
-        SELECT COALESCE(SUM(total), 0) AS revenue, COUNT(*) AS orders
-        FROM orders
-        WHERE "companyId" = ${companyId}
-          AND "createdAt" >= ${startDate} AND "createdAt" < ${endDate}
-          AND "isExample" = false AND status <> 'cancelled'
-      `,
-      this.prisma.$queryRaw<{ revenue: string | null; orders: bigint }[]>`
-        SELECT COALESCE(SUM(total), 0) AS revenue, COUNT(*) AS orders
-        FROM orders
-        WHERE "companyId" = ${companyId}
-          AND "createdAt" >= ${prevStartDate} AND "createdAt" < ${prevEndDate}
-          AND "isExample" = false AND status <> 'cancelled'
-      `,
-      this.prisma.$queryRaw<{ day: string; revenue: string; orders: bigint }[]>`
-        SELECT TO_CHAR("createdAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day,
-               SUM(total) AS revenue,
-               COUNT(*) AS orders
-        FROM orders
-        WHERE "companyId" = ${companyId}
-          AND "createdAt" >= ${startDate} AND "createdAt" < ${endDate}
-          AND "isExample" = false AND status <> 'cancelled'
-        GROUP BY day
-        ORDER BY day ASC
-      `,
-      this.prisma.$queryRaw<{ hour: number; revenue: string; orders: bigint }[]>`
-        SELECT EXTRACT(HOUR FROM "createdAt" AT TIME ZONE 'UTC')::int AS hour,
-               SUM(total) AS revenue,
-               COUNT(*) AS orders
-        FROM orders
-        WHERE "companyId" = ${companyId}
-          AND "createdAt" >= ${startDate} AND "createdAt" < ${endDate}
-          AND "isExample" = false AND status <> 'cancelled'
-        GROUP BY hour
-        ORDER BY hour ASC
-      `,
-      this.prisma.order.findMany({
-        where: {
-          companyId,
-          createdAt: { gte: startDate, lt: endDate },
-          isExample: false,
-          status: { not: "cancelled" },
-        },
-        select: { items: true },
-      }),
-      this.prisma.order.findMany({
-        where: {
-          companyId,
-          createdAt: { gte: startDate, lt: endDate },
-          isExample: false,
-          status: { not: "cancelled" },
-        },
-        select: { items: true },
-      }),
-      this.prisma.$queryRaw<{ status: string; count: bigint }[]>`
-        SELECT status, COUNT(*) AS count
-        FROM orders
-        WHERE "companyId" = ${companyId}
-          AND "createdAt" >= ${startDate} AND "createdAt" < ${endDate}
-          AND "isExample" = false
-        GROUP BY status
-      `,
     ]);
+
+    // Order block — only fetched when the requester is an admin AND at
+    // least one restaurant has ordersEnabled. Soft-deleted orders are
+    // kept (Order.deletedAt is non-null but total/items still reflect the
+    // real sale). Cancelled is excluded from revenue, kept for the funnel.
+    const orderQueries = showOrders
+      ? await Promise.all([
+          this.prisma.$queryRaw<{ revenue: string | null; orders: bigint }[]>`
+            SELECT COALESCE(SUM(total), 0) AS revenue, COUNT(*) AS orders
+            FROM orders
+            WHERE "companyId" = ${companyId}
+              AND "createdAt" >= ${startDate} AND "createdAt" < ${endDate}
+              AND "isExample" = false AND status <> 'cancelled'
+          `,
+          this.prisma.$queryRaw<{ revenue: string | null; orders: bigint }[]>`
+            SELECT COALESCE(SUM(total), 0) AS revenue, COUNT(*) AS orders
+            FROM orders
+            WHERE "companyId" = ${companyId}
+              AND "createdAt" >= ${prevStartDate} AND "createdAt" < ${prevEndDate}
+              AND "isExample" = false AND status <> 'cancelled'
+          `,
+          this.prisma.$queryRaw<{ day: string; revenue: string; orders: bigint }[]>`
+            SELECT TO_CHAR("createdAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day,
+                   SUM(total) AS revenue,
+                   COUNT(*) AS orders
+            FROM orders
+            WHERE "companyId" = ${companyId}
+              AND "createdAt" >= ${startDate} AND "createdAt" < ${endDate}
+              AND "isExample" = false AND status <> 'cancelled'
+            GROUP BY day
+            ORDER BY day ASC
+          `,
+          this.prisma.$queryRaw<{ hour: number; revenue: string; orders: bigint }[]>`
+            SELECT EXTRACT(HOUR FROM "createdAt" AT TIME ZONE 'UTC')::int AS hour,
+                   SUM(total) AS revenue,
+                   COUNT(*) AS orders
+            FROM orders
+            WHERE "companyId" = ${companyId}
+              AND "createdAt" >= ${startDate} AND "createdAt" < ${endDate}
+              AND "isExample" = false AND status <> 'cancelled'
+            GROUP BY hour
+            ORDER BY hour ASC
+          `,
+          this.prisma.order.findMany({
+            where: {
+              companyId,
+              createdAt: { gte: startDate, lt: endDate },
+              isExample: false,
+              status: { not: "cancelled" },
+            },
+            select: { items: true },
+          }),
+          this.prisma.$queryRaw<{ status: string; count: bigint }[]>`
+            SELECT status, COUNT(*) AS count
+            FROM orders
+            WHERE "companyId" = ${companyId}
+              AND "createdAt" >= ${startDate} AND "createdAt" < ${endDate}
+              AND "isExample" = false
+            GROUP BY status
+          `,
+        ])
+      : null;
 
     const totalScans = uniqSessionsRows.length;
 
-    const revenue = Number(ordersAgg[0]?.revenue ?? 0);
-    const orders = Number(ordersAgg[0]?.orders ?? 0);
-    const revenuePrev = Number(ordersAggPrev[0]?.revenue ?? 0);
-    const aov = orders > 0 ? revenue / orders : 0;
+    // Build the orders payload (or null) without losing typing. When the
+    // gate is off this short-circuits the rest of the aggregation work.
+    let ordersPayload: unknown = null;
+    if (orderQueries) {
+      const [
+        ordersAgg,
+        ordersAggPrev,
+        ordersByDayRaw,
+        ordersByHourRaw,
+        ordersForItems,
+        statusCountsRaw,
+      ] = orderQueries;
 
-    // Aggregate items from all in-period order JSON blobs. Each order.items is
-    // [{ id, name, qty, price }]. Used for top dishes + items-per-order + the
-    // order-size histogram below.
-    interface OrderItem { id?: string; name?: string; qty?: number; price?: number | string }
-    const itemAgg = new Map<string, { name: string; quantity: number; revenue: number }>();
-    let totalLines = 0;
-    let totalQty = 0;
-    for (const o of ordersForItems) {
-      const items = (o.items as unknown as OrderItem[]) ?? [];
-      for (const it of items) {
-        const qty = Number(it.qty ?? 0);
-        const price = Number(it.price ?? 0);
-        const key = String(it.id ?? it.name ?? "");
-        if (!key) continue;
-        const prev = itemAgg.get(key) ?? { name: String(it.name ?? key), quantity: 0, revenue: 0 };
-        prev.quantity += qty;
-        prev.revenue += qty * price;
-        if (it.name) prev.name = String(it.name);
-        itemAgg.set(key, prev);
+      const revenue = Number(ordersAgg[0]?.revenue ?? 0);
+      const orders = Number(ordersAgg[0]?.orders ?? 0);
+      const revenuePrev = Number(ordersAggPrev[0]?.revenue ?? 0);
+      const aov = orders > 0 ? revenue / orders : 0;
+
+      // Aggregate items from all in-period order JSON blobs. Each
+      // order.items is [{ id, name, qty, price }]. Drives top dishes,
+      // items-per-order and the order-size histogram.
+      interface OrderItem { id?: string; name?: string; qty?: number; price?: number | string }
+      const itemAgg = new Map<string, { name: string; quantity: number; revenue: number }>();
+      let totalQty = 0;
+      for (const o of ordersForItems) {
+        const items = (o.items as unknown as OrderItem[]) ?? [];
+        for (const it of items) {
+          const qty = Number(it.qty ?? 0);
+          const price = Number(it.price ?? 0);
+          const key = String(it.id ?? it.name ?? "");
+          if (!key) continue;
+          const prev = itemAgg.get(key) ?? { name: String(it.name ?? key), quantity: 0, revenue: 0 };
+          prev.quantity += qty;
+          prev.revenue += qty * price;
+          if (it.name) prev.name = String(it.name);
+          itemAgg.set(key, prev);
+        }
+        totalQty += items.reduce((s, it) => s + Number(it.qty ?? 0), 0);
       }
-      totalLines += items.length;
-      totalQty += items.reduce((s, it) => s + Number(it.qty ?? 0), 0);
-    }
-    const itemsPerOrder = orders > 0 ? totalQty / orders : 0;
-    const topItemsByRevenue = [...itemAgg.values()]
-      .sort((a, b) => b.revenue - a.revenue)
-      .slice(0, 10);
-    const topItemsByQuantity = [...itemAgg.values()]
-      .sort((a, b) => b.quantity - a.quantity)
-      .slice(0, 10);
+      const itemsPerOrder = orders > 0 ? totalQty / orders : 0;
+      const topItemsByRevenue = [...itemAgg.values()]
+        .sort((a, b) => b.revenue - a.revenue)
+        .slice(0, 10);
+      const topItemsByQuantity = [...itemAgg.values()]
+        .sort((a, b) => b.quantity - a.quantity)
+        .slice(0, 10);
 
-    // Order-size distribution: bucket by total qty per order. Reuses the same
-    // findMany result; ordersForSize === ordersForItems but we keep the names
-    // separate to make the schema-vs-aggregation split obvious if either side
-    // moves in the future.
-    const sizeBuckets = { "1": 0, "2-3": 0, "4-5": 0, "6+": 0 };
-    for (const o of ordersForSize) {
-      const items = (o.items as unknown as OrderItem[]) ?? [];
-      const qty = items.reduce((s, it) => s + Number(it.qty ?? 0), 0);
-      if (qty <= 1) sizeBuckets["1"]++;
-      else if (qty <= 3) sizeBuckets["2-3"]++;
-      else if (qty <= 5) sizeBuckets["4-5"]++;
-      else sizeBuckets["6+"]++;
-    }
+      const sizeBuckets = { "1": 0, "2-3": 0, "4-5": 0, "6+": 0 };
+      for (const o of ordersForItems) {
+        const items = (o.items as unknown as OrderItem[]) ?? [];
+        const qty = items.reduce((s, it) => s + Number(it.qty ?? 0), 0);
+        if (qty <= 1) sizeBuckets["1"]++;
+        else if (qty <= 3) sizeBuckets["2-3"]++;
+        else if (qty <= 5) sizeBuckets["4-5"]++;
+        else sizeBuckets["6+"]++;
+      }
 
-    // Status funnel: keep all known statuses with explicit zeros so the UI
-    // can render the funnel in order without conditional checks for missing
-    // keys.
-    const statusFunnel: Record<string, number> = {
-      new: 0, in_progress: 0, completed: 0, cancelled: 0,
-    };
-    for (const r of statusCountsRaw) statusFunnel[r.status] = Number(r.count);
+      // Status funnel: keep all known statuses with explicit zeros so the
+      // UI can render the funnel in order without missing-key checks.
+      const statusFunnel: Record<string, number> = {
+        new: 0, in_progress: 0, completed: 0, cancelled: 0,
+      };
+      for (const r of statusCountsRaw) statusFunnel[r.status] = Number(r.count);
 
-    // Dense by-hour 0..23 so chart shows every slot even with empty hours.
-    const hourMap = new Map(ordersByHourRaw.map((r) => [r.hour, r]));
-    const ordersByHour: { hour: number; revenue: number; orders: number }[] = [];
-    for (let h = 0; h < 24; h++) {
-      const row = hourMap.get(h);
-      ordersByHour.push({
-        hour: h,
-        revenue: row ? Number(row.revenue) : 0,
-        orders: row ? Number(row.orders) : 0,
-      });
-    }
+      // Dense by-hour 0..23 so every slot renders even with empty hours.
+      const hourMap = new Map(ordersByHourRaw.map((r) => [r.hour, r]));
+      const ordersByHour: { hour: number; revenue: number; orders: number }[] = [];
+      for (let h = 0; h < 24; h++) {
+        const row = hourMap.get(h);
+        ordersByHour.push({
+          hour: h,
+          revenue: row ? Number(row.revenue) : 0,
+          orders: row ? Number(row.orders) : 0,
+        });
+      }
 
-    return {
-      period,
-      companyCreatedAt: company?.createdAt?.toISOString() ?? new Date().toISOString(),
-      // Existing scan/view analytics
-      totalViews,
-      totalScans,
-      byDay: densifyByDay(byDayRaw, startDate, endDate),
-      byDayPrev: densifyByDay(byDayPrevRaw, prevStartDate, prevEndDate),
-      byLanguage: byLangRaw.map((l) => ({ language: l.language, views: Number(l.views), scans: Number(l.scans) })),
-      byPage: byPageRaw.map((p) => ({ page: p.page, views: Number(p.views), sessions: Number(p.sessions) })),
-      // New order analytics
-      orders: {
+      ordersPayload = {
         revenue,
         revenuePrev,
         ordersCount: orders,
@@ -315,7 +315,19 @@ export class AnalyticsController {
         topByQuantity: topItemsByQuantity,
         sizeBuckets,
         statusFunnel,
-      },
+      };
+    }
+
+    return {
+      period,
+      companyCreatedAt: company?.createdAt?.toISOString() ?? new Date().toISOString(),
+      totalViews,
+      totalScans,
+      byDay: densifyByDay(byDayRaw, startDate, endDate),
+      byDayPrev: densifyByDay(byDayPrevRaw, prevStartDate, prevEndDate),
+      byLanguage: byLangRaw.map((l) => ({ language: l.language, views: Number(l.views), scans: Number(l.scans) })),
+      byPage: byPageRaw.map((p) => ({ page: p.page, views: Number(p.views), sessions: Number(p.sessions) })),
+      orders: ordersPayload,
     };
   }
 }

@@ -276,7 +276,7 @@ export class MailService implements OnModuleDestroy {
     const to =
       this.config.get<string>("SUPPORT_INBOX_EMAIL") || "support@iq-rest.com";
     const appUrl = (this.config.get<string>("APP_URL") || "https://dashboard.iq-rest.com").replace(/\/$/, "");
-    const adminUrl = `${appUrl}/en/dashboard/admin`;
+    const adminUrl = `${appUrl}/en/dashboard/admin?from=email`;
     const safeMessage = message.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     const subject = `[IQ Rest support] ${companyName} — new message`;
 
@@ -309,7 +309,7 @@ export class MailService implements OnModuleDestroy {
     const t = this.i18n.bundle(locale).supportEmail;
     const dir = this.i18n.isRtl(locale) ? "rtl" : "ltr";
     const appUrl = (this.config.get<string>("APP_URL") || "https://dashboard.iq-rest.com").replace(/\/$/, "");
-    const ctaUrl = `${appUrl}/${this.i18n.urlLocale(locale)}/dashboard/settings/support`;
+    const ctaUrl = `${appUrl}/${this.i18n.urlLocale(locale)}/dashboard/settings/support?from=email`;
 
     await transporter.sendMail({
       from: this.cachedFrom ?? cfg.from,

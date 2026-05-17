@@ -25,10 +25,14 @@ function pick(s: LocaleString | undefined, loc: string): string | undefined {
 }
 
 /** Build the translations JSON column from a multilingual string, including only entries that
- *  actually carry content (skip empty/undefined values). */
-function buildNameTranslations(name: LocaleString): Record<string, { name: string }> {
+ *  actually carry content (skip empty/undefined values). The source-language entry is omitted
+ *  because the menu rendering reads it from the row's primary `name` column instead — leaving
+ *  it duplicated in `translations[sourceLang]` causes drift if the owner renames the dish
+ *  later (the public menu would keep showing the old template name in the source language). */
+function buildNameTranslations(name: LocaleString, sourceLang: string): Record<string, { name: string }> {
   const out: Record<string, { name: string }> = {};
   for (const [lang, value] of Object.entries(name)) {
+    if (lang === sourceLang) continue;
     if (typeof value === "string" && value.length > 0) out[lang] = { name: value };
   }
   return out;
@@ -37,11 +41,12 @@ function buildNameTranslations(name: LocaleString): Record<string, { name: strin
 function buildItemTranslations(
   name: LocaleString,
   description: LocaleString | undefined,
+  sourceLang: string,
 ): Record<string, { name: string; description?: string }> {
   const out: Record<string, { name: string; description?: string }> = {};
-  // Union of locales present in name + description.
   const langs = new Set<string>([...Object.keys(name), ...(description ? Object.keys(description) : [])]);
   for (const lang of langs) {
+    if (lang === sourceLang) continue;
     const n = name[lang];
     if (typeof n !== "string" || n.length === 0) continue;
     const entry: { name: string; description?: string } = { name: n };
@@ -124,7 +129,7 @@ export class OnboardingSeedService {
           data: {
             companyId,
             name: pick(cat.name, seedLocale)!,
-            translations: buildNameTranslations(cat.name),
+            translations: buildNameTranslations(cat.name, seedLocale),
             sortOrder: cat.sortOrder,
           },
         });
@@ -152,7 +157,7 @@ export class OnboardingSeedService {
             categoryId: category.id,
             name: pick(item.name, seedLocale)!,
             description: pick(item.description, seedLocale),
-            translations: buildItemTranslations(item.name, item.description),
+            translations: buildItemTranslations(item.name, item.description, seedLocale),
             price: item.price,
             sortOrder: item.sortOrder,
             isExample: true,

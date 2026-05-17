@@ -1114,6 +1114,7 @@ export class AdminController {
   @Get("google-ads/all")
   async googleAdsAll(
     @Query("dateRange") filterDateRange?: string,
+    @Query("scope") scopeRaw?: string,
   ) {
     const dateSql = this.dateRangeSql(filterDateRange);
     const { search } = await this.gadsClient();
@@ -1124,24 +1125,87 @@ export class AdminController {
     const T3_ACTION = "customers/6803239831/conversionActions/7596477518";
     const CONV_FILTER = `segments.conversion_action IN ('${T2_ACTION}','${T3_ACTION}')`;
 
+    // Scope filters which slices of data we pull. Modes:
+    //   "campaigns"        — campaigns list + timeline + strategies + targeting (light)
+    //   "campaign:<id>"    — above + this campaign's ad groups, ads, negatives, assets
+    //   "adgroup:<id>"     — above + this ad group's keywords, search terms, ad-group assets
+    //   "" / "all"         — legacy full payload (unchanged shape)
+    // Each scope is a superset of the previous so the dashboard can merge
+    // results into a single in-memory store as the user drills in.
+    const scope = parseScope(scopeRaw);
+    const wantKeywords = scope.kind === "all" || scope.kind === "adgroup";
+    const wantAds = scope.kind === "all" || scope.kind === "campaign" || scope.kind === "adgroup";
+    const wantAdGroups = scope.kind !== "campaigns";
+    const wantNegatives = scope.kind !== "campaigns";
+    const wantSearchTerms = scope.kind === "all" || scope.kind === "adgroup";
+    const wantCampaignAssets = scope.kind !== "campaigns";
+    const wantAdGroupAssets = scope.kind === "all" || scope.kind === "adgroup";
+
+    // SQL WHERE fragments scoped to the relevant subtree. Each is empty
+    // for the lightest scope so the underlying query templates can paste
+    // them in unconditionally.
+    const adGroupId = scope.kind === "adgroup" ? scope.id : null;
+    const campaignIdScope =
+      scope.kind === "campaign" ? scope.id :
+      scope.kind === "adgroup" ? null : // resolved below from ad group meta
+      null;
+    let resolvedCampaignId = campaignIdScope;
+    if (adGroupId && !resolvedCampaignId) {
+      const [meta] = await search(`SELECT campaign.id FROM ad_group WHERE ad_group.id = ${adGroupId}`);
+      resolvedCampaignId = meta?.campaign?.id ? String(meta.campaign.id) : null;
+    }
+    const campF = resolvedCampaignId ? `AND campaign.id = ${resolvedCampaignId}` : "";
+    const agF = adGroupId ? `AND ad_group.id = ${adGroupId}` : "";
+    const noop = async () => [] as any[];
+
     const [campRows, allCampRows, agRows, allAgRows, adRows, kwRows, negCampRows, negAgRows, tlRows, assetRows, agAssetRows, stRows, targetingRows, campConvRows, agConvRows, kwConvRows, stConvRows, tlConvRows] = await Promise.all([
+      // Campaigns are always needed (breadcrumb on every view).
       search(`SELECT campaign.id, campaign.name, campaign.status, campaign_budget.amount_micros, campaign_budget.explicitly_shared, metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros FROM campaign WHERE campaign.status != 'REMOVED' AND segments.date ${dateSql}`),
       search(`SELECT campaign.id, campaign.name, campaign.status, campaign_budget.amount_micros, campaign_budget.explicitly_shared FROM campaign WHERE campaign.status != 'REMOVED'`),
-      search(`SELECT ad_group.id, ad_group.name, ad_group.status, ad_group.final_url_suffix, ad_group.cpc_bid_micros, campaign.id, metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros FROM ad_group WHERE ad_group.status != 'REMOVED' AND campaign.status != 'REMOVED' AND segments.date ${dateSql}`),
-      search(`SELECT ad_group.id, ad_group.name, ad_group.status, ad_group.final_url_suffix, ad_group.cpc_bid_micros, campaign.id FROM ad_group WHERE ad_group.status != 'REMOVED' AND campaign.status != 'REMOVED'`),
-      search(`SELECT ad_group_ad.ad.id, ad_group_ad.ad.final_urls, ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.ad.responsive_search_ad.descriptions, ad_group_ad.ad.responsive_search_ad.path1, ad_group_ad.ad.responsive_search_ad.path2, ad_group_ad.ad_strength, ad_group_ad.status, ad_group.id, campaign.id FROM ad_group_ad WHERE ad_group_ad.status != 'REMOVED' AND campaign.status != 'REMOVED'`),
-      search(`SELECT ad_group_criterion.criterion_id, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.status, ad_group_criterion.cpc_bid_micros, ad_group_criterion.effective_cpc_bid_micros, ad_group_criterion.final_urls, ad_group_criterion.quality_info.quality_score, ad_group.id, campaign.id, metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros FROM keyword_view WHERE ad_group_criterion.status != 'REMOVED' AND campaign.status != 'REMOVED' AND segments.date ${dateSql}`),
-      search(`SELECT campaign_criterion.criterion_id, campaign_criterion.keyword.text, campaign_criterion.keyword.match_type, campaign_criterion.status, campaign.id FROM campaign_criterion WHERE campaign_criterion.type = 'KEYWORD' AND campaign_criterion.negative = TRUE AND campaign_criterion.status != 'REMOVED' AND campaign.status != 'REMOVED'`),
-      search(`SELECT ad_group_criterion.criterion_id, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.status, ad_group.id, ad_group.name, campaign.id FROM ad_group_criterion WHERE ad_group_criterion.type = 'KEYWORD' AND ad_group_criterion.negative = TRUE AND ad_group_criterion.status != 'REMOVED' AND campaign.status != 'REMOVED'`),
+      wantAdGroups
+        ? search(`SELECT ad_group.id, ad_group.name, ad_group.status, ad_group.final_url_suffix, ad_group.cpc_bid_micros, campaign.id, metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros FROM ad_group WHERE ad_group.status != 'REMOVED' AND campaign.status != 'REMOVED' ${campF} ${agF} AND segments.date ${dateSql}`)
+        : noop(),
+      wantAdGroups
+        ? search(`SELECT ad_group.id, ad_group.name, ad_group.status, ad_group.final_url_suffix, ad_group.cpc_bid_micros, campaign.id FROM ad_group WHERE ad_group.status != 'REMOVED' AND campaign.status != 'REMOVED' ${campF} ${agF}`)
+        : noop(),
+      wantAds
+        ? search(`SELECT ad_group_ad.ad.id, ad_group_ad.ad.final_urls, ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.ad.responsive_search_ad.descriptions, ad_group_ad.ad.responsive_search_ad.path1, ad_group_ad.ad.responsive_search_ad.path2, ad_group_ad.ad_strength, ad_group_ad.status, ad_group.id, campaign.id FROM ad_group_ad WHERE ad_group_ad.status != 'REMOVED' AND campaign.status != 'REMOVED' ${campF} ${agF}`)
+        : noop(),
+      wantKeywords
+        ? search(`SELECT ad_group_criterion.criterion_id, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.status, ad_group_criterion.cpc_bid_micros, ad_group_criterion.effective_cpc_bid_micros, ad_group_criterion.final_urls, ad_group_criterion.quality_info.quality_score, ad_group.id, campaign.id, metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros FROM keyword_view WHERE ad_group_criterion.status != 'REMOVED' AND campaign.status != 'REMOVED' ${campF} ${agF} AND segments.date ${dateSql}`)
+        : noop(),
+      wantNegatives
+        ? search(`SELECT campaign_criterion.criterion_id, campaign_criterion.keyword.text, campaign_criterion.keyword.match_type, campaign_criterion.status, campaign.id FROM campaign_criterion WHERE campaign_criterion.type = 'KEYWORD' AND campaign_criterion.negative = TRUE AND campaign_criterion.status != 'REMOVED' AND campaign.status != 'REMOVED' ${campF}`)
+        : noop(),
+      wantNegatives
+        ? search(`SELECT ad_group_criterion.criterion_id, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.status, ad_group.id, ad_group.name, campaign.id FROM ad_group_criterion WHERE ad_group_criterion.type = 'KEYWORD' AND ad_group_criterion.negative = TRUE AND ad_group_criterion.status != 'REMOVED' AND campaign.status != 'REMOVED' ${campF} ${agF}`)
+        : noop(),
       search(`SELECT segments.hour, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions FROM campaign WHERE segments.date ${dateSql} AND metrics.impressions > 0`),
-      search(`SELECT campaign.id, asset.id, asset.type, asset.name, asset.sitelink_asset.link_text, asset.sitelink_asset.description1, asset.sitelink_asset.description2, asset.image_asset.full_size.url, asset.image_asset.full_size.width_pixels, asset.image_asset.full_size.height_pixels, campaign_asset.field_type, campaign_asset.status FROM campaign_asset WHERE campaign_asset.status = 'ENABLED'`),
-      search(`SELECT ad_group.id, asset.id, asset.type, asset.sitelink_asset.link_text, asset.sitelink_asset.description1, asset.sitelink_asset.description2, asset.callout_asset.callout_text, asset.structured_snippet_asset.header, asset.structured_snippet_asset.values, asset.image_asset.full_size.url, asset.image_asset.full_size.width_pixels, asset.image_asset.full_size.height_pixels, asset.final_urls, ad_group_asset.field_type, ad_group_asset.status FROM ad_group_asset WHERE ad_group_asset.status = 'ENABLED' AND ad_group_asset.field_type IN ('SITELINK', 'CALLOUT', 'STRUCTURED_SNIPPET', 'MARKETING_IMAGE', 'SQUARE_MARKETING_IMAGE', 'LOGO', 'LANDSCAPE_LOGO')`),
-      search(`SELECT ad_group.id, search_term_view.search_term, search_term_view.status, segments.keyword.info.text, segments.keyword.info.match_type, metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros FROM search_term_view WHERE segments.date ${dateSql}`),
-      search(`SELECT campaign.id, campaign_criterion.type, campaign_criterion.location.geo_target_constant, campaign_criterion.language.language_constant, campaign_criterion.negative FROM campaign_criterion WHERE campaign.status != 'REMOVED' AND campaign_criterion.status != 'REMOVED'`),
-      search(`SELECT campaign.id, segments.conversion_action, metrics.conversions FROM campaign WHERE campaign.status != 'REMOVED' AND segments.date ${dateSql} AND ${CONV_FILTER}`),
-      search(`SELECT ad_group.id, segments.conversion_action, metrics.conversions FROM ad_group WHERE ad_group.status != 'REMOVED' AND campaign.status != 'REMOVED' AND segments.date ${dateSql} AND ${CONV_FILTER}`),
-      search(`SELECT ad_group_criterion.criterion_id, ad_group.id, segments.conversion_action, metrics.conversions FROM keyword_view WHERE ad_group_criterion.status != 'REMOVED' AND campaign.status != 'REMOVED' AND segments.date ${dateSql} AND ${CONV_FILTER}`),
-      search(`SELECT ad_group.id, search_term_view.search_term, segments.keyword.info.text, segments.keyword.info.match_type, segments.conversion_action, metrics.conversions FROM search_term_view WHERE segments.date ${dateSql} AND ${CONV_FILTER}`),
+      wantCampaignAssets
+        ? search(`SELECT campaign.id, asset.id, asset.type, asset.name, asset.sitelink_asset.link_text, asset.sitelink_asset.description1, asset.sitelink_asset.description2, asset.image_asset.full_size.url, asset.image_asset.full_size.width_pixels, asset.image_asset.full_size.height_pixels, campaign_asset.field_type, campaign_asset.status FROM campaign_asset WHERE campaign_asset.status = 'ENABLED' ${campF}`)
+        : noop(),
+      wantAdGroupAssets
+        ? search(`SELECT ad_group.id, asset.id, asset.type, asset.sitelink_asset.link_text, asset.sitelink_asset.description1, asset.sitelink_asset.description2, asset.callout_asset.callout_text, asset.structured_snippet_asset.header, asset.structured_snippet_asset.values, asset.image_asset.full_size.url, asset.image_asset.full_size.width_pixels, asset.image_asset.full_size.height_pixels, asset.final_urls, ad_group_asset.field_type, ad_group_asset.status FROM ad_group_asset WHERE ad_group_asset.status = 'ENABLED' AND ad_group_asset.field_type IN ('SITELINK', 'CALLOUT', 'STRUCTURED_SNIPPET', 'MARKETING_IMAGE', 'SQUARE_MARKETING_IMAGE', 'LOGO', 'LANDSCAPE_LOGO') ${agF}`)
+        : noop(),
+      wantSearchTerms
+        ? search(`SELECT ad_group.id, search_term_view.search_term, search_term_view.status, segments.keyword.info.text, segments.keyword.info.match_type, metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros FROM search_term_view WHERE segments.date ${dateSql} ${campF} ${agF}`)
+        : noop(),
+      // Targeting is always queried — needed for breadcrumb-context geo
+      // resolution at the chip / bid-edit layer and is cheap (one row per
+      // criterion).
+      search(`SELECT campaign.id, campaign_criterion.type, campaign_criterion.location.geo_target_constant, campaign_criterion.language.language_constant, campaign_criterion.negative FROM campaign_criterion WHERE campaign.status != 'REMOVED' AND campaign_criterion.status != 'REMOVED' ${campF}`),
+      // Conversion breakdowns mirror the scope of the row data they
+      // back-fill, so skip them when the row data itself is skipped.
+      search(`SELECT campaign.id, segments.conversion_action, metrics.conversions FROM campaign WHERE campaign.status != 'REMOVED' AND segments.date ${dateSql} ${campF} AND ${CONV_FILTER}`),
+      wantAdGroups
+        ? search(`SELECT ad_group.id, segments.conversion_action, metrics.conversions FROM ad_group WHERE ad_group.status != 'REMOVED' AND campaign.status != 'REMOVED' ${campF} ${agF} AND segments.date ${dateSql} AND ${CONV_FILTER}`)
+        : noop(),
+      wantKeywords
+        ? search(`SELECT ad_group_criterion.criterion_id, ad_group.id, segments.conversion_action, metrics.conversions FROM keyword_view WHERE ad_group_criterion.status != 'REMOVED' AND campaign.status != 'REMOVED' ${campF} ${agF} AND segments.date ${dateSql} AND ${CONV_FILTER}`)
+        : noop(),
+      wantSearchTerms
+        ? search(`SELECT ad_group.id, search_term_view.search_term, segments.keyword.info.text, segments.keyword.info.match_type, segments.conversion_action, metrics.conversions FROM search_term_view WHERE segments.date ${dateSql} ${campF} ${agF} AND ${CONV_FILTER}`)
+        : noop(),
       search(`SELECT segments.hour, segments.conversion_action, metrics.conversions FROM campaign WHERE segments.date ${dateSql} AND ${CONV_FILTER}`),
     ]);
 
@@ -3647,6 +3711,27 @@ export class AdminController {
 }
 
 // ────────────────── helpers ──────────────────
+
+type GadsScope =
+  | { kind: "all" }
+  | { kind: "campaigns" }
+  | { kind: "campaign"; id: string }
+  | { kind: "adgroup"; id: string };
+
+function parseScope(raw: string | undefined): GadsScope {
+  if (!raw) return { kind: "all" };
+  if (raw === "all") return { kind: "all" };
+  if (raw === "campaigns") return { kind: "campaigns" };
+  if (raw.startsWith("campaign:")) {
+    const id = raw.slice("campaign:".length).replace(/[^0-9]/g, "");
+    if (id) return { kind: "campaign", id };
+  }
+  if (raw.startsWith("adgroup:")) {
+    const id = raw.slice("adgroup:".length).replace(/[^0-9]/g, "");
+    if (id) return { kind: "adgroup", id };
+  }
+  return { kind: "all" };
+}
 
 async function parseGadsResponse(res: globalThis.Response): Promise<Record<string, unknown>> {
   const text = await res.text();

@@ -165,7 +165,7 @@ export class AnalyticsController {
     // Order block — only fetched when the requester is an admin AND at
     // least one restaurant has ordersEnabled. Soft-deleted orders are
     // kept (Order.deletedAt is non-null but total/items still reflect the
-    // real sale). Cancelled is excluded from revenue, kept for the funnel.
+    // real sale). Cancelled is excluded from revenue.
     const orderQueries = showOrders
       ? await Promise.all([
           this.prisma.$queryRaw<{ revenue: string | null; orders: bigint }[]>`
@@ -213,14 +213,6 @@ export class AnalyticsController {
             },
             select: { items: true },
           }),
-          this.prisma.$queryRaw<{ status: string; count: bigint }[]>`
-            SELECT status, COUNT(*) AS count
-            FROM orders
-            WHERE "companyId" = ${companyId}
-              AND "createdAt" >= ${startDate} AND "createdAt" < ${endDate}
-              AND "isExample" = false
-            GROUP BY status
-          `,
         ])
       : null;
 
@@ -236,7 +228,6 @@ export class AnalyticsController {
         ordersByDayRaw,
         ordersByHourRaw,
         ordersForItems,
-        statusCountsRaw,
       ] = orderQueries;
 
       const revenue = Number(ordersAgg[0]?.revenue ?? 0);
@@ -247,20 +238,37 @@ export class AnalyticsController {
       // Aggregate items from all in-period order JSON blobs. Each
       // order.items is [{ id, name, qty, price }]. Drives top dishes,
       // items-per-order and the order-size histogram.
-      interface OrderItem { id?: string; name?: string; qty?: number; price?: number | string }
+      interface OrderItem {
+        id?: string;
+        dishId?: string;
+        name?: string;
+        dishNameSnapshot?: Record<string, string>;
+        qty?: number;
+        price?: number | string;
+        basePriceSnapshot?: number | string;
+      }
       const itemAgg = new Map<string, { name: string; quantity: number; revenue: number }>();
       let totalQty = 0;
       for (const o of ordersForItems) {
         const items = (o.items as unknown as OrderItem[]) ?? [];
         for (const it of items) {
           const qty = Number(it.qty ?? 0);
-          const price = Number(it.price ?? 0);
-          const key = String(it.id ?? it.name ?? "");
+          const price = Number(it.price ?? it.basePriceSnapshot ?? 0);
+          // Group by canonical dish: dishId (new fat shape) → name (legacy
+          // flat shape) → per-unit random id as last resort. The random
+          // id_xxx token is unique per ordered unit, so keying off it
+          // would put every unit in its own bucket.
+          const key = String(it.dishId ?? it.name ?? it.id ?? "");
           if (!key) continue;
-          const prev = itemAgg.get(key) ?? { name: String(it.name ?? key), quantity: 0, revenue: 0 };
+          const snapshotName = it.dishNameSnapshot
+            ? Object.values(it.dishNameSnapshot)[0]
+            : undefined;
+          const fallbackName = String(it.name ?? snapshotName ?? key);
+          const prev = itemAgg.get(key) ?? { name: fallbackName, quantity: 0, revenue: 0 };
           prev.quantity += qty;
           prev.revenue += qty * price;
           if (it.name) prev.name = String(it.name);
+          else if (snapshotName) prev.name = String(snapshotName);
           itemAgg.set(key, prev);
         }
         totalQty += items.reduce((s, it) => s + Number(it.qty ?? 0), 0);
@@ -282,13 +290,6 @@ export class AnalyticsController {
         else if (qty <= 5) sizeBuckets["4-5"]++;
         else sizeBuckets["6+"]++;
       }
-
-      // Status funnel: keep all known statuses with explicit zeros so the
-      // UI can render the funnel in order without missing-key checks.
-      const statusFunnel: Record<string, number> = {
-        new: 0, in_progress: 0, completed: 0, cancelled: 0,
-      };
-      for (const r of statusCountsRaw) statusFunnel[r.status] = Number(r.count);
 
       // Dense by-hour 0..23 so every slot renders even with empty hours.
       const hourMap = new Map(ordersByHourRaw.map((r) => [r.hour, r]));
@@ -314,7 +315,6 @@ export class AnalyticsController {
         topByRevenue: topItemsByRevenue,
         topByQuantity: topItemsByQuantity,
         sizeBuckets,
-        statusFunnel,
       };
     }
 

@@ -5,6 +5,7 @@ import cookieParser from "cookie-parser";
 import bodyParser from "body-parser";
 import helmet from "helmet";
 import { AppModule } from "./app.module";
+import { AllExceptionsFilter } from "./common/all-exceptions.filter";
 
 async function bootstrap() {
   // rawBody: true keeps a Buffer copy of every request body on req.rawBody,
@@ -44,6 +45,8 @@ async function bootstrap() {
       forbidNonWhitelisted: false,
     }),
   );
+
+  app.useGlobalFilters(new AllExceptionsFilter());
 
   app.setGlobalPrefix("api");
 

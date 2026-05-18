@@ -211,7 +211,11 @@ export class AnalyticsController {
               isExample: false,
               status: { not: "cancelled" },
             },
-            select: { items: true },
+            select: { items: true, restaurantId: true },
+          }),
+          this.prisma.restaurant.findMany({
+            where: { companyId },
+            select: { id: true, defaultLanguage: true },
           }),
         ])
       : null;
@@ -228,7 +232,18 @@ export class AnalyticsController {
         ordersByDayRaw,
         ordersByHourRaw,
         ordersForItems,
+        restaurantsForLang,
       ] = orderQueries;
+
+      // Map restaurantId → defaultLanguage so analytics renders dish names
+      // in the restaurant's working language (mirrors what the orders modal
+      // does with getMlWithFallback(dishNameSnapshot, defaultLang)). Diner's
+      // locale stored in `it.name` is the wrong choice when restaurants
+      // serve multilingual customers but staff reads orders in one language.
+      const restaurantDefaultLang = new Map<string, string>();
+      for (const r of restaurantsForLang) {
+        restaurantDefaultLang.set(r.id, r.defaultLanguage || "en");
+      }
 
       const revenue = Number(ordersAgg[0]?.revenue ?? 0);
       const orders = Number(ordersAgg[0]?.orders ?? 0);
@@ -251,6 +266,7 @@ export class AnalyticsController {
       let totalQty = 0;
       for (const o of ordersForItems) {
         const items = (o.items as unknown as OrderItem[]) ?? [];
+        const defaultLang = restaurantDefaultLang.get(o.restaurantId) ?? "en";
         for (const it of items) {
           const qty = Number(it.qty ?? 0);
           const price = Number(it.price ?? it.basePriceSnapshot ?? 0);
@@ -260,15 +276,19 @@ export class AnalyticsController {
           // would put every unit in its own bucket.
           const key = String(it.dishId ?? it.name ?? it.id ?? "");
           if (!key) continue;
-          const snapshotName = it.dishNameSnapshot
-            ? Object.values(it.dishNameSnapshot)[0]
-            : undefined;
-          const fallbackName = String(it.name ?? snapshotName ?? key);
-          const prev = itemAgg.get(key) ?? { name: fallbackName, quantity: 0, revenue: 0 };
+          // Name preference matches orders modal: dishNameSnapshot in the
+          // restaurant's default language → any snapshot value → flat
+          // `it.name` (legacy / diner-locale) → key. New orders set `it.name`
+          // to the default-lang dashName already, but multi-locale snapshots
+          // are the authoritative source if present.
+          const snap = it.dishNameSnapshot;
+          const snapDefault = snap?.[defaultLang];
+          const snapAny = snap ? Object.values(snap)[0] : undefined;
+          const resolvedName = String(snapDefault ?? snapAny ?? it.name ?? key);
+          const prev = itemAgg.get(key) ?? { name: resolvedName, quantity: 0, revenue: 0 };
           prev.quantity += qty;
           prev.revenue += qty * price;
-          if (it.name) prev.name = String(it.name);
-          else if (snapshotName) prev.name = String(snapshotName);
+          prev.name = resolvedName;
           itemAgg.set(key, prev);
         }
         totalQty += items.reduce((s, it) => s + Number(it.qty ?? 0), 0);

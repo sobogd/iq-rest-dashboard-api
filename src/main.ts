@@ -1,17 +1,16 @@
 import { NestFactory } from "@nestjs/core";
+import { NestExpressApplication } from "@nestjs/platform-express";
 import { ValidationPipe } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import cookieParser from "cookie-parser";
-import bodyParser from "body-parser";
 import helmet from "helmet";
-import type { Request, Response, NextFunction } from "express";
 import { AppModule } from "./app.module";
 import { AllExceptionsFilter } from "./common/all-exceptions.filter";
 
 async function bootstrap() {
   // rawBody: true keeps a Buffer copy of every request body on req.rawBody,
   // which Stripe webhook signature verification requires.
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bufferLogs: true,
     rawBody: true,
   });
@@ -26,22 +25,11 @@ async function bootstrap() {
   );
   app.use(cookieParser());
   // Authenticated endpoints accept large file uploads (PDF menus, photos).
-  // Stripe webhook MUST receive the raw, untouched body so the signature
-  // verification works — skip the JSON / urlencoded parsers for that route.
-  // Without this, `rawBody: true` on NestFactory has no chance to capture
-  // the buffer (the JSON parser consumes the stream first) and the
-  // controller throws "Missing raw body".
-  const STRIPE_WEBHOOK_PATH = "/api/stripe/webhook";
-  const jsonParser = bodyParser.json({ limit: "500mb" });
-  const urlencodedParser = bodyParser.urlencoded({ limit: "500mb", extended: true });
-  app.use((req: Request, res: Response, next: NextFunction) => {
-    if (req.originalUrl === STRIPE_WEBHOOK_PATH) return next();
-    jsonParser(req, res, next);
-  });
-  app.use((req: Request, res: Response, next: NextFunction) => {
-    if (req.originalUrl === STRIPE_WEBHOOK_PATH) return next();
-    urlencodedParser(req, res, next);
-  });
+  // Use Nest's built-in body parsers (already installed by rawBody:true) and
+  // only bump the limit — registering a second bodyParser.json via app.use
+  // consumes the stream twice and breaks every POST/PATCH with a body.
+  app.useBodyParser("json", { limit: "500mb" });
+  app.useBodyParser("urlencoded", { limit: "500mb", extended: true });
 
   const corsOrigins = (config.get<string>("CORS_ORIGINS") || "")
     .split(",")

@@ -4,6 +4,7 @@ import { ConfigService } from "@nestjs/config";
 import cookieParser from "cookie-parser";
 import bodyParser from "body-parser";
 import helmet from "helmet";
+import type { Request, Response, NextFunction } from "express";
 import { AppModule } from "./app.module";
 import { AllExceptionsFilter } from "./common/all-exceptions.filter";
 
@@ -25,8 +26,22 @@ async function bootstrap() {
   );
   app.use(cookieParser());
   // Authenticated endpoints accept large file uploads (PDF menus, photos).
-  app.use(bodyParser.json({ limit: "500mb" }));
-  app.use(bodyParser.urlencoded({ limit: "500mb", extended: true }));
+  // Stripe webhook MUST receive the raw, untouched body so the signature
+  // verification works — skip the JSON / urlencoded parsers for that route.
+  // Without this, `rawBody: true` on NestFactory has no chance to capture
+  // the buffer (the JSON parser consumes the stream first) and the
+  // controller throws "Missing raw body".
+  const STRIPE_WEBHOOK_PATH = "/api/stripe/webhook";
+  const jsonParser = bodyParser.json({ limit: "500mb" });
+  const urlencodedParser = bodyParser.urlencoded({ limit: "500mb", extended: true });
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    if (req.originalUrl === STRIPE_WEBHOOK_PATH) return next();
+    jsonParser(req, res, next);
+  });
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    if (req.originalUrl === STRIPE_WEBHOOK_PATH) return next();
+    urlencodedParser(req, res, next);
+  });
 
   const corsOrigins = (config.get<string>("CORS_ORIGINS") || "")
     .split(",")

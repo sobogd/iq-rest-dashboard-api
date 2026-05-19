@@ -63,8 +63,15 @@ export class AuthController {
     // Accept-Language header — they often disagree (e.g. RU UI on a Chrome with en-US default).
     const acceptLang = req.headers["accept-language"]?.toString().split(",")[0]?.split("-")[0];
     const currency = getRequestCurrency(req);
+    // Custom-button OAuth flow sends `code` from initCodeClient; legacy renderButton
+    // flow sends `credential` (an id_token). Exchange code → id_token here so the
+    // downstream verifier only deals with one shape.
+    let credential = body.credential || "";
+    if (!credential && body.code) {
+      credential = await this.auth.exchangeGoogleCode(body.code);
+    }
     const result = await this.auth.verifyGoogleCredential(
-      body.credential || "",
+      credential,
       body.signupContext,
       currency,
       body.locale || acceptLang || null,

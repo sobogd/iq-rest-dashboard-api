@@ -35,9 +35,16 @@ export class VerifyOtpDto {
 }
 
 export class GoogleAuthDto {
+  /** id_token JWT (legacy renderButton flow). */
   @IsOptional()
   @IsString()
   credential?: string;
+
+  /** Authorization code from initCodeClient popup flow.
+   *  Either credential or code must be provided. */
+  @IsOptional()
+  @IsString()
+  code?: string;
 
   @IsOptional()
   @IsString()

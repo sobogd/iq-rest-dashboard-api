@@ -446,10 +446,12 @@ export class AuthService implements OnModuleDestroy {
   /** Exchange an authorization code (from accounts.oauth2.initCodeClient popup flow)
    *  for an id_token. Uses redirect_uri="postmessage" because the popup hands the
    *  code back via window.postMessage rather than a redirect. */
-  async exchangeGoogleCode(code: string): Promise<string> {
+  /** Exchange a Google authorization code for an id_token.
+   *  redirectUri defaults to "postmessage" (popup ux_mode); pass the actual
+   *  callback URL when using a full-page redirect flow — Google validates it
+   *  must match the one used to obtain the code. */
+  async exchangeGoogleCode(code: string, redirectUri = "postmessage"): Promise<string> {
     const clientId = this.config.get<string>("GOOGLE_CLIENT_ID");
-    // Same OAuth client is used for Sign-in and Google Ads, so the Ads secret
-    // is a valid fallback when GOOGLE_CLIENT_SECRET is not set explicitly.
     const clientSecret =
       this.config.get<string>("GOOGLE_CLIENT_SECRET") ||
       this.config.get<string>("GOOGLE_ADS_CLIENT_SECRET");
@@ -457,7 +459,7 @@ export class AuthService implements OnModuleDestroy {
       throw new HttpException("Google auth not configured", HttpStatus.INTERNAL_SERVER_ERROR);
     }
     const { OAuth2Client } = await import("google-auth-library");
-    const oauth = new OAuth2Client(clientId, clientSecret, "postmessage");
+    const oauth = new OAuth2Client(clientId, clientSecret, redirectUri);
     try {
       const { tokens } = await oauth.getToken(code);
       if (!tokens.id_token) throw new BadRequestException("Google did not return id_token");

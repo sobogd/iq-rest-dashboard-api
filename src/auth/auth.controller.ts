@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Post,
+  Query,
   Req,
   Res,
 } from "@nestjs/common";
@@ -90,6 +91,65 @@ export class AuthController {
       isNewUser: result.isNewUser,
       legacyDashboard: result.legacyDashboard,
     };
+  }
+
+  /**
+   * Full-page-redirect OAuth callback. The landing constructs a Google sign-in
+   * URL with `redirect_uri=<this>` and `state=<base64url(json)>`, and Google
+   * redirects the browser back here with `?code=...&state=...`. We exchange
+   * the code, set the session cookies on .iq-rest.com, then 302 to the
+   * dashboard. Visible warnings still apply until the OAuth app is verified.
+   */
+  @Get("google/callback")
+  async googleCallback(
+    @Query("code") code: string | undefined,
+    @Query("state") state: string | undefined,
+    @Query("error") error: string | undefined,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const landingBase = this.config.get<string>("LANDING_URL") || "https://iq-rest.com";
+    const dashboardBase = this.config.get<string>("DASHBOARD_URL") || "https://dashboard.iq-rest.com";
+    const apiBase = this.config.get<string>("API_PUBLIC_URL") || "https://dashboard-api.iq-rest.com";
+
+    let parsedState: { locale?: string; signupContext?: { cuisine: string; restaurantName: string } } = {};
+    try {
+      if (state) {
+        const json = Buffer.from(state, "base64url").toString("utf8");
+        parsedState = JSON.parse(json);
+      }
+    } catch {
+      // Malformed state — fall through with empty defaults.
+    }
+    const locale = parsedState.locale || "en";
+
+    if (error || !code) {
+      return res.redirect(302, `${landingBase}/${locale}`);
+    }
+
+    try {
+      const credential = await this.auth.exchangeGoogleCode(code, `${apiBase}/api/auth/google/callback`);
+      const acceptLang = req.headers["accept-language"]?.toString().split(",")[0]?.split("-")[0];
+      const currency = getRequestCurrency(req);
+      const result = await this.auth.verifyGoogleCredential(
+        credential,
+        parsedState.signupContext,
+        currency,
+        locale || acceptLang || null,
+      );
+      const domain = this.config.get<string>("COOKIE_DOMAIN") || undefined;
+      const opts = authCookieOptions(domain);
+      res.cookie(SESSION_COOKIE, result.token, opts);
+      res.cookie(EMAIL_COOKIE, result.email, { ...opts, httpOnly: false });
+      res.cookie(LEGACY_SESSION_COOKIE, result.token, opts);
+      res.cookie(LEGACY_EMAIL_COOKIE, result.email, { ...opts, httpOnly: false });
+      const target = result.legacyDashboard
+        ? `${landingBase}/${locale}/dashboard`
+        : `${dashboardBase}/${locale}/dashboard`;
+      return res.redirect(302, target);
+    } catch {
+      return res.redirect(302, `${landingBase}/${locale}?google_error=1`);
+    }
   }
 
   @Post("logout")

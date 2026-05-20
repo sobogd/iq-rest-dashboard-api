@@ -4,6 +4,7 @@ import type { Transporter } from "nodemailer";
 import { I18nService } from "../i18n/i18n.service";
 import { pickWelcomePersonal, isRtl as isWelcomeRtl } from "./templates/welcome-personal";
 import { pickMenuAlmostReady, isRtl as isMarRtl } from "./templates/menu-almost-ready";
+import { pickTrialEnding, isRtl as isTrialEndingRtl } from "./templates/trial-ending";
 import { pickReservationStatus, isRtl as isResRtl } from "./templates/reservation-status";
 
 interface SendOtpOptions {
@@ -170,6 +171,46 @@ export class MailService implements OnModuleDestroy {
     const subject = t.subject.replace("{name}", name);
     const greeting = t.greeting.replace("{name}", name);
     const dir = isMarRtl(locale) ? "rtl" : "ltr";
+
+    await transporter.sendMail({
+      from: this.cachedFrom ?? cfg.from,
+      to: email,
+      subject,
+      html: `
+        <div dir="${dir}" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:520px;margin:0 auto;padding:32px 20px;color:#1a1a1a">
+          ${this.logoMark()}
+          <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${greeting}</p>
+          <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${t.body}</p>
+          <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${t.help}</p>
+          <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${t.closing}</p>
+          <p style="font-size:15px;margin:0;color:#1a1a1a">${t.signature}</p>
+        </div>
+      `,
+      text: `${greeting}\n\n${t.body}\n\n${t.help}\n\n${t.closing}\n\n${t.signature.replace(/<br>/g, "\n")}`,
+    });
+  }
+
+  /** Trial-ending reminder — sent 1 day before trial expiry. Same shape as
+   *  welcome_personal/menu_almost_ready. */
+  async sendTrialEnding({
+    email,
+    name,
+    locale,
+  }: {
+    email: string;
+    name: string;
+    locale: string;
+  }): Promise<void> {
+    const cfg = this.smtpConfig();
+    if (!cfg) {
+      this.logger.warn("SMTP not configured — trial_ending skipped");
+      return;
+    }
+    const transporter = await this.getTransporter(cfg);
+    const t = pickTrialEnding(locale);
+    const subject = t.subject.replace("{name}", name);
+    const greeting = t.greeting.replace("{name}", name);
+    const dir = isTrialEndingRtl(locale) ? "rtl" : "ltr";
 
     await transporter.sendMail({
       from: this.cachedFrom ?? cfg.from,

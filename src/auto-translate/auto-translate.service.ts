@@ -340,11 +340,14 @@ export class AutoTranslateService {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) return {};
 
+    // Translate every target language in parallel with a small concurrency
+    // cap. The cap keeps us well below Gemini's per-minute quota while
+    // collapsing the wall-clock from ~N×latency down to ~ceil(N/limit)×latency.
     const out: Record<string, { name?: string; description?: string }> = {};
-    for (const req of requests) {
+    await parallelLimit(requests, 8, async (req) => {
       const single = await this.translateOne(apiKey, req);
       if (single) out[req.lang] = single;
-    }
+    });
     return out;
   }
 

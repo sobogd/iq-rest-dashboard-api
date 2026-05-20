@@ -44,7 +44,12 @@ export class StripeController {
     const company = await this.prisma.company.findUnique({ where: { id: companyId } });
     if (!company) throw new BadRequestException("Company not found");
 
-    const validKeys: string[] = [PRICE_LOOKUP_KEYS.BASIC_MONTHLY, PRICE_LOOKUP_KEYS.BASIC_YEARLY];
+    const validKeys: string[] = [
+      PRICE_LOOKUP_KEYS.BASIC_MONTHLY,
+      PRICE_LOOKUP_KEYS.BASIC_YEARLY,
+      PRICE_LOOKUP_KEYS.PRO_MONTHLY,
+      PRICE_LOOKUP_KEYS.PRO_YEARLY,
+    ];
     if (!body.priceLookupKey || !validKeys.includes(body.priceLookupKey)) {
       throw new BadRequestException("Invalid price lookup key");
     }

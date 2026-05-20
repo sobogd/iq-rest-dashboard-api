@@ -6,6 +6,7 @@ import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import { AppModule } from "./app.module";
 import { AllExceptionsFilter } from "./common/all-exceptions.filter";
+import { appVersionMiddleware, APP_VERSION_HEADER } from "./common/app-version";
 
 async function bootstrap() {
   // rawBody: true keeps a Buffer copy of every request body on req.rawBody,
@@ -24,6 +25,10 @@ async function bootstrap() {
     }),
   );
   app.use(cookieParser());
+  // Stamp every outgoing response with the build version so the dashboard
+  // can detect when the server has been redeployed and refresh itself on
+  // the next safe moment (a route change).
+  app.use(appVersionMiddleware);
   // Authenticated endpoints accept large file uploads (PDF menus, photos).
   // Use Nest's built-in body parsers (already installed by rawBody:true) and
   // only bump the limit — registering a second bodyParser.json via app.use
@@ -39,6 +44,11 @@ async function bootstrap() {
   app.enableCors({
     origin: corsOrigins.length ? corsOrigins : true,
     credentials: true,
+    // Required so the browser actually surfaces our custom header to the
+    // dashboard JS when it's running cross-origin (e.g. local dev where
+    // web is on :8129 and api is on :8130). Without this the read in
+    // version-check.ts silently returns null on every response.
+    exposedHeaders: [APP_VERSION_HEADER],
   });
 
   app.useGlobalPipes(

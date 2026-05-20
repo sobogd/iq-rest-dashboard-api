@@ -55,6 +55,7 @@ interface RestaurantInput {
   defaultLanguage?: string;
   hideTitle?: boolean;
   menuLayout?: string;
+  paymentMethods?: string[];
   reservationsEnabled?: boolean;
   reservationMode?: string;
   reservationSlotMinutes?: number;
@@ -72,7 +73,7 @@ interface RestaurantInput {
 const FIELDS: (keyof RestaurantInput)[] = [
   "title", "subtitle", "description", "slug", "currency", "source", "backgroundType",
   "accentColor", "address", "x", "y", "googlePlaceId", "phone", "instagram", "whatsapp", "languages",
-  "defaultLanguage", "hideTitle", "menuLayout", "reservationsEnabled", "reservationMode",
+  "defaultLanguage", "hideTitle", "menuLayout", "paymentMethods", "reservationsEnabled", "reservationMode",
   "reservationSlotMinutes", "workingHoursStart", "workingHoursEnd",
   "reservationSchedule", "timezone", "ordersEnabled",
   "orderNameEnabled", "orderPhoneEnabled", "orderAddressEnabled", "orderMode",
@@ -113,6 +114,18 @@ function pickFields(raw: Record<string, unknown>): RestaurantInput {
       throw new BadRequestException("Invalid menuLayout: must be 'flat' or 'drill'");
     }
     out.menuLayout = v;
+  }
+  if (out.paymentMethods !== undefined) {
+    if (!Array.isArray(out.paymentMethods)) {
+      throw new BadRequestException("paymentMethods must be an array of strings");
+    }
+    const allowed = new Set([
+      "cash", "card", "iban", "yemeksipeti", "trendyolyemek", "stripe", "uber_eats", "glovo",
+    ]);
+    const cleaned = (out.paymentMethods as unknown[])
+      .map((v) => String(v).trim().toLowerCase())
+      .filter((v) => allowed.has(v));
+    out.paymentMethods = Array.from(new Set(cleaned));
   }
   return out as RestaurantInput;
 }

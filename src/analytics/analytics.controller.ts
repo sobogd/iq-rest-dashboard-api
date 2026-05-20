@@ -59,6 +59,29 @@ function monthWindow(periodRaw: string): {
   prevEndDate: Date;
 } {
   const now = new Date();
+
+  // Today bucket — single UTC day. Previous window = previous UTC day.
+  if (periodRaw === "today") {
+    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const end = new Date(start);
+    end.setUTCDate(end.getUTCDate() + 1);
+    const prevStart = new Date(start);
+    prevStart.setUTCDate(prevStart.getUTCDate() - 1);
+    return { period: "today", startDate: start, endDate: end, prevStartDate: prevStart, prevEndDate: start };
+  }
+
+  // Calendar week (Mon–Sun in UTC). Previous window = previous calendar week.
+  if (periodRaw === "week") {
+    const day = now.getUTCDay(); // 0=Sun … 6=Sat
+    const daysFromMonday = (day + 6) % 7; // distance back to Monday
+    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - daysFromMonday));
+    const end = new Date(start);
+    end.setUTCDate(end.getUTCDate() + 7);
+    const prevStart = new Date(start);
+    prevStart.setUTCDate(prevStart.getUTCDate() - 7);
+    return { period: "week", startDate: start, endDate: end, prevStartDate: prevStart, prevEndDate: start };
+  }
+
   const match = /^(\d{4})-(\d{2})$/.exec(periodRaw);
   let year: number;
   let month0: number; // 0-indexed
@@ -173,14 +196,14 @@ export class AnalyticsController {
             FROM orders
             WHERE "companyId" = ${companyId}
               AND "createdAt" >= ${startDate} AND "createdAt" < ${endDate}
-              AND "isExample" = false AND status <> 'cancelled'
+              AND "isExample" = false AND status = 'completed'
           `,
           this.prisma.$queryRaw<{ revenue: string | null; orders: bigint }[]>`
             SELECT COALESCE(SUM(total), 0) AS revenue, COUNT(*) AS orders
             FROM orders
             WHERE "companyId" = ${companyId}
               AND "createdAt" >= ${prevStartDate} AND "createdAt" < ${prevEndDate}
-              AND "isExample" = false AND status <> 'cancelled'
+              AND "isExample" = false AND status = 'completed'
           `,
           this.prisma.$queryRaw<{ day: string; revenue: string; orders: bigint }[]>`
             SELECT TO_CHAR("createdAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day,
@@ -189,7 +212,18 @@ export class AnalyticsController {
             FROM orders
             WHERE "companyId" = ${companyId}
               AND "createdAt" >= ${startDate} AND "createdAt" < ${endDate}
-              AND "isExample" = false AND status <> 'cancelled'
+              AND "isExample" = false AND status = 'completed'
+            GROUP BY day
+            ORDER BY day ASC
+          `,
+          this.prisma.$queryRaw<{ day: string; revenue: string; orders: bigint }[]>`
+            SELECT TO_CHAR("createdAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day,
+                   SUM(total) AS revenue,
+                   COUNT(*) AS orders
+            FROM orders
+            WHERE "companyId" = ${companyId}
+              AND "createdAt" >= ${prevStartDate} AND "createdAt" < ${prevEndDate}
+              AND "isExample" = false AND status = 'completed'
             GROUP BY day
             ORDER BY day ASC
           `,
@@ -200,7 +234,7 @@ export class AnalyticsController {
             FROM orders
             WHERE "companyId" = ${companyId}
               AND "createdAt" >= ${startDate} AND "createdAt" < ${endDate}
-              AND "isExample" = false AND status <> 'cancelled'
+              AND "isExample" = false AND status = 'completed'
             GROUP BY hour
             ORDER BY hour ASC
           `,
@@ -209,7 +243,7 @@ export class AnalyticsController {
               companyId,
               createdAt: { gte: startDate, lt: endDate },
               isExample: false,
-              status: { not: "cancelled" },
+              status: "completed",
             },
             select: { items: true, restaurantId: true },
           }),
@@ -230,6 +264,7 @@ export class AnalyticsController {
         ordersAgg,
         ordersAggPrev,
         ordersByDayRaw,
+        ordersByDayPrevRaw,
         ordersByHourRaw,
         ordersForItems,
         restaurantsForLang,
@@ -331,6 +366,7 @@ export class AnalyticsController {
         itemsPerOrder,
         currency: "EUR",
         byDay: densifyOrdersByDay(ordersByDayRaw, startDate, endDate),
+        byDayPrev: densifyOrdersByDay(ordersByDayPrevRaw, prevStartDate, prevEndDate),
         byHour: ordersByHour,
         topByRevenue: topItemsByRevenue,
         topByQuantity: topItemsByQuantity,

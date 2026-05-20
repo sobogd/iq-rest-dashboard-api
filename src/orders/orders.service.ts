@@ -49,9 +49,32 @@ export class OrdersService {
     private readonly events: OrdersEventsService,
   ) {}
 
-  list(companyId: string, status?: string) {
+  list(companyId: string, status?: string, from?: string, to?: string) {
+    // Optional date-range filter (analytics modal). `from` / `to` are ISO
+    // strings; when present we constrain on the `orderDate` column (a date,
+    // not a timestamp, so we widen to inclusive day boundaries).
+    const range: { gte?: Date; lte?: Date } = {};
+    if (from) {
+      const d = new Date(from);
+      if (!Number.isNaN(d.getTime())) {
+        d.setUTCHours(0, 0, 0, 0);
+        range.gte = d;
+      }
+    }
+    if (to) {
+      const d = new Date(to);
+      if (!Number.isNaN(d.getTime())) {
+        d.setUTCHours(0, 0, 0, 0);
+        range.lte = d;
+      }
+    }
     return this.prisma.order.findMany({
-      where: { companyId, deletedAt: null, ...(status ? { status } : {}) },
+      where: {
+        companyId,
+        deletedAt: null,
+        ...(status ? { status } : {}),
+        ...(range.gte || range.lte ? { orderDate: range } : {}),
+      },
       orderBy: { createdAt: "desc" },
     });
   }
@@ -103,7 +126,7 @@ export class OrdersService {
     throw new Error("Could not allocate daily order number");
   }
 
-  async patch(companyId: string, id: string, body: { status?: string; items?: unknown[]; total?: number; tableNumber?: number | null }) {
+  async patch(companyId: string, id: string, body: { status?: string; items?: unknown[]; total?: number; tableNumber?: number | null; paymentMethodId?: string | null }) {
     const order = await this.prisma.order.findFirst({ where: { id, companyId, deletedAt: null } });
     if (!order) throw new NotFoundException();
     // Server-side total recalc. When `items` changes we always recompute
@@ -116,6 +139,14 @@ export class OrdersService {
         : body.total !== undefined
         ? { total: new Prisma.Decimal(body.total) }
         : {};
+    // When the new status closes the order (completed/cancelled) and the
+    // previous one was active, remember the previous status so Reopen can
+    // restore exactly that.
+    const isClosing = (s?: string) => s === "completed" || s === "cancelled";
+    const statusBeforeUpdate =
+      body.status !== undefined && isClosing(body.status) && !isClosing(order.status)
+        ? { statusBeforeClose: order.status }
+        : {};
     const updated = await this.prisma.order.update({
       where: { id },
       data: {
@@ -123,7 +154,28 @@ export class OrdersService {
         ...(body.items !== undefined ? { items: body.items as Prisma.InputJsonValue } : {}),
         ...totalUpdate,
         ...(body.tableNumber !== undefined ? { tableNumber: body.tableNumber } : {}),
+        ...(body.paymentMethodId !== undefined ? { paymentMethodId: body.paymentMethodId } : {}),
+        ...statusBeforeUpdate,
       },
+    });
+    await this.events.publish({
+      action: "updated",
+      restaurantId: updated.restaurantId,
+      order: updated,
+    });
+    return updated;
+  }
+
+  async reopen(companyId: string, id: string) {
+    const order = await this.prisma.order.findFirst({ where: { id, companyId, deletedAt: null } });
+    if (!order) throw new NotFoundException();
+    // Restore exactly the status the order had at close time. If we don't
+    // know (legacy closed orders), fall back to "in_progress" so it shows up
+    // on the kitchen board.
+    const restored = order.statusBeforeClose || "in_progress";
+    const updated = await this.prisma.order.update({
+      where: { id },
+      data: { status: restored, statusBeforeClose: null },
     });
     await this.events.publish({
       action: "updated",

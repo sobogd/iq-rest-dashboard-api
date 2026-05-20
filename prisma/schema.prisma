@@ -147,6 +147,9 @@ model Restaurant {
   // or "drill" (vertical list of categories → click into per-category dish screen).
   // Groups, when present, always show as a vertical drill above this layout.
   menuLayout      String   @default("flat")
+  // Payment methods this restaurant offers — enum codes only (cash, card, ...).
+  // Display strings live in dashboard locales; integrations add new codes here.
+  paymentMethods  String[] @default(["cash", "card"])
   companyId       String
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -414,6 +417,11 @@ model Order {
   comment         String?
   tableNumber     Int?
   status          String   @default("new") // new | in_progress | completed | cancelled
+  // Status the order had right before being closed (completed/cancelled). Lets
+  // "Return to kitchen" restore exactly that without guessing.
+  statusBeforeClose String?
+  // Payment method code chosen at close-time. Nullable for legacy orders.
+  paymentMethodId String?
   isExample       Boolean  @default(false)
   // Soft-delete marker. Hidden from operational lists but preserved so
   // analytics (revenue, top dishes, etc.) survive a delete.

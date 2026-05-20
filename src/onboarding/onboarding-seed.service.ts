@@ -2,6 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import type { CuisineKey } from "./cuisine";
 import { cuisineTemplates, commonPlaceholders, sampleGuestNames, type LocaleString } from "./cuisine-templates";
+import { isReservedSlug, slugify } from "../common/reserved-slugs";
 
 // Locales for which we ship at least subtitle/category/item translations. Anything outside this
 // set falls back to "en" — both for the dashboard default language and for guest-name samples.
@@ -295,17 +296,17 @@ export class OnboardingSeedService {
 
   /** Mirror RestaurantService.uniqueSlug — kept private to the seeder so it doesn't pull in
    *  the whole restaurant module just for one helper. Always returns a random suffix on
-   *  collision (no time-based fallback that could collide between concurrent seeds). */
+   *  collision (no time-based fallback that could collide between concurrent seeds). When
+   *  the slugified seed lands on a reserved word ("test", "admin", etc.), behave as if it
+   *  were taken so a random suffix is appended — the visible restaurant name stays as the
+   *  user typed; only the URL slug becomes unique. */
   private async uniqueSlug(seed: string): Promise<string> {
-    const base = (seed || "rest")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 40) || "rest";
+    const base = slugify(seed) || "rest";
     let slug = base;
+    if (isReservedSlug(slug)) slug = `${base}-${Math.random().toString(36).slice(2, 8)}`;
     for (let i = 0; i < 20; i++) {
       const taken = await this.prisma.restaurant.findFirst({ where: { slug }, select: { id: true } });
-      if (!taken) return slug;
+      if (!taken && !isReservedSlug(slug)) return slug;
       // Use a 6-char random suffix so even concurrent collisions are vanishingly unlikely.
       slug = `${base}-${Math.random().toString(36).slice(2, 8)}`;
     }

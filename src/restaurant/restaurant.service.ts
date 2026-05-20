@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { PrismaService } from "../prisma/prisma.service";
 import { AutoTranslateService } from "../auto-translate/auto-translate.service";
+import { isReservedSlug, slugify } from "../common/reserved-slugs";
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 const reservationDaySchema = z
@@ -206,14 +207,14 @@ export class RestaurantService {
   }
 
   private async uniqueSlug(seed: string): Promise<string> {
-    const base = (seed || "rest")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 40) || "rest";
+    const base = slugify(seed) || "rest";
     let slug = base;
+    if (isReservedSlug(slug)) slug = `${base}-${Math.random().toString(36).slice(2, 6)}`;
     let i = 0;
-    while (await this.prisma.restaurant.findFirst({ where: { slug }, select: { id: true } })) {
+    while (
+      isReservedSlug(slug) ||
+      (await this.prisma.restaurant.findFirst({ where: { slug }, select: { id: true } }))
+    ) {
       i++;
       slug = `${base}-${Math.random().toString(36).slice(2, 6)}`;
       if (i > 10) {

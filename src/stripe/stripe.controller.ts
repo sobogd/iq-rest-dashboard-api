@@ -53,13 +53,45 @@ export class StripeController {
     if (!body.priceLookupKey || !validKeys.includes(body.priceLookupKey)) {
       throw new BadRequestException("Invalid price lookup key");
     }
-    if (company.subscriptionStatus === "ACTIVE" && company.stripeSubscriptionId) {
-      throw new BadRequestException("Active subscription already exists");
-    }
 
     // EU-only billing — Stripe checkout always uses the EUR price object.
     const baseLookupKey = body.priceLookupKey as PriceLookupKey;
     const fullLookupKey = getLookupKeyWithCurrency(baseLookupKey, "EUR");
+
+    // When there's already an active subscription, "switching" plans should
+    // update the existing subscription item (with proration) instead of
+    // creating a brand-new checkout session.
+    if (company.subscriptionStatus === "ACTIVE" && company.stripeSubscriptionId) {
+      let priceList = await stripe.prices.list({ lookup_keys: [fullLookupKey], active: true, limit: 1 });
+      if (priceList.data.length === 0) {
+        priceList = await stripe.prices.list({ lookup_keys: [baseLookupKey], active: true, limit: 1 });
+      }
+      if (priceList.data.length === 0) {
+        throw new BadRequestException(`Price not found for ${fullLookupKey} or ${baseLookupKey}`);
+      }
+      const sub = await stripe.subscriptions.retrieve(company.stripeSubscriptionId);
+      const currentItem = sub.items?.data?.[0];
+      if (!currentItem) {
+        throw new BadRequestException("Active subscription has no items to switch");
+      }
+      if (currentItem.price.id === priceList.data[0].id) {
+        // Already on the requested plan — nothing to do, just bounce back.
+        const appUrl = process.env.APP_URL;
+        const locale = body.locale || "en";
+        return { url: `${appUrl}/${locale}/dashboard/settings/billing?success=true` };
+      }
+      await stripe.subscriptions.update(company.stripeSubscriptionId, {
+        items: [{ id: currentItem.id, price: priceList.data[0].id }],
+        proration_behavior: "create_prorations",
+      });
+      await this.prisma.company.update({
+        where: { id: company.id },
+        data: { paymentProcessing: true },
+      });
+      const appUrl = process.env.APP_URL;
+      const locale = body.locale || "en";
+      return { url: `${appUrl}/${locale}/dashboard/settings/billing?success=true` };
+    }
 
     let customerId = company.stripeCustomerId;
     if (customerId) {

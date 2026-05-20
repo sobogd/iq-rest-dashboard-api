@@ -19,10 +19,27 @@ type TranslationsMap = Record<string, {
   descriptionLocked?: boolean;
 }>;
 
-interface TranslateRequest {
-  lang: string;
-  fields: { name?: string; description?: string };
+// Generic per-lang batch — each entry has a stable key (e.g. "name",
+// "description", "opt:<id>:name", "var:<optId>:<varId>:name") and the
+// source text to translate. The translator returns a map keyed by the
+// same key strings so the caller can distribute results back wherever
+// they came from.
+interface KeyedSource {
+  key: string;
+  text: string;
 }
+
+type DishOptionLike = {
+  id?: string;
+  name?: Record<string, string> | null;
+  variants?: DishVariantLike[] | null;
+  [k: string]: unknown;
+};
+type DishVariantLike = {
+  id?: string;
+  name?: Record<string, string> | null;
+  [k: string]: unknown;
+};
 
 @Injectable()
 export class AutoTranslateService {
@@ -209,59 +226,127 @@ export class AutoTranslateService {
       select: { defaultLanguage: true, languages: true },
     });
     if (!restaurant) return;
-    const targets = (restaurant.languages || []).filter((l) => l && l !== restaurant.defaultLanguage);
+    const defaultLang = restaurant.defaultLanguage;
+    const targets = (restaurant.languages || []).filter((l) => l && l !== defaultLang);
     if (targets.length === 0) return;
 
     const item = await this.prisma.item.findFirst({
       where: { id: itemId, companyId, deletedAt: null },
-      select: { id: true, name: true, description: true, translations: true },
+      select: { id: true, name: true, description: true, translations: true, options: true },
     });
     if (!item) return;
 
     const sourceName = item.name || "";
     const sourceDescription = item.description || "";
     const current = (item.translations as TranslationsMap | null) ?? {};
+    const options = normalizeOptionsArray(item.options);
 
-    const requests: TranslateRequest[] = [];
+    // Per-language list of {key, source} pairs that need translating.
+    // - name/description: gated by lock flag + source-changed / empty target
+    // - option/variant names: gated by missing target value (items.service
+    //   wipes target langs whenever the default-lang source changes, so the
+    //   "target missing" check already covers renames)
+    const byLang = new Map<string, KeyedSource[]>();
     for (const lang of targets) {
       const tr = current[lang] || {};
-      const fields: { name?: string; description?: string } = {};
-      // name: skip if locked; otherwise translate when source changed or empty
+      const reqs: KeyedSource[] = [];
       if (sourceName && !tr.nameLocked && (sourceNameChanged || !tr.name)) {
-        fields.name = sourceName;
+        reqs.push({ key: "name", text: sourceName });
       }
       if (sourceDescription && !tr.descriptionLocked && (sourceDescriptionChanged || !tr.description)) {
-        fields.description = sourceDescription;
+        reqs.push({ key: "description", text: sourceDescription });
       }
-      if (fields.name || fields.description) requests.push({ lang, fields });
+      for (const opt of options) {
+        if (!opt.id) continue;
+        const optDefault = opt.name?.[defaultLang]?.trim() || "";
+        if (optDefault && !(opt.name?.[lang] || "").trim()) {
+          reqs.push({ key: `opt:${opt.id}:name`, text: optDefault });
+        }
+        const variants = Array.isArray(opt.variants) ? opt.variants : [];
+        for (const v of variants) {
+          if (!v.id) continue;
+          const vDefault = v.name?.[defaultLang]?.trim() || "";
+          if (vDefault && !(v.name?.[lang] || "").trim()) {
+            reqs.push({ key: `var:${opt.id}:${v.id}:name`, text: vDefault });
+          }
+        }
+      }
+      if (reqs.length > 0) byLang.set(lang, reqs);
     }
-    if (requests.length === 0) return;
+    if (byLang.size === 0) return;
 
-    const results = await this.translateBatch(requests);
-    if (Object.keys(results).length === 0) return;
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) return;
 
-    // Re-fetch the latest row to merge with whatever the user has saved in
-    // the meantime (translations the user typed manually win — we only fill
-    // the languages we actually translated).
+    // Fan out: one Gemini call per language, all in parallel. Each call
+    // carries the entire set of strings for that language (name +
+    // description + every option/variant name) so the wall-clock equals one
+    // Gemini round-trip regardless of how many strings the dish has.
+    const results = new Map<string, Map<string, string>>();
+    await Promise.all(
+      Array.from(byLang.entries()).map(async ([lang, reqs]) => {
+        const out = await this.translateKeyedBatch(apiKey, lang, reqs);
+        if (out && out.size > 0) results.set(lang, out);
+      }),
+    );
+    if (results.size === 0) return;
+
+    // Re-read the freshest row so we merge with anything the user may have
+    // saved while Gemini was thinking (manual edits win for fields we did
+    // not translate).
     const fresh = await this.prisma.item.findFirst({
       where: { id: itemId, companyId, deletedAt: null },
-      select: { id: true, translations: true },
+      select: { id: true, translations: true, options: true },
     });
     if (!fresh) return;
 
-    const merged: TranslationsMap = { ...((fresh.translations as TranslationsMap | null) ?? {}) };
-    for (const [lang, fields] of Object.entries(results)) {
-      const existing = merged[lang] || {};
-      merged[lang] = {
-        ...existing,
-        ...(fields.name !== undefined ? { name: fields.name } : {}),
-        ...(fields.description !== undefined ? { description: fields.description } : {}),
-      };
+    const mergedTranslations: TranslationsMap = { ...((fresh.translations as TranslationsMap | null) ?? {}) };
+    const mergedOptions = normalizeOptionsArray(fresh.options);
+
+    for (const [lang, kvs] of results) {
+      const existing = mergedTranslations[lang] || {};
+      const next: TranslationsMap[string] = { ...existing };
+      let touchedTranslations = false;
+
+      for (const [key, value] of kvs) {
+        if (key === "name") {
+          next.name = value;
+          touchedTranslations = true;
+          continue;
+        }
+        if (key === "description") {
+          next.description = value;
+          touchedTranslations = true;
+          continue;
+        }
+        const optMatch = key.match(/^opt:(.+):name$/);
+        if (optMatch && !key.startsWith("var:")) {
+          const optId = optMatch[1];
+          const opt = mergedOptions.find((o) => o.id === optId);
+          if (opt && !(opt.name?.[lang] || "").trim()) {
+            opt.name = { ...(opt.name || {}), [lang]: value };
+          }
+          continue;
+        }
+        const varMatch = key.match(/^var:([^:]+):(.+):name$/);
+        if (varMatch) {
+          const [, optId, varId] = varMatch;
+          const opt = mergedOptions.find((o) => o.id === optId);
+          const v = opt?.variants?.find?.((x) => x.id === varId);
+          if (v && !(v.name?.[lang] || "").trim()) {
+            v.name = { ...(v.name || {}), [lang]: value };
+          }
+        }
+      }
+      if (touchedTranslations) mergedTranslations[lang] = next;
     }
 
     await this.prisma.item.update({
       where: { id: fresh.id },
-      data: { translations: merged as Prisma.InputJsonValue },
+      data: {
+        translations: mergedTranslations as Prisma.InputJsonValue,
+        options: mergedOptions as unknown as Prisma.InputJsonValue,
+      },
     });
   }
 
@@ -292,17 +377,26 @@ export class AutoTranslateService {
     if (!sourceName) return;
     const current = (cat.translations as TranslationsMap | null) ?? {};
 
-    const requests: TranslateRequest[] = [];
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) return;
+
+    const todo: { lang: string; reqs: KeyedSource[] }[] = [];
     for (const lang of targets) {
       const tr = current[lang] || {};
       if (!tr.nameLocked && (sourceNameChanged || !tr.name)) {
-        requests.push({ lang, fields: { name: sourceName } });
+        todo.push({ lang, reqs: [{ key: "name", text: sourceName }] });
       }
     }
-    if (requests.length === 0) return;
+    if (todo.length === 0) return;
 
-    const results = await this.translateBatch(requests);
-    if (Object.keys(results).length === 0) return;
+    const results = new Map<string, Map<string, string>>();
+    await Promise.all(
+      todo.map(async ({ lang, reqs }) => {
+        const out = await this.translateKeyedBatch(apiKey, lang, reqs);
+        if (out && out.size > 0) results.set(lang, out);
+      }),
+    );
+    if (results.size === 0) return;
 
     const fresh = await this.prisma.category.findFirst({
       where: { id: categoryId, companyId },
@@ -311,12 +405,10 @@ export class AutoTranslateService {
     if (!fresh) return;
 
     const merged: TranslationsMap = { ...((fresh.translations as TranslationsMap | null) ?? {}) };
-    for (const [lang, fields] of Object.entries(results)) {
+    for (const [lang, kvs] of results) {
       const existing = merged[lang] || {};
-      merged[lang] = {
-        ...existing,
-        ...(fields.name !== undefined ? { name: fields.name } : {}),
-      };
+      const name = kvs.get("name");
+      if (name !== undefined) merged[lang] = { ...existing, name };
     }
 
     await this.prisma.category.update({
@@ -326,54 +418,33 @@ export class AutoTranslateService {
   }
 
   /**
-   * Translate `fields` into every target language. Splits into one Gemini
-   * call per language (sequential within an item) so a long description
-   * with many target languages does not bust the per-call token budget —
-   * the previous all-langs-in-one-response design silently dropped items
-   * whose JSON output got truncated past `maxOutputTokens`. Per-lang calls
-   * also let one language fail without losing the rest, and let us retry
-   * 429/5xx independently.
+   * Translate a batch of keyed strings into a single target language. Each
+   * call returns a Map<key, translated> so the caller can stitch results
+   * back wherever they came from (name/description/options/variants). All
+   * target languages run in parallel — Gemini-2.5-flash on Tier 1 easily
+   * absorbs the 34 concurrent calls a typical dish save produces, so we no
+   * longer impose a wall-clock penalty by capping concurrency.
    */
-  private async translateBatch(
-    requests: TranslateRequest[],
-  ): Promise<Record<string, { name?: string; description?: string }>> {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) return {};
-
-    // Translate every target language in parallel with a small concurrency
-    // cap. The cap keeps us well below Gemini's per-minute quota while
-    // collapsing the wall-clock from ~N×latency down to ~ceil(N/limit)×latency.
-    const out: Record<string, { name?: string; description?: string }> = {};
-    await parallelLimit(requests, 8, async (req) => {
-      const single = await this.translateOne(apiKey, req);
-      if (single) out[req.lang] = single;
-    });
-    return out;
-  }
-
-  private async translateOne(
+  private async translateKeyedBatch(
     apiKey: string,
-    req: TranslateRequest,
-  ): Promise<{ name?: string; description?: string } | null> {
-    const ln = LANGUAGE_NAMES[req.lang] || req.lang;
+    lang: string,
+    items: KeyedSource[],
+  ): Promise<Map<string, string> | null> {
+    if (items.length === 0) return null;
 
+    const ln = LANGUAGE_NAMES[lang] || lang;
     const properties: Record<string, unknown> = {};
     const required: string[] = [];
-    if (req.fields.name !== undefined) {
-      properties.name = { type: "string" };
-      required.push("name");
-    }
-    if (req.fields.description !== undefined) {
-      properties.description = { type: "string" };
-      required.push("description");
-    }
-
     const sources: Record<string, string> = {};
-    if (req.fields.name !== undefined) sources.name = req.fields.name ?? "";
-    if (req.fields.description !== undefined) sources.description = req.fields.description ?? "";
+    for (const it of items) {
+      properties[it.key] = { type: "string" };
+      required.push(it.key);
+      sources[it.key] = it.text;
+    }
 
     const prompt = [
-      `You are a strict literal translator for restaurant menus. Translate the JSON below into ${ln} (${req.lang}).`,
+      `You are a strict literal translator for restaurant menus. Translate every value in the JSON below into ${ln} (${lang}).`,
+      "Each key holds an independent short string (dish name, dish description, option group name, or variant name).",
       "Hard rules:",
       "- Translate ONLY what is in the source. Do NOT add adjectives, descriptions, or commentary that is not in the original.",
       "- Do NOT make the text more appetizing or marketing-y.",
@@ -388,6 +459,12 @@ export class AutoTranslateService {
       "Output JSON with exactly the same keys as the source.",
     ].join("\n");
 
+    // Cap output tokens at ~80 per string (rough upper bound for a dish
+    // name/description after worst-case Cyrillic expansion). The previous
+    // hard-coded 2000 made every dish — including 1-field categories — pay
+    // the full budget.
+    const maxOutputTokens = Math.min(8000, 256 + items.length * 96);
+
     const MAX_ATTEMPTS = 3;
     let lastErr: unknown;
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
@@ -401,7 +478,7 @@ export class AutoTranslateService {
               contents: [{ role: "user", parts: [{ text: prompt }] }],
               generationConfig: {
                 temperature: 0.1,
-                maxOutputTokens: 2000,
+                maxOutputTokens,
                 responseMimeType: "application/json",
                 responseSchema: {
                   type: "object",
@@ -415,14 +492,17 @@ export class AutoTranslateService {
         );
 
         if (res.status === 429 || res.status >= 500) {
-          await sleep(500 * Math.pow(2, attempt));
+          // Halved the retry backoff from 500ms — Gemini almost always
+          // recovers on the first retry, and the user is waiting on this
+          // call synchronously, so eat less wall-clock on a transient.
+          await sleep(250 * Math.pow(2, attempt));
           lastErr = new Error(`Gemini ${res.status}`);
           continue;
         }
 
         if (!res.ok) {
           const txt = await res.text();
-          this.logger.error(`Gemini ${res.status} (${req.lang}): ${txt.slice(0, 300)}`);
+          this.logger.error(`Gemini ${res.status} (${lang}): ${txt.slice(0, 300)}`);
           return null;
         }
 
@@ -436,26 +516,49 @@ export class AutoTranslateService {
         const text = candidate?.content?.parts?.[0]?.text;
         if (candidate?.finishReason && candidate.finishReason !== "STOP") {
           this.logger.error(
-            `Gemini (${req.lang}) finishReason=${candidate.finishReason} — likely truncated`,
+            `Gemini (${lang}) finishReason=${candidate.finishReason} — likely truncated`,
           );
         }
         if (!text) return null;
         try {
-          return JSON.parse(text) as { name?: string; description?: string };
+          const parsed = JSON.parse(text) as Record<string, unknown>;
+          const out = new Map<string, string>();
+          for (const k of Object.keys(sources)) {
+            const v = parsed[k];
+            if (typeof v === "string" && v.length > 0) out.set(k, v);
+          }
+          return out;
         } catch (err) {
           this.logger.error(
-            `Gemini (${req.lang}) invalid JSON: ${err}; text head: ${text.slice(0, 200)}`,
+            `Gemini (${lang}) invalid JSON: ${err}; text head: ${text.slice(0, 200)}`,
           );
           return null;
         }
       } catch (err) {
         lastErr = err;
-        await sleep(500 * Math.pow(2, attempt));
+        await sleep(250 * Math.pow(2, attempt));
       }
     }
-    this.logger.error(`Gemini (${req.lang}) all retries failed: ${lastErr}`);
+    this.logger.error(`Gemini (${lang}) all retries failed: ${lastErr}`);
     return null;
   }
+}
+
+// Convert the JSON-blob `Item.options` column into a typed array. Returns a
+// deep-enough copy so callers can mutate `name[lang]` slots without
+// touching the original Prisma row.
+function normalizeOptionsArray(raw: unknown): DishOptionLike[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((o) => {
+    const opt = (o ?? {}) as DishOptionLike;
+    const variants = Array.isArray(opt.variants)
+      ? opt.variants.map((v) => {
+          const vv = (v ?? {}) as DishVariantLike;
+          return { ...vv, name: vv.name ? { ...vv.name } : null } as DishVariantLike;
+        })
+      : null;
+    return { ...opt, name: opt.name ? { ...opt.name } : null, variants } as DishOptionLike;
+  });
 }
 
 function sleep(ms: number): Promise<void> {

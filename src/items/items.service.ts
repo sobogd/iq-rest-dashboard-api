@@ -1,7 +1,30 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
+import { z } from "zod";
 import { PrismaService } from "../prisma/prisma.service";
 import { AutoTranslateService } from "../auto-translate/auto-translate.service";
+
+const mlSchema = z.record(z.string(), z.string());
+const variantSchema = z.object({
+  id: z.string().min(1),
+  name: mlSchema.nullable().optional(),
+  priceDelta: z.union([z.string(), z.number()]).optional(),
+}).passthrough();
+const optionSchema = z.object({
+  id: z.string().min(1),
+  name: mlSchema.nullable().optional(),
+  type: z.enum(["single", "multi"]).optional(),
+  required: z.boolean().optional(),
+  variants: z.array(variantSchema).optional(),
+}).passthrough();
+const optionsArraySchema = z.array(optionSchema).nullable();
+
+function validateOptions(raw: unknown): unknown {
+  if (raw === null || raw === undefined) return raw;
+  const parsed = optionsArraySchema.safeParse(raw);
+  if (!parsed.success) throw new BadRequestException("Invalid options payload");
+  return parsed.data;
+}
 
 interface ItemUpsert {
   name: string;
@@ -42,6 +65,7 @@ export class ItemsService {
       where: { companyId, categoryId: body.categoryId, deletedAt: null },
       _max: { sortOrder: true },
     });
+    const validatedOptions = validateOptions(body.options);
     const created = await this.prisma.item.create({
       data: {
         name: body.name,
@@ -53,7 +77,7 @@ export class ItemsService {
         translations: (body.translations as Prisma.InputJsonValue) ?? Prisma.JsonNull,
         allergens: body.allergens ?? [],
         diets: body.diets ?? [],
-        options: (body.options as Prisma.InputJsonValue) ?? Prisma.JsonNull,
+        options: (validatedOptions as Prisma.InputJsonValue) ?? Prisma.JsonNull,
         sortOrder: (max._max.sortOrder ?? -1) + 1,
         companyId,
       },
@@ -108,7 +132,23 @@ export class ItemsService {
     }
     if (body.allergens !== undefined) data.allergens = body.allergens;
     if (body.diets !== undefined) data.diets = body.diets;
-    if (body.options !== undefined) data.options = (body.options as Prisma.InputJsonValue) ?? Prisma.JsonNull;
+    if (body.options !== undefined) {
+      // Validate shape before any further work so a malformed payload is
+      // rejected before it touches the auto-translate path.
+      const validatedOptions = validateOptions(body.options);
+      // When the default-language name of an option or variant changes, wipe
+      // every non-default lang for that node so the auto-translator refills
+      // them on this save. Without the wipe a "dish of the day" rename to
+      // options stays frozen in the previous language.
+      const restaurant = await this.prisma.restaurant.findFirst({
+        where: { companyId },
+        select: { defaultLanguage: true },
+      });
+      const defaultLang = restaurant?.defaultLanguage || "en";
+      const prevOptions = Array.isArray(item.options) ? (item.options as DishOptLike[]) : [];
+      const nextOptions = resetTargetLangsOnSourceRename(prevOptions, validatedOptions, defaultLang);
+      data.options = (nextOptions as Prisma.InputJsonValue) ?? Prisma.JsonNull;
+    }
     if (body.sortOrder !== undefined) data.sortOrder = body.sortOrder;
     // User edited a seeded sample item — drop the example flag so it stops showing the badge.
     if (item.isExample) {
@@ -190,6 +230,59 @@ type TranslationsRow = Record<string, {
   nameLocked?: boolean;
   descriptionLocked?: boolean;
 }>;
+
+type DishOptLike = {
+  id?: string;
+  name?: Record<string, string> | null;
+  variants?: DishVarLike[] | null;
+  [k: string]: unknown;
+};
+type DishVarLike = {
+  id?: string;
+  name?: Record<string, string> | null;
+  [k: string]: unknown;
+};
+
+// When an option or variant default-lang name changes vs the previous save,
+// drop every non-default lang value for that node. The auto-translator's
+// "target missing → fill" path will re-create them in the same request.
+export function resetTargetLangsOnSourceRename(
+  prevOptions: DishOptLike[],
+  incomingOptionsRaw: unknown,
+  defaultLang: string,
+): DishOptLike[] | null {
+  if (incomingOptionsRaw === null) return null;
+  if (!Array.isArray(incomingOptionsRaw)) return [];
+  const prevById = new Map<string, DishOptLike>();
+  for (const p of prevOptions) if (p?.id) prevById.set(p.id, p);
+  return (incomingOptionsRaw as DishOptLike[]).map((opt) => {
+    if (!opt || typeof opt !== "object") return opt;
+    const prev = opt.id ? prevById.get(opt.id) : undefined;
+    const prevDefault = (prev?.name?.[defaultLang] ?? "").trim();
+    const nextDefault = (opt.name?.[defaultLang] ?? "").trim();
+    let name = opt.name ? { ...opt.name } : opt.name ?? null;
+    if (prev && prevDefault && nextDefault && prevDefault !== nextDefault) {
+      name = { [defaultLang]: nextDefault };
+    }
+    let variants = opt.variants;
+    if (Array.isArray(variants)) {
+      const prevVarsById = new Map<string, DishVarLike>();
+      for (const pv of prev?.variants || []) if (pv?.id) prevVarsById.set(pv.id, pv);
+      variants = variants.map((v) => {
+        if (!v || typeof v !== "object") return v;
+        const prevV = v.id ? prevVarsById.get(v.id) : undefined;
+        const pVal = (prevV?.name?.[defaultLang] ?? "").trim();
+        const nVal = (v.name?.[defaultLang] ?? "").trim();
+        let vName = v.name ? { ...v.name } : v.name ?? null;
+        if (prevV && pVal && nVal && pVal !== nVal) {
+          vName = { [defaultLang]: nVal };
+        }
+        return { ...v, name: vName };
+      });
+    }
+    return { ...opt, name, variants };
+  });
+}
 
 /**
  * Merge incoming translations into the previous row, recomputing per-field

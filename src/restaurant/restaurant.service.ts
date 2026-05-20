@@ -54,6 +54,7 @@ interface RestaurantInput {
   languages?: string[];
   defaultLanguage?: string;
   hideTitle?: boolean;
+  menuLayout?: string;
   reservationsEnabled?: boolean;
   reservationMode?: string;
   reservationSlotMinutes?: number;
@@ -71,7 +72,7 @@ interface RestaurantInput {
 const FIELDS: (keyof RestaurantInput)[] = [
   "title", "subtitle", "description", "slug", "currency", "source", "backgroundType",
   "accentColor", "address", "x", "y", "googlePlaceId", "phone", "instagram", "whatsapp", "languages",
-  "defaultLanguage", "hideTitle", "reservationsEnabled", "reservationMode",
+  "defaultLanguage", "hideTitle", "menuLayout", "reservationsEnabled", "reservationMode",
   "reservationSlotMinutes", "workingHoursStart", "workingHoursEnd",
   "reservationSchedule", "timezone", "ordersEnabled",
   "orderNameEnabled", "orderPhoneEnabled", "orderAddressEnabled", "orderMode",
@@ -105,6 +106,13 @@ function pickFields(raw: Record<string, unknown>): RestaurantInput {
       throw new BadRequestException("Invalid timezone: must be IANA identifier (e.g. Europe/Rome)");
     }
     out.timezone = tz;
+  }
+  if (out.menuLayout !== undefined) {
+    const v = String(out.menuLayout);
+    if (v !== "flat" && v !== "drill") {
+      throw new BadRequestException("Invalid menuLayout: must be 'flat' or 'drill'");
+    }
+    out.menuLayout = v;
   }
   return out as RestaurantInput;
 }

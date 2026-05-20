@@ -16,8 +16,7 @@ import { AuthService } from "../auth/auth.service";
 import { PrismaService } from "../prisma/prisma.service";
 
 const EVENT_REGEX = /^[a-z0-9_]{1,64}$/;
-const GCLID_PREFIX = "land_gclid_";
-const GCLID_VALUE_REGEX = /^[A-Za-z0-9_-]{1,256}$/;
+const GCLID_EVENT_REGEX = /^l_gclid_[A-Za-z0-9_-]{1,256}$/;
 const REFERRER_HOST_REGEX =
   /(?:^|\.)(google|bing|yandex|duckduckgo|yahoo|baidu|ecosia|qwant|startpage|mojeek|brave)\.[a-z.]+$/i;
 const SESSION_COOKIE = "iqr_session";
@@ -110,32 +109,20 @@ export class UsageController {
     @Query("r") referrerHost: string | undefined,
     @Req() req: Request,
   ) {
-    // Parse event name. `land_gclid_<GCLID>` is a special form: the gclid
-    // value travels in the URL path so the server can split it off into the
-    // dedicated `gclid` column without ever needing a request body.
-    let event = rawEvent;
-    let gclid: string | null = null;
-    let gclidArrived = false;
+    // `l_gclid_<ID>` events arrive from Google Ads landings — store name as-is,
+    // bypass bot filtering so every paid click is recorded regardless of UA.
+    const event = rawEvent;
+    const isGoogleAds = GCLID_EVENT_REGEX.test(rawEvent);
 
-    if (rawEvent.startsWith(GCLID_PREFIX)) {
-      const candidate = rawEvent.slice(GCLID_PREFIX.length);
-      if (!GCLID_VALUE_REGEX.test(candidate)) throw new BadRequestException("gclid invalid");
-      gclid = candidate;
-      event = "land_gclid";
-      gclidArrived = true;
-    } else if (!EVENT_REGEX.test(rawEvent)) {
+    if (!isGoogleAds && !EVENT_REGEX.test(rawEvent)) {
       throw new BadRequestException("event invalid");
     }
 
     const ua = headerStr(req, "user-agent");
 
-    // Bot arrivals are dropped before any DB write — we only want signal from
-    // real visitors. UA detection is the only gate; suspect rows never reach
-    // `usage_events`.
-    if (detectBot(ua)) return;
+    if (!isGoogleAds && detectBot(ua)) return;
 
     const { device, platform } = classifyDevice(ua);
-    const isGoogleAds = gclidArrived;
 
     // Referrer detection happens client-side: a JS fetch always sends the
     // current page URL as Referer, not the original document.referrer, so
@@ -187,7 +174,7 @@ export class UsageController {
         region,
         device,
         platform,
-        gclid,
+        gclid: null,
         is_google_ads: isGoogleAds,
         is_search: isSearch,
         companyId,

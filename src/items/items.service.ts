@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AutoTranslateService } from "../auto-translate/auto-translate.service";
@@ -12,6 +12,7 @@ interface ItemUpsert {
   isActive?: boolean;
   translations?: Record<string, { name?: string; description?: string }> | null;
   allergens?: string[];
+  diets?: string[];
   options?: unknown;
   sortOrder?: number;
 }
@@ -31,6 +32,12 @@ export class ItemsService {
   }
 
   async create(companyId: string, body: ItemUpsert) {
+    const cat = await this.prisma.category.findFirst({
+      where: { id: body.categoryId, companyId },
+      select: { isGroup: true },
+    });
+    if (!cat) throw new BadRequestException("Category not found");
+    if (cat.isGroup) throw new BadRequestException("Cannot add items to a group category");
     const max = await this.prisma.item.aggregate({
       where: { companyId, categoryId: body.categoryId, deletedAt: null },
       _max: { sortOrder: true },
@@ -45,6 +52,7 @@ export class ItemsService {
         isActive: body.isActive ?? true,
         translations: (body.translations as Prisma.InputJsonValue) ?? Prisma.JsonNull,
         allergens: body.allergens ?? [],
+        diets: body.diets ?? [],
         options: (body.options as Prisma.InputJsonValue) ?? Prisma.JsonNull,
         sortOrder: (max._max.sortOrder ?? -1) + 1,
         companyId,
@@ -70,20 +78,36 @@ export class ItemsService {
     if (body.description !== undefined) data.description = body.description ?? null;
     if (body.price !== undefined) data.price = new Prisma.Decimal(body.price);
     if (body.imageUrl !== undefined) data.imageUrl = body.imageUrl ?? null;
-    if (body.categoryId !== undefined) data.category = { connect: { id: body.categoryId } };
+    if (body.categoryId !== undefined) {
+      const targetCat = await this.prisma.category.findFirst({
+        where: { id: body.categoryId, companyId },
+        select: { isGroup: true },
+      });
+      if (!targetCat) throw new BadRequestException("Category not found");
+      if (targetCat.isGroup) throw new BadRequestException("Cannot move item to a group category");
+      data.category = { connect: { id: body.categoryId } };
+    }
     if (body.isActive !== undefined) data.isActive = body.isActive;
     // Persist translations with lock flags merged. A field becomes locked
     // when the user manually edits it to a non-empty value; unlocked when
     // they clear it. Locked fields are never auto-overwritten.
+    const sourceNameChangedForMerge = body.name !== undefined && body.name !== item.name;
+    const sourceDescriptionChangedForMerge =
+      body.description !== undefined && (body.description ?? null) !== (item.description ?? null);
     if (body.translations !== undefined) {
+      const resetLocks: ("name" | "description")[] = [];
+      if (sourceNameChangedForMerge) resetLocks.push("name");
+      if (sourceDescriptionChangedForMerge) resetLocks.push("description");
       const merged = mergeTranslationsWithLocks(
         item.translations as TranslationsRow | null,
         body.translations as Record<string, { name?: string; description?: string }> | null,
         ["name", "description"],
+        resetLocks,
       );
       data.translations = (merged as Prisma.InputJsonValue) ?? Prisma.JsonNull;
     }
     if (body.allergens !== undefined) data.allergens = body.allergens;
+    if (body.diets !== undefined) data.diets = body.diets;
     if (body.options !== undefined) data.options = (body.options as Prisma.InputJsonValue) ?? Prisma.JsonNull;
     if (body.sortOrder !== undefined) data.sortOrder = body.sortOrder;
     // User edited a seeded sample item — drop the example flag so it stops showing the badge.
@@ -180,6 +204,11 @@ export function mergeTranslationsWithLocks(
   prev: TranslationsRow | null,
   incoming: TranslationsRow | null | undefined,
   fields: ("name" | "description")[],
+  // When the source-language field changes, prior per-lang locks for that
+  // field must be wiped so auto-translate can refresh every language. Without
+  // this, a "dish of the day" pattern (PT renamed daily, translations once
+  // edited by hand and then locked) keeps yesterday's translations forever.
+  resetLocksOn: ("name" | "description")[] = [],
 ): TranslationsRow | null {
   if (incoming === null) return null;
   const out: TranslationsRow = {};
@@ -196,7 +225,9 @@ export function mergeTranslationsWithLocks(
         "nameLocked" | "descriptionLocked";
       const incomingHas = (incoming || {})[lang] && i[f] !== undefined;
       let value = incomingHas ? (i[f] ?? null) : (p[f] ?? null);
-      let locked = !!p[lockKey];
+      // If the source language changed for this field, drop the prior lock.
+      const sourceFieldChanged = resetLocksOn.includes(f);
+      let locked = sourceFieldChanged ? false : !!p[lockKey];
       if (incomingHas && (i[f] ?? null) !== (p[f] ?? null)) {
         // user actively touched this field — lock if non-empty, unlock if cleared
         locked = !!(i[f] && (i[f] ?? "").length > 0);

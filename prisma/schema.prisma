@@ -143,6 +143,10 @@ model Restaurant {
   languages       String[] @default(["en"])
   defaultLanguage String   @default("en")
   hideTitle       Boolean  @default(false)
+  // Public-menu visual: "flat" (current — horizontal tabs + inline dishes)
+  // or "drill" (vertical list of categories → click into per-category dish screen).
+  // Groups, when present, always show as a vertical drill above this layout.
+  menuLayout      String   @default("flat")
   companyId       String
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -265,6 +269,14 @@ model Category {
   translations Json?    // { "en": { "name": "..." }, "es": {...} }
   sortOrder    Int      @default(0)
   isActive     Boolean  @default(true)
+  // Group nodes have isGroup=true and contain only sub-categories (no items).
+  // Leaf categories contain items and never have children.
+  isGroup      Boolean  @default(false)
+  // Self-reference for the 2-level tree (group -> categories). Null = top-level.
+  // onDelete: SetNull -> deleting a group bubbles its children to top-level.
+  parentId     String?
+  parent       Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children     Category[] @relation("CategoryTree")
   companyId    String
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -275,6 +287,7 @@ model Category {
   @@index([companyId])
   @@index([companyId, sortOrder])
   @@index([companyId, isActive, sortOrder])
+  @@index([companyId, parentId, sortOrder])
   @@map("categories")
 }
 
@@ -286,6 +299,7 @@ model Item {
   price        Decimal  @db.Decimal(10, 2)
   imageUrl     String?
   allergens    String[] @default([]) // Array of allergen codes: gluten, dairy, eggs, etc.
+  diets        String[] @default([]) // Array of diet/lifestyle tags: vegan, vegetarian, gluten_free, etc.
   // Variant groups: [{ id, name, translations, type: "single"|"multi", required, variants: [{ id, name, translations, priceDelta }] }]
   options      Json?
   sortOrder    Int      @default(0)

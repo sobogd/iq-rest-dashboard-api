@@ -22,6 +22,12 @@ import { OrdersEventsService } from "./orders-events.service";
 // Why scoped to restaurantId (not companyId): one company will own many
 // restaurants soon (see multi-restaurant plan). Scoping now keeps the wire
 // format stable and avoids cross-restaurant leaks.
+//
+// Liveness: a typed `ping` event is sent every 15s. The client uses it as a
+// watchdog — if no ping/order is observed for ~45s the client force-
+// reconnects (catches dead-but-not-closed sockets behind some proxies).
+const CLIENT_PING_INTERVAL_MS = 15_000;
+
 @Controller("orders/stream")
 export class OrdersStreamController {
   private readonly logger = new Logger(OrdersStreamController.name);
@@ -40,9 +46,6 @@ export class OrdersStreamController {
   ): Promise<void> {
     if (!restaurantId) throw new BadRequestException("restaurantId required");
 
-    // Verify the requested restaurant belongs to the authed user's company.
-    // Without this anyone with a session could subscribe to any restaurant's
-    // event stream by id-guessing.
     const restaurant = await this.prisma.restaurant.findUnique({
       where: { id: restaurantId },
       select: { companyId: true },
@@ -55,31 +58,42 @@ export class OrdersStreamController {
     res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("Connection", "keep-alive");
     res.setHeader("X-Accel-Buffering", "no");
+    // Hint EventSource clients to retry quickly if the stream drops.
     res.flushHeaders();
+    res.write(`retry: 2000\n\n`);
 
     // Initial hello — also doubles as a connect probe for the client.
     res.write(`event: ready\ndata: {}\n\n`);
 
-    const unsubscribe = this.events.subscribe(restaurantId, (event) => {
+    let closed = false;
+    const safeWrite = (chunk: string): boolean => {
+      if (closed) return false;
       try {
-        res.write(`event: order\ndata: ${JSON.stringify(event)}\n\n`);
+        return res.write(chunk);
       } catch {
-        // Client gone; cleanup on close handler.
+        return false;
       }
+    };
+
+    const unsubscribe = this.events.subscribe(restaurantId, (event) => {
+      safeWrite(`event: order\ndata: ${JSON.stringify(event)}\n\n`);
     });
 
-    // 25s comment pings keep proxies (nginx, Cloudflare) from idling the conn.
+    // Typed ping the client treats as a liveness heartbeat.
     const ping = setInterval(() => {
-      try {
-        res.write(`: ping\n\n`);
-      } catch {
-        // ignore
-      }
-    }, 25_000);
+      safeWrite(`event: ping\ndata: ${Date.now()}\n\n`);
+    }, CLIENT_PING_INTERVAL_MS);
 
-    req.on("close", () => {
+    const cleanup = () => {
+      if (closed) return;
+      closed = true;
       clearInterval(ping);
       unsubscribe();
-    });
+    };
+
+    req.on("close", cleanup);
+    req.on("aborted", cleanup);
+    res.on("close", cleanup);
+    res.on("error", cleanup);
   }
 }

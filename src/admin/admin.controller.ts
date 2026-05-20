@@ -282,7 +282,7 @@ export class AdminController {
   @Post("companies/:id/send-email")
   async sendEmail(
     @Param("id") companyId: string,
-    @Body() body: { template?: string },
+    @Body() body: { template?: string; locale?: string },
   ) {
     const template = body.template;
     if (template !== "welcome_personal" && template !== "menu_almost_ready") {
@@ -307,7 +307,11 @@ export class AdminController {
     if (company.emailUnsubscribed) throw new BadRequestException("Owner unsubscribed");
 
     const restaurant = company.restaurants[0];
-    const locale = owner.preferredLocale || restaurant?.defaultLanguage || "en";
+    // Admin-supplied locale wins. Falls back to the user's preference, then
+    // the restaurant default, then "en". Validation is loose — i18n templates
+    // already fall back to "en" for unknown locales.
+    const requestedLocale = (body.locale ?? "").trim().toLowerCase();
+    const locale = requestedLocale || owner.preferredLocale || restaurant?.defaultLanguage || "en";
     const name = restaurant?.title || owner.email.split("@")[0];
 
     if (template === "welcome_personal") {
@@ -334,7 +338,7 @@ export class AdminController {
   async sendMessage(
     @Req() req: Request,
     @Param("id") companyId: string,
-    @Body() body: { message?: string },
+    @Body() body: { message?: string; locale?: string },
   ) {
     const adminEmail = (req as AuthedRequest).authUser.email;
     const text = (body.message ?? "").trim();
@@ -369,7 +373,9 @@ export class AdminController {
     });
     const owner = companyForEmail?.users[0]?.user;
     const clientEmail = owner?.email;
+    const requestedLocale = (body.locale ?? "").trim().toLowerCase();
     const locale =
+      requestedLocale ||
       owner?.preferredLocale ||
       companyForEmail?.restaurants[0]?.defaultLanguage ||
       "en";

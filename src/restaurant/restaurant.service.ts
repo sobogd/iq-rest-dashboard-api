@@ -268,6 +268,14 @@ export class RestaurantService {
         });
     const baseSettings = source ?? fallback;
 
+    // Duplicate carries the source restaurant's full language list. Blank
+    // inherits only the company's working language (primary's defaultLanguage)
+    // so the user can add more from /settings/languages — copying every
+    // language would force translations on a menu that doesn't exist yet.
+    const blankDefaultLang = baseSettings?.defaultLanguage ?? "en";
+    const languages = source ? source.languages : [blankDefaultLang];
+    const defaultLanguage = source ? source.defaultLanguage : blankDefaultLang;
+
     const created = await this.prisma.restaurant.create({
       data: {
         companyId,
@@ -275,8 +283,8 @@ export class RestaurantService {
         slug,
         currency: baseSettings?.currency ?? "EUR",
         accentColor: baseSettings?.accentColor ?? "#000000",
-        languages: baseSettings?.languages ?? ["en"],
-        defaultLanguage: baseSettings?.defaultLanguage ?? "en",
+        languages,
+        defaultLanguage,
         menuLayout: baseSettings?.menuLayout ?? "flat",
         paymentMethods: baseSettings?.paymentMethods ?? ["cash", "card"],
         timezone: baseSettings?.timezone ?? "UTC",

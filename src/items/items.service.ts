@@ -40,6 +40,11 @@ interface ItemUpsert {
   sortOrder?: number;
 }
 
+interface Ctx {
+  companyId: string;
+  restaurantId: string;
+}
+
 @Injectable()
 export class ItemsService {
   constructor(
@@ -47,22 +52,22 @@ export class ItemsService {
     private readonly autoTranslate: AutoTranslateService,
   ) {}
 
-  list(companyId: string) {
+  list(ctx: Ctx) {
     return this.prisma.item.findMany({
-      where: { companyId, deletedAt: null },
+      where: { restaurantId: ctx.restaurantId, deletedAt: null },
       orderBy: { sortOrder: "asc" },
     });
   }
 
-  async create(companyId: string, body: ItemUpsert) {
+  async create(ctx: Ctx, body: ItemUpsert) {
     const cat = await this.prisma.category.findFirst({
-      where: { id: body.categoryId, companyId },
+      where: { id: body.categoryId, restaurantId: ctx.restaurantId },
       select: { isGroup: true },
     });
     if (!cat) throw new BadRequestException("Category not found");
     if (cat.isGroup) throw new BadRequestException("Cannot add items to a group category");
     const max = await this.prisma.item.aggregate({
-      where: { companyId, categoryId: body.categoryId, deletedAt: null },
+      where: { restaurantId: ctx.restaurantId, categoryId: body.categoryId, deletedAt: null },
       _max: { sortOrder: true },
     });
     const validatedOptions = validateOptions(body.options);
@@ -79,14 +84,13 @@ export class ItemsService {
         diets: body.diets ?? [],
         options: (validatedOptions as Prisma.InputJsonValue) ?? Prisma.JsonNull,
         sortOrder: (max._max.sortOrder ?? -1) + 1,
-        companyId,
+        companyId: ctx.companyId,
+        restaurantId: ctx.restaurantId,
       },
     });
-    // New item — treat as if both source fields just changed; auto-translate
-    // fills any missing additional-language slots. Sync so the response
-    // already includes the freshly-translated translations.
     await this.autoTranslate.translateItem({
-      companyId,
+      companyId: ctx.companyId,
+      restaurantId: ctx.restaurantId,
       itemId: created.id,
       sourceNameChanged: true,
       sourceDescriptionChanged: !!body.description,
@@ -94,8 +98,8 @@ export class ItemsService {
     return this.prisma.item.findFirst({ where: { id: created.id } });
   }
 
-  async update(companyId: string, id: string, body: Partial<ItemUpsert>) {
-    const item = await this.prisma.item.findFirst({ where: { id, companyId, deletedAt: null } });
+  async update(ctx: Ctx, id: string, body: Partial<ItemUpsert>) {
+    const item = await this.prisma.item.findFirst({ where: { id, restaurantId: ctx.restaurantId, deletedAt: null } });
     if (!item) throw new NotFoundException();
     const data: Prisma.ItemUpdateInput = {};
     if (body.name !== undefined) data.name = body.name;
@@ -104,7 +108,7 @@ export class ItemsService {
     if (body.imageUrl !== undefined) data.imageUrl = body.imageUrl ?? null;
     if (body.categoryId !== undefined) {
       const targetCat = await this.prisma.category.findFirst({
-        where: { id: body.categoryId, companyId },
+        where: { id: body.categoryId, restaurantId: ctx.restaurantId },
         select: { isGroup: true },
       });
       if (!targetCat) throw new BadRequestException("Category not found");
@@ -112,9 +116,6 @@ export class ItemsService {
       data.category = { connect: { id: body.categoryId } };
     }
     if (body.isActive !== undefined) data.isActive = body.isActive;
-    // Persist translations with lock flags merged. A field becomes locked
-    // when the user manually edits it to a non-empty value; unlocked when
-    // they clear it. Locked fields are never auto-overwritten.
     const sourceNameChangedForMerge = body.name !== undefined && body.name !== item.name;
     const sourceDescriptionChangedForMerge =
       body.description !== undefined && (body.description ?? null) !== (item.description ?? null);
@@ -133,15 +134,9 @@ export class ItemsService {
     if (body.allergens !== undefined) data.allergens = body.allergens;
     if (body.diets !== undefined) data.diets = body.diets;
     if (body.options !== undefined) {
-      // Validate shape before any further work so a malformed payload is
-      // rejected before it touches the auto-translate path.
       const validatedOptions = validateOptions(body.options);
-      // When the default-language name of an option or variant changes, wipe
-      // every non-default lang for that node so the auto-translator refills
-      // them on this save. Without the wipe a "dish of the day" rename to
-      // options stays frozen in the previous language.
-      const restaurant = await this.prisma.restaurant.findFirst({
-        where: { companyId },
+      const restaurant = await this.prisma.restaurant.findUnique({
+        where: { id: ctx.restaurantId },
         select: { defaultLanguage: true },
       });
       const defaultLang = restaurant?.defaultLanguage || "en";
@@ -150,7 +145,6 @@ export class ItemsService {
       data.options = (nextOptions as Prisma.InputJsonValue) ?? Prisma.JsonNull;
     }
     if (body.sortOrder !== undefined) data.sortOrder = body.sortOrder;
-    // User edited a seeded sample item — drop the example flag so it stops showing the badge.
     if (item.isExample) {
       const renamedDefault = body.name !== undefined && body.name !== item.name;
       const renamedTranslations = body.translations !== undefined;
@@ -161,7 +155,8 @@ export class ItemsService {
       body.description !== undefined && (body.description ?? null) !== (item.description ?? null);
     const updated = await this.prisma.item.update({ where: { id }, data });
     await this.autoTranslate.translateItem({
-      companyId,
+      companyId: ctx.companyId,
+      restaurantId: ctx.restaurantId,
       itemId: updated.id,
       sourceNameChanged,
       sourceDescriptionChanged,
@@ -169,8 +164,8 @@ export class ItemsService {
     return this.prisma.item.findFirst({ where: { id: updated.id } });
   }
 
-  async patch(companyId: string, id: string, body: { isActive?: boolean }) {
-    const item = await this.prisma.item.findFirst({ where: { id, companyId, deletedAt: null } });
+  async patch(ctx: Ctx, id: string, body: { isActive?: boolean }) {
+    const item = await this.prisma.item.findFirst({ where: { id, restaurantId: ctx.restaurantId, deletedAt: null } });
     if (!item) throw new NotFoundException();
     return this.prisma.item.update({
       where: { id },
@@ -178,18 +173,18 @@ export class ItemsService {
     });
   }
 
-  async remove(companyId: string, id: string) {
-    const item = await this.prisma.item.findFirst({ where: { id, companyId, deletedAt: null } });
+  async remove(ctx: Ctx, id: string) {
+    const item = await this.prisma.item.findFirst({ where: { id, restaurantId: ctx.restaurantId, deletedAt: null } });
     if (!item) throw new NotFoundException();
     await this.prisma.item.update({ where: { id }, data: { deletedAt: new Date() } });
   }
 
-  async reorderBulk(companyId: string, items: { id: string; sortOrder: number }[]) {
+  async reorderBulk(ctx: Ctx, items: { id: string; sortOrder: number }[]) {
     if (!Array.isArray(items) || items.length === 0) return { ok: true };
     await this.prisma.$transaction(
       items.map((it) =>
         this.prisma.item.updateMany({
-          where: { id: it.id, companyId, deletedAt: null },
+          where: { id: it.id, restaurantId: ctx.restaurantId, deletedAt: null },
           data: { sortOrder: it.sortOrder },
         }),
       ),
@@ -197,11 +192,11 @@ export class ItemsService {
     return { ok: true };
   }
 
-  async reorder(companyId: string, itemId: string, direction: "up" | "down") {
-    const item = await this.prisma.item.findFirst({ where: { id: itemId, companyId } });
+  async reorder(ctx: Ctx, itemId: string, direction: "up" | "down") {
+    const item = await this.prisma.item.findFirst({ where: { id: itemId, restaurantId: ctx.restaurantId } });
     if (!item) throw new NotFoundException();
     const siblings = await this.prisma.item.findMany({
-      where: { companyId, categoryId: item.categoryId, deletedAt: null },
+      where: { restaurantId: ctx.restaurantId, categoryId: item.categoryId, deletedAt: null },
       orderBy: { sortOrder: "asc" },
       select: { id: true, sortOrder: true },
     });
@@ -243,9 +238,6 @@ type DishVarLike = {
   [k: string]: unknown;
 };
 
-// When an option or variant default-lang name changes vs the previous save,
-// drop every non-default lang value for that node. The auto-translator's
-// "target missing → fill" path will re-create them in the same request.
 export function resetTargetLangsOnSourceRename(
   prevOptions: DishOptLike[],
   incomingOptionsRaw: unknown,
@@ -284,23 +276,10 @@ export function resetTargetLangsOnSourceRename(
   });
 }
 
-/**
- * Merge incoming translations into the previous row, recomputing per-field
- * lock flags. A field is `locked` when the user manually changes it to a
- * non-empty value (we never auto-overwrite locked fields). Clearing a field
- * unlocks it — the next save can re-fill it via auto-translate.
- *
- * `fields` is the list of translatable text fields per language (items have
- * name+description, categories have only name).
- */
 export function mergeTranslationsWithLocks(
   prev: TranslationsRow | null,
   incoming: TranslationsRow | null | undefined,
   fields: ("name" | "description")[],
-  // When the source-language field changes, prior per-lang locks for that
-  // field must be wiped so auto-translate can refresh every language. Without
-  // this, a "dish of the day" pattern (PT renamed daily, translations once
-  // edited by hand and then locked) keeps yesterday's translations forever.
   resetLocksOn: ("name" | "description")[] = [],
 ): TranslationsRow | null {
   if (incoming === null) return null;
@@ -318,11 +297,9 @@ export function mergeTranslationsWithLocks(
         "nameLocked" | "descriptionLocked";
       const incomingHas = (incoming || {})[lang] && i[f] !== undefined;
       let value = incomingHas ? (i[f] ?? null) : (p[f] ?? null);
-      // If the source language changed for this field, drop the prior lock.
       const sourceFieldChanged = resetLocksOn.includes(f);
       let locked = sourceFieldChanged ? false : !!p[lockKey];
       if (incomingHas && (i[f] ?? null) !== (p[f] ?? null)) {
-        // user actively touched this field — lock if non-empty, unlock if cleared
         locked = !!(i[f] && (i[f] ?? "").length > 0);
       }
       if (value !== null && value !== undefined) row[f] = value;

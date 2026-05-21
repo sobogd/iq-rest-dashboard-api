@@ -6,6 +6,7 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import type { Request } from "express";
+import { Prisma } from "@prisma/client";
 import { AuthGuard, type AuthedRequest } from "../auth/auth.guard";
 import { PrismaService } from "../prisma/prisma.service";
 
@@ -47,10 +48,6 @@ function densifyOrdersByDay(
   return out;
 }
 
-/** Parse a YYYY-MM period string and return the UTC half-open month window
- *  [start, end). Falls back to the current UTC month if the input is missing
- *  or malformed. Also returns the matching previous-month window for delta
- *  calculation. */
 function monthWindow(periodRaw: string): {
   period: string;
   startDate: Date;
@@ -60,7 +57,6 @@ function monthWindow(periodRaw: string): {
 } {
   const now = new Date();
 
-  // Today bucket — single UTC day. Previous window = previous UTC day.
   if (periodRaw === "today") {
     const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
     const end = new Date(start);
@@ -70,10 +66,9 @@ function monthWindow(periodRaw: string): {
     return { period: "today", startDate: start, endDate: end, prevStartDate: prevStart, prevEndDate: start };
   }
 
-  // Calendar week (Mon–Sun in UTC). Previous window = previous calendar week.
   if (periodRaw === "week") {
-    const day = now.getUTCDay(); // 0=Sun … 6=Sat
-    const daysFromMonday = (day + 6) % 7; // distance back to Monday
+    const day = now.getUTCDay();
+    const daysFromMonday = (day + 6) % 7;
     const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - daysFromMonday));
     const end = new Date(start);
     end.setUTCDate(end.getUTCDate() + 7);
@@ -84,7 +79,7 @@ function monthWindow(periodRaw: string): {
 
   const match = /^(\d{4})-(\d{2})$/.exec(periodRaw);
   let year: number;
-  let month0: number; // 0-indexed
+  let month0: number;
   if (match) {
     year = Number(match[1]);
     month0 = Number(match[2]) - 1;
@@ -109,34 +104,48 @@ export class AnalyticsController {
   constructor(private readonly prisma: PrismaService) {}
 
   /** Public-menu analytics + order analytics for the authenticated user's
-   *  company. Period is a calendar month (YYYY-MM); defaults to the current
-   *  UTC month. The dashboard renders months from company.createdAt up to
-   *  the current month (descending) in the period dropdown.
-   *
-   *  The order-metrics block is gated behind two checks:
-   *    - the requester is an IQ Rest admin (email @ admin domain), and
-   *    - at least one restaurant in the company has ordersEnabled = true.
-   *  Both conditions must hold; otherwise `orders` is null in the response
-   *  and the frontend skips the order sections. */
+   *  active restaurant (default) or company-wide when scope=all. Period is
+   *  a calendar month (YYYY-MM); defaults to the current UTC month. */
   @Get("stats")
   @UseGuards(AuthGuard)
-  async stats(@Req() req: Request, @Query("period") periodRaw = "") {
-    const { companyId, email } = (req as AuthedRequest).authUser;
+  async stats(
+    @Req() req: Request,
+    @Query("period") periodRaw = "",
+    @Query("scope") scope = "",
+  ) {
+    const { companyId, email, restaurantId } = (req as AuthedRequest).authUser;
     const { period, startDate, endDate, prevStartDate, prevEndDate } = monthWindow(periodRaw);
 
     const adminDomain = (process.env.ADMIN_EMAIL_DOMAIN || "iq-rest.com").toLowerCase();
     const isAdmin = !!email && email.toLowerCase().endsWith("@" + adminDomain);
+
+    const isAll = scope === "all";
+    // Resolve restaurant filter once for all queries.
+    const pvScopeWhere = isAll
+      ? Prisma.sql`"companyId" = ${companyId}`
+      : Prisma.sql`"restaurantId" = ${restaurantId}`;
+    const orderScopeWhere = isAll
+      ? Prisma.sql`"companyId" = ${companyId}`
+      : Prisma.sql`"restaurantId" = ${restaurantId}`;
+
+    const ordersEnabledWhere = isAll
+      ? { companyId, ordersEnabled: true }
+      : { id: restaurantId, ordersEnabled: true };
 
     const [company, ordersEnabledCount] = await Promise.all([
       this.prisma.company.findUnique({
         where: { id: companyId },
         select: { createdAt: true },
       }),
-      this.prisma.restaurant.count({ where: { companyId, ordersEnabled: true } }),
+      this.prisma.restaurant.count({ where: ordersEnabledWhere }),
     ]);
 
     const ordersFeatureOn = ordersEnabledCount > 0;
     const showOrders = isAdmin && ordersFeatureOn;
+
+    const pvFilterWhere = isAll
+      ? { companyId, createdAt: { gte: startDate, lt: endDate } }
+      : { restaurantId, createdAt: { gte: startDate, lt: endDate } };
 
     const [
       totalViews,
@@ -146,17 +155,17 @@ export class AnalyticsController {
       byLangRaw,
       byPageRaw,
     ] = await Promise.all([
-      this.prisma.pageView.count({ where: { companyId, createdAt: { gte: startDate, lt: endDate } } }),
+      this.prisma.pageView.count({ where: pvFilterWhere }),
       this.prisma.pageView.groupBy({
         by: ["sessionId"],
-        where: { companyId, createdAt: { gte: startDate, lt: endDate } },
+        where: pvFilterWhere,
       }),
       this.prisma.$queryRaw<{ day: string; views: bigint; scans: bigint }[]>`
         SELECT TO_CHAR("createdAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day,
                COUNT(*) AS views,
                COUNT(DISTINCT "sessionId") AS scans
         FROM page_views
-        WHERE "companyId" = ${companyId} AND "createdAt" >= ${startDate} AND "createdAt" < ${endDate}
+        WHERE ${pvScopeWhere} AND "createdAt" >= ${startDate} AND "createdAt" < ${endDate}
         GROUP BY day
         ORDER BY day ASC
       `,
@@ -165,43 +174,43 @@ export class AnalyticsController {
                COUNT(*) AS views,
                COUNT(DISTINCT "sessionId") AS scans
         FROM page_views
-        WHERE "companyId" = ${companyId} AND "createdAt" >= ${prevStartDate} AND "createdAt" < ${prevEndDate}
+        WHERE ${pvScopeWhere} AND "createdAt" >= ${prevStartDate} AND "createdAt" < ${prevEndDate}
         GROUP BY day
         ORDER BY day ASC
       `,
       this.prisma.$queryRaw<{ language: string; views: bigint; scans: bigint }[]>`
         SELECT language, COUNT(*) AS views, COUNT(DISTINCT "sessionId") AS scans
         FROM page_views
-        WHERE "companyId" = ${companyId} AND "createdAt" >= ${startDate} AND "createdAt" < ${endDate}
+        WHERE ${pvScopeWhere} AND "createdAt" >= ${startDate} AND "createdAt" < ${endDate}
         GROUP BY language
         ORDER BY views DESC
       `,
       this.prisma.$queryRaw<{ page: string; views: bigint; sessions: bigint }[]>`
         SELECT page, COUNT(*) AS views, COUNT(DISTINCT "sessionId") AS sessions
         FROM page_views
-        WHERE "companyId" = ${companyId} AND "createdAt" >= ${startDate} AND "createdAt" < ${endDate}
+        WHERE ${pvScopeWhere} AND "createdAt" >= ${startDate} AND "createdAt" < ${endDate}
         GROUP BY page
         ORDER BY views DESC
       `,
     ]);
 
-    // Order block — only fetched when the requester is an admin AND at
-    // least one restaurant has ordersEnabled. Soft-deleted orders are
-    // kept (Order.deletedAt is non-null but total/items still reflect the
-    // real sale). Cancelled is excluded from revenue.
+    const orderFilterWhere = isAll
+      ? { companyId, isExample: false, status: "completed" }
+      : { restaurantId, isExample: false, status: "completed" };
+
     const orderQueries = showOrders
       ? await Promise.all([
           this.prisma.$queryRaw<{ revenue: string | null; orders: bigint }[]>`
             SELECT COALESCE(SUM(total), 0) AS revenue, COUNT(*) AS orders
             FROM orders
-            WHERE "companyId" = ${companyId}
+            WHERE ${orderScopeWhere}
               AND "createdAt" >= ${startDate} AND "createdAt" < ${endDate}
               AND "isExample" = false AND status = 'completed'
           `,
           this.prisma.$queryRaw<{ revenue: string | null; orders: bigint }[]>`
             SELECT COALESCE(SUM(total), 0) AS revenue, COUNT(*) AS orders
             FROM orders
-            WHERE "companyId" = ${companyId}
+            WHERE ${orderScopeWhere}
               AND "createdAt" >= ${prevStartDate} AND "createdAt" < ${prevEndDate}
               AND "isExample" = false AND status = 'completed'
           `,
@@ -210,7 +219,7 @@ export class AnalyticsController {
                    SUM(total) AS revenue,
                    COUNT(*) AS orders
             FROM orders
-            WHERE "companyId" = ${companyId}
+            WHERE ${orderScopeWhere}
               AND "createdAt" >= ${startDate} AND "createdAt" < ${endDate}
               AND "isExample" = false AND status = 'completed'
             GROUP BY day
@@ -221,7 +230,7 @@ export class AnalyticsController {
                    SUM(total) AS revenue,
                    COUNT(*) AS orders
             FROM orders
-            WHERE "companyId" = ${companyId}
+            WHERE ${orderScopeWhere}
               AND "createdAt" >= ${prevStartDate} AND "createdAt" < ${prevEndDate}
               AND "isExample" = false AND status = 'completed'
             GROUP BY day
@@ -232,7 +241,7 @@ export class AnalyticsController {
                    SUM(total) AS revenue,
                    COUNT(*) AS orders
             FROM orders
-            WHERE "companyId" = ${companyId}
+            WHERE ${orderScopeWhere}
               AND "createdAt" >= ${startDate} AND "createdAt" < ${endDate}
               AND "isExample" = false AND status = 'completed'
             GROUP BY hour
@@ -240,15 +249,13 @@ export class AnalyticsController {
           `,
           this.prisma.order.findMany({
             where: {
-              companyId,
+              ...orderFilterWhere,
               createdAt: { gte: startDate, lt: endDate },
-              isExample: false,
-              status: "completed",
             },
             select: { items: true, restaurantId: true },
           }),
           this.prisma.restaurant.findMany({
-            where: { companyId },
+            where: isAll ? { companyId } : { id: restaurantId },
             select: { id: true, defaultLanguage: true },
           }),
         ])
@@ -256,8 +263,6 @@ export class AnalyticsController {
 
     const totalScans = uniqSessionsRows.length;
 
-    // Build the orders payload (or null) without losing typing. When the
-    // gate is off this short-circuits the rest of the aggregation work.
     let ordersPayload: unknown = null;
     if (orderQueries) {
       const [
@@ -270,11 +275,6 @@ export class AnalyticsController {
         restaurantsForLang,
       ] = orderQueries;
 
-      // Map restaurantId → defaultLanguage so analytics renders dish names
-      // in the restaurant's working language (mirrors what the orders modal
-      // does with getMlWithFallback(dishNameSnapshot, defaultLang)). Diner's
-      // locale stored in `it.name` is the wrong choice when restaurants
-      // serve multilingual customers but staff reads orders in one language.
       const restaurantDefaultLang = new Map<string, string>();
       for (const r of restaurantsForLang) {
         restaurantDefaultLang.set(r.id, r.defaultLanguage || "en");
@@ -285,9 +285,6 @@ export class AnalyticsController {
       const revenuePrev = Number(ordersAggPrev[0]?.revenue ?? 0);
       const aov = orders > 0 ? revenue / orders : 0;
 
-      // Aggregate items from all in-period order JSON blobs. Each
-      // order.items is [{ id, name, qty, price }]. Drives top dishes,
-      // items-per-order and the order-size histogram.
       interface OrderItem {
         id?: string;
         dishId?: string;
@@ -305,17 +302,8 @@ export class AnalyticsController {
         for (const it of items) {
           const qty = Number(it.qty ?? 0);
           const price = Number(it.price ?? it.basePriceSnapshot ?? 0);
-          // Group by canonical dish: dishId (new fat shape) → name (legacy
-          // flat shape) → per-unit random id as last resort. The random
-          // id_xxx token is unique per ordered unit, so keying off it
-          // would put every unit in its own bucket.
           const key = String(it.dishId ?? it.name ?? it.id ?? "");
           if (!key) continue;
-          // Name preference matches orders modal: dishNameSnapshot in the
-          // restaurant's default language → any snapshot value → flat
-          // `it.name` (legacy / diner-locale) → key. New orders set `it.name`
-          // to the default-lang dashName already, but multi-locale snapshots
-          // are the authoritative source if present.
           const snap = it.dishNameSnapshot;
           const snapDefault = snap?.[defaultLang];
           const snapAny = snap ? Object.values(snap)[0] : undefined;
@@ -346,7 +334,6 @@ export class AnalyticsController {
         else sizeBuckets["6+"]++;
       }
 
-      // Dense by-hour 0..23 so every slot renders even with empty hours.
       const hourMap = new Map(ordersByHourRaw.map((r) => [r.hour, r]));
       const ordersByHour: { hour: number; revenue: number; orders: number }[] = [];
       for (let h = 0; h < 24; h++) {
@@ -376,6 +363,7 @@ export class AnalyticsController {
 
     return {
       period,
+      scope: isAll ? "all" : "restaurant",
       companyCreatedAt: company?.createdAt?.toISOString() ?? new Date().toISOString(),
       totalViews,
       totalScans,

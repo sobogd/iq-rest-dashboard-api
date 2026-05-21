@@ -46,7 +46,14 @@ async function main() {
     const t0 = Date.now();
     console.log(`→ ${email} (${companyId})`);
     try {
-      await autoTranslate.runMenuBackfill(companyId);
+      const restaurants = await prisma.restaurant.findMany({
+        where: { companyId },
+        select: { id: true },
+        orderBy: { createdAt: "asc" },
+      });
+      for (const r of restaurants) {
+        await autoTranslate.runMenuBackfill(r.id);
+      }
       console.log(`✓ ${email} done in ${Math.round((Date.now() - t0) / 1000)}s`);
     } catch (err) {
       console.error(`✗ ${email} failed:`, err);

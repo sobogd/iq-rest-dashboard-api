@@ -129,6 +129,7 @@ export class OnboardingSeedService {
         const created = await tx.category.create({
           data: {
             companyId,
+            restaurantId: restaurant.id,
             name: pick(cat.name, seedLocale)!,
             translations: buildNameTranslations(cat.name, seedLocale),
             sortOrder: cat.sortOrder,
@@ -155,6 +156,7 @@ export class OnboardingSeedService {
         const created = await tx.item.create({
           data: {
             companyId,
+            restaurantId: restaurant.id,
             categoryId: category.id,
             name: pick(item.name, seedLocale)!,
             description: pick(item.description, seedLocale),
@@ -302,15 +304,17 @@ export class OnboardingSeedService {
    *  user typed; only the URL slug becomes unique. */
   private async uniqueSlug(seed: string): Promise<string> {
     const base = slugify(seed) || "rest";
-    let slug = base;
-    if (isReservedSlug(slug)) slug = `${base}-${Math.random().toString(36).slice(2, 8)}`;
-    for (let i = 0; i < 20; i++) {
-      const taken = await this.prisma.restaurant.findFirst({ where: { slug }, select: { id: true } });
-      if (!taken && !isReservedSlug(slug)) return slug;
-      // Use a 6-char random suffix so even concurrent collisions are vanishingly unlikely.
-      slug = `${base}-${Math.random().toString(36).slice(2, 8)}`;
+    // Incremental suffix on collision: base, base1, base2, ...
+    let i = isReservedSlug(base) ? 1 : 0;
+    while (true) {
+      const candidate = i === 0 ? base : `${base}${i}`;
+      const taken = await this.prisma.restaurant.findFirst({
+        where: { slug: candidate },
+        select: { id: true },
+      });
+      if (!taken && !isReservedSlug(candidate)) return candidate;
+      i++;
+      if (i > 9999) throw new Error(`Could not allocate a unique slug for "${seed}"`);
     }
-    // 20 random suffixes all collided — astronomically unlikely; surface the issue.
-    throw new Error(`Could not allocate a unique slug for "${seed}" after 20 attempts`);
   }
 }

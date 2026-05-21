@@ -22,17 +22,17 @@ export class ReservationsController {
 
   @Get()
   list(@Req() req: Request) {
-    return this.svc.list((req as AuthedRequest).authUser.companyId);
+    return this.svc.list((req as AuthedRequest).authUser.restaurantId);
   }
 
   @Patch(":id")
   setStatus(@Req() req: Request, @Param("id") id: string, @Body() body: SetStatusDto) {
-    return this.svc.setStatus((req as AuthedRequest).authUser.companyId, id, body.status);
+    return this.svc.setStatus((req as AuthedRequest).authUser.restaurantId, id, body.status);
   }
 
   @Delete(":id")
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@Req() req: Request, @Param("id") id: string) {
-    await this.svc.remove((req as AuthedRequest).authUser.companyId, id);
+    await this.svc.remove((req as AuthedRequest).authUser.restaurantId, id);
   }
 }

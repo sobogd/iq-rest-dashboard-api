@@ -20,6 +20,11 @@ import { callGeminiImage, uploadGeneratedImage } from "../common/gemini-image";
 import { consumeAiImageQuota, refundAiImageUsage } from "../common/ai-quota";
 import { PrismaService } from "../prisma/prisma.service";
 
+function ctx(req: Request) {
+  const { companyId, restaurantId } = (req as AuthedRequest).authUser;
+  return { companyId, restaurantId };
+}
+
 @Controller("items")
 @UseGuards(AuthGuard)
 export class ItemsController {
@@ -27,33 +32,33 @@ export class ItemsController {
 
   @Get()
   list(@Req() req: Request) {
-    return this.svc.list((req as AuthedRequest).authUser.companyId);
+    return this.svc.list(ctx(req));
   }
 
   @Post()
   create(@Req() req: Request, @Body() body: Parameters<ItemsService["create"]>[1]) {
-    return this.svc.create((req as AuthedRequest).authUser.companyId, body);
+    return this.svc.create(ctx(req), body);
   }
 
   @Put(":id")
   update(@Req() req: Request, @Param("id") id: string, @Body() body: Parameters<ItemsService["update"]>[2]) {
-    return this.svc.update((req as AuthedRequest).authUser.companyId, id, body);
+    return this.svc.update(ctx(req), id, body);
   }
 
   @Patch(":id")
   patch(@Req() req: Request, @Param("id") id: string, @Body() body: { isActive?: boolean }) {
-    return this.svc.patch((req as AuthedRequest).authUser.companyId, id, body);
+    return this.svc.patch(ctx(req), id, body);
   }
 
   @Delete(":id")
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@Req() req: Request, @Param("id") id: string) {
-    await this.svc.remove((req as AuthedRequest).authUser.companyId, id);
+    await this.svc.remove(ctx(req), id);
   }
 
   @Post("reorder")
   reorder(@Req() req: Request, @Body() body: { itemId: string; direction: "up" | "down" }) {
-    return this.svc.reorder((req as AuthedRequest).authUser.companyId, body.itemId, body.direction);
+    return this.svc.reorder(ctx(req), body.itemId, body.direction);
   }
 
   @Post("reorder-bulk")
@@ -61,7 +66,7 @@ export class ItemsController {
     @Req() req: Request,
     @Body() body: { items: { id: string; sortOrder: number }[] },
   ) {
-    return this.svc.reorderBulk((req as AuthedRequest).authUser.companyId, body.items);
+    return this.svc.reorderBulk(ctx(req), body.items);
   }
 
   @Post("generate-image")
@@ -76,12 +81,12 @@ export class ItemsController {
       prompt?: string;
     },
   ) {
-    const { companyId } = (req as AuthedRequest).authUser;
+    const { companyId, restaurantId } = (req as AuthedRequest).authUser;
     const { name, description, categoryName, accentColor, sourceImageUrl, prompt: userPrompt } = body;
     if (!userPrompt?.trim() && !name?.trim()) {
       throw new BadRequestException("Name or prompt is required");
     }
-    const { restaurantId, isPaid } = await consumeAiImageQuota(this.prisma, companyId);
+    const { isPaid } = await consumeAiImageQuota(this.prisma, restaurantId);
     const categoryLine = categoryName?.trim() ? `Category: ${categoryName.trim()}.` : "";
     const descLine = description?.trim() ? `${description.trim()}.` : "";
 

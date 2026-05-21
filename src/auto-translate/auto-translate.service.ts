@@ -64,6 +64,7 @@ export class AutoTranslateService {
    */
   async translateItem(opts: {
     companyId: string;
+    restaurantId: string;
     itemId: string;
     sourceNameChanged: boolean;
     sourceDescriptionChanged: boolean;
@@ -77,6 +78,7 @@ export class AutoTranslateService {
 
   async translateCategory(opts: {
     companyId: string;
+    restaurantId: string;
     categoryId: string;
     sourceNameChanged: boolean;
   }) {
@@ -88,20 +90,26 @@ export class AutoTranslateService {
   }
 
   /**
-   * Walk every item + category in the company, parallelised with a
+   * Walk every item + category in the restaurant, parallelised with a
    * concurrency cap so we don't pelt Gemini all at once. Runs the gap-fill
    * path so newly-added languages get populated. The restaurant settings
    * save awaits this so the UI can keep its blocking modal up.
    */
-  async runMenuBackfill(companyId: string) {
+  async runMenuBackfill(restaurantId: string) {
+    const restaurant = await this.prisma.restaurant.findUnique({
+      where: { id: restaurantId },
+      select: { companyId: true },
+    });
+    if (!restaurant) return;
     const [items, cats] = await Promise.all([
-      this.prisma.item.findMany({ where: { companyId, deletedAt: null }, select: { id: true } }),
-      this.prisma.category.findMany({ where: { companyId }, select: { id: true } }),
+      this.prisma.item.findMany({ where: { restaurantId, deletedAt: null }, select: { id: true } }),
+      this.prisma.category.findMany({ where: { restaurantId }, select: { id: true } }),
     ]);
     await parallelLimit(items, 5, async (it) => {
       try {
         await this.runItem({
-          companyId,
+          companyId: restaurant.companyId,
+          restaurantId,
           itemId: it.id,
           sourceNameChanged: false,
           sourceDescriptionChanged: false,
@@ -113,7 +121,8 @@ export class AutoTranslateService {
     await parallelLimit(cats, 5, async (c) => {
       try {
         await this.runCategory({
-          companyId,
+          companyId: restaurant.companyId,
+          restaurantId,
           categoryId: c.id,
           sourceNameChanged: false,
         });
@@ -124,20 +133,19 @@ export class AutoTranslateService {
   }
 
   /**
-   * Drop translations[lang] from every item and category in the company. Used
-   * when the user removes a language from restaurant settings.
+   * Drop translations[lang] from every item and category in the restaurant.
+   * Used when the user removes a language from restaurant settings.
    */
-  async removeLanguagesFromMenu(companyId: string, langs: string[]) {
+  async removeLanguagesFromMenu(restaurantId: string, langs: string[]) {
     if (langs.length === 0) return;
-    // Build chained jsonb minus expression: translations - 'a' - 'b' - ...
     const minusExpr = langs.map((_, i) => `- $${i + 2}`).join(" ");
-    const args: (string | string[])[] = [companyId, ...langs];
+    const args: (string | string[])[] = [restaurantId, ...langs];
     await this.prisma.$executeRawUnsafe(
-      `UPDATE items SET translations = translations ${minusExpr} WHERE "companyId" = $1 AND translations IS NOT NULL`,
+      `UPDATE items SET translations = translations ${minusExpr} WHERE "restaurantId" = $1 AND translations IS NOT NULL`,
       ...args,
     );
     await this.prisma.$executeRawUnsafe(
-      `UPDATE categories SET translations = translations ${minusExpr} WHERE "companyId" = $1 AND translations IS NOT NULL`,
+      `UPDATE categories SET translations = translations ${minusExpr} WHERE "restaurantId" = $1 AND translations IS NOT NULL`,
       ...args,
     );
   }
@@ -152,7 +160,7 @@ export class AutoTranslateService {
    * subsequent auto-translate would think the source is in the wrong
    * language.
    */
-  async swapMenuDefaultLanguage(companyId: string, oldDefault: string, newDefault: string) {
+  async swapMenuDefaultLanguage(restaurantId: string, oldDefault: string, newDefault: string) {
     if (!oldDefault || !newDefault || oldDefault === newDefault) return;
 
     // Items: archive the previous source into translations[oldDefault] only
@@ -178,9 +186,9 @@ export class AutoTranslateService {
                    )
                  )
              END
-      WHERE "companyId" = $1
+      WHERE "restaurantId" = $1
       `,
-      companyId,
+      restaurantId,
       newDefault,
       oldDefault,
     );
@@ -202,27 +210,28 @@ export class AutoTranslateService {
                    jsonb_build_object('name', name)
                  )
              END
-      WHERE "companyId" = $1
+      WHERE "restaurantId" = $1
       `,
-      companyId,
+      restaurantId,
       newDefault,
       oldDefault,
     );
   }
 
   private async runItem({
-    companyId,
+    restaurantId,
     itemId,
     sourceNameChanged,
     sourceDescriptionChanged,
   }: {
     companyId: string;
+    restaurantId: string;
     itemId: string;
     sourceNameChanged: boolean;
     sourceDescriptionChanged: boolean;
   }) {
-    const restaurant = await this.prisma.restaurant.findFirst({
-      where: { companyId },
+    const restaurant = await this.prisma.restaurant.findUnique({
+      where: { id: restaurantId },
       select: { defaultLanguage: true, languages: true },
     });
     if (!restaurant) return;
@@ -231,7 +240,7 @@ export class AutoTranslateService {
     if (targets.length === 0) return;
 
     const item = await this.prisma.item.findFirst({
-      where: { id: itemId, companyId, deletedAt: null },
+      where: { id: itemId, restaurantId, deletedAt: null },
       select: { id: true, name: true, description: true, translations: true, options: true },
     });
     if (!item) return;
@@ -295,7 +304,7 @@ export class AutoTranslateService {
     // saved while Gemini was thinking (manual edits win for fields we did
     // not translate).
     const fresh = await this.prisma.item.findFirst({
-      where: { id: itemId, companyId, deletedAt: null },
+      where: { id: itemId, restaurantId, deletedAt: null },
       select: { id: true, translations: true, options: true },
     });
     if (!fresh) return;
@@ -351,16 +360,17 @@ export class AutoTranslateService {
   }
 
   private async runCategory({
-    companyId,
+    restaurantId,
     categoryId,
     sourceNameChanged,
   }: {
     companyId: string;
+    restaurantId: string;
     categoryId: string;
     sourceNameChanged: boolean;
   }) {
-    const restaurant = await this.prisma.restaurant.findFirst({
-      where: { companyId },
+    const restaurant = await this.prisma.restaurant.findUnique({
+      where: { id: restaurantId },
       select: { defaultLanguage: true, languages: true },
     });
     if (!restaurant) return;
@@ -368,7 +378,7 @@ export class AutoTranslateService {
     if (targets.length === 0) return;
 
     const cat = await this.prisma.category.findFirst({
-      where: { id: categoryId, companyId },
+      where: { id: categoryId, restaurantId },
       select: { id: true, name: true, translations: true },
     });
     if (!cat) return;
@@ -399,7 +409,7 @@ export class AutoTranslateService {
     if (results.size === 0) return;
 
     const fresh = await this.prisma.category.findFirst({
-      where: { id: categoryId, companyId },
+      where: { id: categoryId, restaurantId },
       select: { id: true, translations: true },
     });
     if (!fresh) return;

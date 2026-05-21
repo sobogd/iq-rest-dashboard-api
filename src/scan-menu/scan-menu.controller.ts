@@ -212,24 +212,21 @@ export class ScanMenuController {
     @Req() req: Request,
     @Body() body: { categories?: ScannedCategory[]; replaceExisting?: boolean },
   ) {
-    const { companyId } = (req as AuthedRequest).authUser;
+    const { companyId, restaurantId } = (req as AuthedRequest).authUser;
 
     const incoming = (body.categories ?? []).filter(
       (c) => c.name && Array.isArray(c.items) && c.items.length > 0,
     );
     if (incoming.length === 0) throw new BadRequestException("No items selected");
 
-    // Always remove example items
-    await this.prisma.item.deleteMany({ where: { companyId, isExample: true } });
+    await this.prisma.item.deleteMany({ where: { restaurantId, isExample: true } });
 
-    // Optionally remove all real items
     if (body.replaceExisting) {
-      await this.prisma.item.deleteMany({ where: { companyId } });
+      await this.prisma.item.deleteMany({ where: { restaurantId } });
     }
 
-    // Drop categories that became empty
     const empty = await this.prisma.category.findMany({
-      where: { companyId, items: { none: {} } },
+      where: { restaurantId, items: { none: {} } },
       select: { id: true },
     });
     if (empty.length > 0) {
@@ -238,7 +235,7 @@ export class ScanMenuController {
       });
     }
 
-    const existingCategoriesCount = await this.prisma.category.count({ where: { companyId } });
+    const existingCategoriesCount = await this.prisma.category.count({ where: { restaurantId } });
 
     let categoriesCount = 0;
     let itemsCount = 0;
@@ -251,6 +248,7 @@ export class ScanMenuController {
           sortOrder: existingCategoriesCount + i,
           isActive: true,
           companyId,
+          restaurantId,
         },
       });
       categoriesCount++;
@@ -265,6 +263,7 @@ export class ScanMenuController {
           isActive: true,
           categoryId: category.id,
           companyId,
+          restaurantId,
         }));
 
       if (itemsData.length > 0) {
@@ -273,8 +272,8 @@ export class ScanMenuController {
       }
     }
 
-    await this.prisma.restaurant.updateMany({
-      where: { companyId },
+    await this.prisma.restaurant.update({
+      where: { id: restaurantId },
       data: { checklistMenuEdited: true, fromScanner: true },
     });
 

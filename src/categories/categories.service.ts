@@ -23,6 +23,11 @@ interface CategoryUpdateBody {
   parentId?: string | null;
 }
 
+interface Ctx {
+  companyId: string;
+  restaurantId: string;
+}
+
 @Injectable()
 export class CategoriesService {
   constructor(
@@ -30,28 +35,26 @@ export class CategoriesService {
     private readonly autoTranslate: AutoTranslateService,
   ) {}
 
-  list(companyId: string) {
+  list(ctx: Ctx) {
     return this.prisma.category.findMany({
-      where: { companyId },
+      where: { restaurantId: ctx.restaurantId },
       orderBy: { sortOrder: "asc" },
     });
   }
 
-  async create(companyId: string, body: CategoryCreateBody) {
+  async create(ctx: Ctx, body: CategoryCreateBody) {
     const isGroup = body.isGroup === true;
     const parentId = body.parentId ?? null;
     if (isGroup && parentId) {
       throw new BadRequestException("A group cannot itself have a parent group");
     }
     if (parentId) {
-      const parent = await this.prisma.category.findFirst({ where: { id: parentId, companyId } });
+      const parent = await this.prisma.category.findFirst({ where: { id: parentId, restaurantId: ctx.restaurantId } });
       if (!parent) throw new BadRequestException("Parent group not found");
       if (!parent.isGroup) throw new BadRequestException("Parent must be a group");
     }
-    // sortOrder is scoped to siblings (same parentId), so groups and leaves
-    // each get their own ordered list.
     const max = await this.prisma.category.aggregate({
-      where: { companyId, parentId },
+      where: { restaurantId: ctx.restaurantId, parentId },
       _max: { sortOrder: true },
     });
     const created = await this.prisma.category.create({
@@ -62,20 +65,22 @@ export class CategoriesService {
         isGroup,
         parentId,
         sortOrder: (max._max.sortOrder ?? -1) + 1,
-        companyId,
+        companyId: ctx.companyId,
+        restaurantId: ctx.restaurantId,
       },
     });
     await this.autoTranslate.translateCategory({
-      companyId,
+      companyId: ctx.companyId,
+      restaurantId: ctx.restaurantId,
       categoryId: created.id,
       sourceNameChanged: true,
     });
     return this.prisma.category.findFirst({ where: { id: created.id } });
   }
 
-  async update(companyId: string, id: string, body: CategoryUpdateBody) {
+  async update(ctx: Ctx, id: string, body: CategoryUpdateBody) {
     const cat = await this.prisma.category.findFirst({
-      where: { id, companyId },
+      where: { id, restaurantId: ctx.restaurantId },
       include: { _count: { select: { children: true, items: true } } },
     });
     if (!cat) throw new NotFoundException();
@@ -83,7 +88,7 @@ export class CategoriesService {
 
     if (body.parentId !== undefined && body.parentId !== null) {
       if (body.parentId === id) throw new BadRequestException("Category cannot be its own parent");
-      const parent = await this.prisma.category.findFirst({ where: { id: body.parentId, companyId } });
+      const parent = await this.prisma.category.findFirst({ where: { id: body.parentId, restaurantId: ctx.restaurantId } });
       if (!parent) throw new BadRequestException("Parent group not found");
       if (!parent.isGroup) throw new BadRequestException("Parent must be a group");
       if (cat.isGroup) throw new BadRequestException("A group cannot itself have a parent group");
@@ -117,28 +122,29 @@ export class CategoriesService {
     }
     const updated = await this.prisma.category.update({ where: { id }, data });
     await this.autoTranslate.translateCategory({
-      companyId,
+      companyId: ctx.companyId,
+      restaurantId: ctx.restaurantId,
       categoryId: updated.id,
       sourceNameChanged,
     });
     return this.prisma.category.findFirst({ where: { id: updated.id } });
   }
 
-  async remove(companyId: string, id: string) {
-    const cat = await this.prisma.category.findFirst({ where: { id, companyId } });
+  async remove(ctx: Ctx, id: string) {
+    const cat = await this.prisma.category.findFirst({ where: { id, restaurantId: ctx.restaurantId } });
     if (!cat) throw new NotFoundException();
     await this.prisma.category.delete({ where: { id } });
   }
 
-  async reorder(companyId: string, items: { id: string; sortOrder: number }[]) {
+  async reorder(ctx: Ctx, items: { id: string; sortOrder: number }[]) {
     await this.prisma.$transaction(
       items.map((it) =>
         this.prisma.category.updateMany({
-          where: { id: it.id, companyId },
+          where: { id: it.id, restaurantId: ctx.restaurantId },
           data: { sortOrder: it.sortOrder },
         }),
       ),
     );
-    return this.list(companyId);
+    return this.list(ctx);
   }
 }

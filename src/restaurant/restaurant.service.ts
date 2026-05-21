@@ -1,9 +1,10 @@
-import { BadRequestException, Injectable } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { PrismaService } from "../prisma/prisma.service";
 import { AutoTranslateService } from "../auto-translate/auto-translate.service";
 import { isReservedSlug, slugify } from "../common/reserved-slugs";
+import { isPaidActive } from "../common/ai-quota";
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 const reservationDaySchema = z
@@ -80,7 +81,6 @@ const FIELDS: (keyof RestaurantInput)[] = [
   "orderNameEnabled", "orderPhoneEnabled", "orderAddressEnabled", "orderMode",
 ];
 
-/** Returns true if `tz` is a valid IANA timezone identifier (e.g. "Europe/Rome"). */
 function isValidTimezone(tz: string): boolean {
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: tz });
@@ -138,16 +138,38 @@ export class RestaurantService {
     private readonly autoTranslate: AutoTranslateService,
   ) {}
 
-  async getByCompany(companyId: string) {
-    return this.prisma.restaurant.findFirst({ where: { companyId } });
+  /** Active restaurant (by id from AuthGuard). */
+  async getActive(restaurantId: string) {
+    return this.prisma.restaurant.findUnique({ where: { id: restaurantId } });
   }
 
-  async upsert(companyId: string, raw: Record<string, unknown>) {
-    const input = pickFields(raw);
-    const existing = await this.prisma.restaurant.findFirst({ where: { companyId } });
+  /** All restaurants for company. Soft-hide non-primary on FREE plan. */
+  async listForCompany(companyId: string) {
+    const [company, restaurants] = await Promise.all([
+      this.prisma.company.findUnique({
+        where: { id: companyId },
+        select: { plan: true, subscriptionStatus: true },
+      }),
+      this.prisma.restaurant.findMany({
+        where: { companyId },
+        orderBy: { createdAt: "asc" },
+      }),
+    ]);
+    const paid = company ? isPaidActive(company) : false;
+    if (!paid && restaurants.length > 1) {
+      return restaurants.slice(0, 1);
+    }
+    return restaurants;
+  }
 
-    // Translate `null` on JSON column to Prisma's DbNull sentinel — plain
-    // null from the JS side trips the unchecked create/update typings.
+  /**
+   * Update active restaurant. If no restaurant exists for the company, create
+   * one (legacy onboarding path — pre-seed users hit POST /restaurant before
+   * any restaurant exists).
+   */
+  async upsert(companyId: string, restaurantId: string | null, raw: Record<string, unknown>) {
+    const input = pickFields(raw);
+
     const { reservationSchedule, ...rest } = input;
     const scheduleField =
       reservationSchedule === undefined
@@ -156,13 +178,15 @@ export class RestaurantService {
           ? { reservationSchedule: Prisma.DbNull }
           : { reservationSchedule: reservationSchedule as Prisma.InputJsonValue };
 
-    if (existing) {
+    if (restaurantId) {
+      const existing = await this.prisma.restaurant.findFirst({
+        where: { id: restaurantId, companyId },
+      });
+      if (!existing) throw new NotFoundException("Restaurant not found");
       const updated = await this.prisma.restaurant.update({
         where: { id: existing.id },
         data: { ...(rest as Prisma.RestaurantUpdateInput), ...scheduleField },
       });
-      // Diff languages + defaultLanguage and trigger menu-wide auto-translate
-      // / cleanup / swap so items+categories stay in sync.
       const prevLangs = existing.languages || [];
       const nextLangs = updated.languages || [];
       const added = nextLangs.filter((l) => !prevLangs.includes(l));
@@ -170,22 +194,18 @@ export class RestaurantService {
       const defaultChanged =
         existing.defaultLanguage !== updated.defaultLanguage &&
         !!existing.defaultLanguage && !!updated.defaultLanguage;
-      // 1) drop translations for removed languages first (await so the
-      //    add-lang backfill below sees a consistent state)
       if (removed.length) {
-        await this.autoTranslate.removeLanguagesFromMenu(companyId, removed);
+        await this.autoTranslate.removeLanguagesFromMenu(updated.id, removed);
       }
-      // 2) swap source name/description with the new default's translation
       if (defaultChanged) {
         await this.autoTranslate.swapMenuDefaultLanguage(
-          companyId,
+          updated.id,
           existing.defaultLanguage,
           updated.defaultLanguage,
         );
       }
-      // 3) backfill newly added languages — sync (UI shows blocking modal)
       if (added.length) {
-        await this.autoTranslate.runMenuBackfill(companyId);
+        await this.autoTranslate.runMenuBackfill(updated.id);
       }
       return updated;
     }
@@ -206,22 +226,165 @@ export class RestaurantService {
     return this.prisma.restaurant.create({ data: createData });
   }
 
-  private async uniqueSlug(seed: string): Promise<string> {
-    const base = slugify(seed) || "rest";
-    let slug = base;
-    if (isReservedSlug(slug)) slug = `${base}-${Math.random().toString(36).slice(2, 6)}`;
-    let i = 0;
-    while (
-      isReservedSlug(slug) ||
-      (await this.prisma.restaurant.findFirst({ where: { slug }, select: { id: true } }))
-    ) {
-      i++;
-      slug = `${base}-${Math.random().toString(36).slice(2, 6)}`;
-      if (i > 10) {
-        slug = base + "-" + Date.now().toString(36);
-        break;
+  /**
+   * Create additional restaurant for a company. PRO-gated.
+   * If duplicateFromId is given, copies categories+items+settings from that
+   * restaurant (same company). Tables/orders/reservations/page_views are NOT
+   * copied — physical/historical.
+   */
+  async createForCompany(
+    companyId: string,
+    body: { name: string; duplicateFromId?: string | null },
+  ) {
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      select: { plan: true, subscriptionStatus: true },
+    });
+    if (!company) throw new NotFoundException("Company not found");
+    if (!isPaidActive(company)) {
+      throw new ForbiddenException("multi_restaurant_requires_paid");
+    }
+
+    const name = (body.name || "").trim();
+    if (!name) throw new BadRequestException("Name required");
+
+    const slug = await this.uniqueSlug(name);
+
+    let source: Awaited<ReturnType<typeof this.prisma.restaurant.findUnique>> | null = null;
+    if (body.duplicateFromId) {
+      source = await this.prisma.restaurant.findFirst({
+        where: { id: body.duplicateFromId, companyId },
+      });
+      if (!source) throw new BadRequestException("Source restaurant not found");
+    }
+
+    // Carry settings forward from source (if duplicating) or use the
+    // current primary's languages/currency as a sane starting default.
+    const fallback = source
+      ? null
+      : await this.prisma.restaurant.findFirst({
+          where: { companyId },
+          orderBy: { createdAt: "asc" },
+        });
+    const baseSettings = source ?? fallback;
+
+    const created = await this.prisma.restaurant.create({
+      data: {
+        companyId,
+        title: name,
+        slug,
+        currency: baseSettings?.currency ?? "EUR",
+        accentColor: baseSettings?.accentColor ?? "#000000",
+        languages: baseSettings?.languages ?? ["en"],
+        defaultLanguage: baseSettings?.defaultLanguage ?? "en",
+        menuLayout: baseSettings?.menuLayout ?? "flat",
+        paymentMethods: baseSettings?.paymentMethods ?? ["cash", "card"],
+        timezone: baseSettings?.timezone ?? "UTC",
+        startedFromScratch: !source,
+      },
+    });
+
+    if (source) {
+      await this.duplicateMenu(source.id, created.id, created.companyId);
+    }
+
+    return created;
+  }
+
+  /** Copy categories + items (with translations) from one restaurant to another. */
+  private async duplicateMenu(fromRestaurantId: string, toRestaurantId: string, toCompanyId: string) {
+    const cats = await this.prisma.category.findMany({
+      where: { restaurantId: fromRestaurantId },
+      orderBy: { sortOrder: "asc" },
+    });
+    const idMap = new Map<string, string>();
+    // First pass: create categories without parentId.
+    for (const c of cats) {
+      const created = await this.prisma.category.create({
+        data: {
+          name: c.name,
+          translations: (c.translations ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+          sortOrder: c.sortOrder,
+          isActive: c.isActive,
+          isGroup: c.isGroup,
+          companyId: toCompanyId,
+          restaurantId: toRestaurantId,
+        },
+      });
+      idMap.set(c.id, created.id);
+    }
+    // Second pass: wire parentId.
+    for (const c of cats) {
+      if (!c.parentId) continue;
+      const newId = idMap.get(c.id);
+      const newParent = idMap.get(c.parentId);
+      if (newId && newParent) {
+        await this.prisma.category.update({
+          where: { id: newId },
+          data: { parentId: newParent },
+        });
       }
     }
-    return slug;
+    const items = await this.prisma.item.findMany({
+      where: { restaurantId: fromRestaurantId, deletedAt: null },
+      orderBy: { sortOrder: "asc" },
+    });
+    for (const it of items) {
+      const newCatId = idMap.get(it.categoryId);
+      if (!newCatId) continue;
+      await this.prisma.item.create({
+        data: {
+          name: it.name,
+          description: it.description,
+          translations: (it.translations ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+          price: it.price,
+          imageUrl: it.imageUrl,
+          allergens: it.allergens,
+          diets: it.diets,
+          options: (it.options ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+          sortOrder: it.sortOrder,
+          isActive: it.isActive,
+          isExample: it.isExample,
+          categoryId: newCatId,
+          companyId: toCompanyId,
+          restaurantId: toRestaurantId,
+        },
+      });
+    }
+  }
+
+  async deleteForCompany(companyId: string, restaurantId: string) {
+    const restaurant = await this.prisma.restaurant.findFirst({
+      where: { id: restaurantId, companyId },
+    });
+    if (!restaurant) throw new NotFoundException();
+    const remaining = await this.prisma.restaurant.count({ where: { companyId } });
+    if (remaining <= 1) {
+      throw new BadRequestException("Cannot delete the last restaurant");
+    }
+    await this.prisma.restaurant.delete({ where: { id: restaurantId } });
+  }
+
+  /** Compute the slug that would be allocated for `seed` without writing
+   *  anything. Used by the dashboard's "URL preview" field as the user types. */
+  async previewSlug(seed: string): Promise<string> {
+    return this.uniqueSlug(seed);
+  }
+
+  private async uniqueSlug(seed: string): Promise<string> {
+    const base = slugify(seed) || "rest";
+    // Incremental suffix on collision: base, base1, base2, ... — readable and
+    // predictable. Reserved words always carry a suffix.
+    let i = isReservedSlug(base) ? 1 : 0;
+    while (true) {
+      const candidate = i === 0 ? base : `${base}${i}`;
+      const taken = await this.prisma.restaurant.findFirst({
+        where: { slug: candidate },
+        select: { id: true },
+      });
+      if (!taken && !isReservedSlug(candidate)) return candidate;
+      i++;
+      if (i > 9999) throw new Error(`Could not allocate a unique slug for "${seed}"`);
+    }
   }
 }

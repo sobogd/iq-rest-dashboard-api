@@ -20,25 +20,16 @@ interface TableUpsert {
 export class TablesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  private async restaurantId(companyId: string) {
-    const r = await this.prisma.restaurant.findFirst({ where: { companyId }, select: { id: true } });
-    return r?.id;
-  }
-
-  async list(companyId: string) {
-    const rid = await this.restaurantId(companyId);
-    if (!rid) return [];
+  async list(restaurantId: string) {
     return this.prisma.table.findMany({
-      where: { restaurantId: rid, deletedAt: null },
+      where: { restaurantId, deletedAt: null },
       orderBy: { sortOrder: "asc" },
     });
   }
 
-  async create(companyId: string, body: TableUpsert) {
-    const rid = await this.restaurantId(companyId);
-    if (!rid) throw new NotFoundException("Restaurant not found");
+  async create(restaurantId: string, body: TableUpsert) {
     const max = await this.prisma.table.aggregate({
-      where: { restaurantId: rid },
+      where: { restaurantId },
       _max: { sortOrder: true },
     });
     return this.prisma.table.create({
@@ -54,15 +45,13 @@ export class TablesService {
         isActive: body.isActive ?? true,
         sortOrder: (max._max.sortOrder ?? -1) + 1,
         translations: (body.translations as Prisma.InputJsonValue) ?? Prisma.JsonNull,
-        restaurantId: rid,
+        restaurantId,
       },
     });
   }
 
-  async update(companyId: string, id: string, body: Partial<TableUpsert>) {
-    const rid = await this.restaurantId(companyId);
-    if (!rid) throw new NotFoundException();
-    const tbl = await this.prisma.table.findFirst({ where: { id, restaurantId: rid, deletedAt: null } });
+  async update(restaurantId: string, id: string, body: Partial<TableUpsert>) {
+    const tbl = await this.prisma.table.findFirst({ where: { id, restaurantId, deletedAt: null } });
     if (!tbl) throw new NotFoundException();
     const data: Prisma.TableUpdateInput = {};
     if (body.number !== undefined) data.number = body.number;
@@ -80,10 +69,8 @@ export class TablesService {
     return this.prisma.table.update({ where: { id }, data });
   }
 
-  async remove(companyId: string, id: string) {
-    const rid = await this.restaurantId(companyId);
-    if (!rid) throw new NotFoundException();
-    const tbl = await this.prisma.table.findFirst({ where: { id, restaurantId: rid, deletedAt: null } });
+  async remove(restaurantId: string, id: string) {
+    const tbl = await this.prisma.table.findFirst({ where: { id, restaurantId, deletedAt: null } });
     if (!tbl) throw new NotFoundException();
     await this.prisma.table.update({ where: { id }, data: { deletedAt: new Date() } });
   }

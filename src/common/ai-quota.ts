@@ -13,38 +13,29 @@ export function isPaidActive(company: { plan: string | null; subscriptionStatus:
 // the limit check before either has incremented.
 export async function consumeAiImageQuota(
   prisma: PrismaService,
-  companyId: string,
-): Promise<{ restaurantId: string; isPaid: boolean }> {
-  const [company, restaurant] = await Promise.all([
-    prisma.company.findUnique({
-      where: { id: companyId },
-      select: { plan: true, subscriptionStatus: true },
-    }),
-    prisma.restaurant.findFirst({
-      where: { companyId },
-      select: { id: true },
-    }),
-  ]);
-  if (!company || !restaurant) throw new ForbiddenException("Not found");
+  restaurantId: string,
+): Promise<{ isPaid: boolean }> {
+  const restaurant = await prisma.restaurant.findUnique({
+    where: { id: restaurantId },
+    select: { company: { select: { plan: true, subscriptionStatus: true } } },
+  });
+  if (!restaurant) throw new ForbiddenException("Not found");
 
-  const paid = isPaidActive(company);
-  if (paid) return { restaurantId: restaurant.id, isPaid: true };
+  const paid = isPaidActive(restaurant.company);
+  if (paid) return { isPaid: true };
 
   const reserved = await prisma.restaurant.updateMany({
-    where: { id: restaurant.id, imageGenerationsUsed: { lt: FREE_AI_IMAGE_QUOTA } },
+    where: { id: restaurantId, imageGenerationsUsed: { lt: FREE_AI_IMAGE_QUOTA } },
     data: { imageGenerationsUsed: { increment: 1 } },
   });
   if (reserved.count === 0) {
     throw new ForbiddenException("ai_quota_exceeded");
   }
-  return { restaurantId: restaurant.id, isPaid: false };
+  return { isPaid: false };
 }
 
-// Counter already incremented atomically in consumeAiImageQuota. Kept as a
-// no-op to preserve call sites; if the downstream operation fails callers
-// should call refundAiImageUsage instead.
 export async function incrementAiImageUsage(_prisma: PrismaService, _restaurantId: string) {
-  // intentionally empty
+  // intentionally empty — already incremented in consumeAiImageQuota
 }
 
 export async function refundAiImageUsage(prisma: PrismaService, restaurantId: string) {
@@ -54,22 +45,15 @@ export async function refundAiImageUsage(prisma: PrismaService, restaurantId: st
   });
 }
 
-// Translation quota was removed — translations are unlimited and free.
-// Manual /api/translate and the auto-translate background worker both run
-// without metering.
-
-export async function getAiImageUsage(prisma: PrismaService, companyId: string) {
-  const [company, restaurant] = await Promise.all([
-    prisma.company.findUnique({
-      where: { id: companyId },
-      select: { plan: true, subscriptionStatus: true },
-    }),
-    prisma.restaurant.findFirst({
-      where: { companyId },
-      select: { imageGenerationsUsed: true },
-    }),
-  ]);
-  const paid = company ? isPaidActive(company) : false;
+export async function getAiImageUsage(prisma: PrismaService, restaurantId: string) {
+  const restaurant = await prisma.restaurant.findUnique({
+    where: { id: restaurantId },
+    select: {
+      imageGenerationsUsed: true,
+      company: { select: { plan: true, subscriptionStatus: true } },
+    },
+  });
+  const paid = restaurant ? isPaidActive(restaurant.company) : false;
   return {
     aiImagesUsed: restaurant?.imageGenerationsUsed ?? 0,
     aiImagesLimit: paid ? null : FREE_AI_IMAGE_QUOTA,

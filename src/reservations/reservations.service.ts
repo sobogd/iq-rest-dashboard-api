@@ -8,36 +8,21 @@ export class ReservationsService {
   private readonly logger = new Logger(ReservationsService.name);
   constructor(private readonly prisma: PrismaService, private readonly mail: MailService) {}
 
-  private async restaurantIds(companyId: string) {
-    const rs = await this.prisma.restaurant.findMany({
-      where: { companyId },
-      select: { id: true },
-      orderBy: { createdAt: "asc" },
-    });
-    return rs.map((r) => r.id);
-  }
-
-  async list(companyId: string) {
-    const ids = await this.restaurantIds(companyId);
-    if (ids.length === 0) return [];
+  async list(restaurantId: string) {
     return this.prisma.reservation.findMany({
-      where: { restaurantId: { in: ids } },
+      where: { restaurantId },
       orderBy: [{ date: "desc" }, { startTime: "desc" }],
     });
   }
 
-  async setStatus(companyId: string, id: string, status: ReservationStatus) {
-    const ids = await this.restaurantIds(companyId);
-    if (ids.length === 0) throw new NotFoundException();
+  async setStatus(restaurantId: string, id: string, status: ReservationStatus) {
     const res = await this.prisma.reservation.findFirst({
-      where: { id, restaurantId: { in: ids } },
+      where: { id, restaurantId },
       include: { restaurant: { select: { title: true, defaultLanguage: true } }, table: { select: { number: true } } },
     });
     if (!res) throw new NotFoundException();
     const updated = await this.prisma.reservation.update({ where: { id }, data: { status } });
 
-    // Notify guest on confirm/cancel transitions only — not on completed/pending
-    // updates. Skip if status didn't actually change.
     if ((status === "confirmed" || status === "cancelled") && res.status !== status && res.guestEmail) {
       const dateStr =
         res.date instanceof Date
@@ -61,11 +46,9 @@ export class ReservationsService {
     return updated;
   }
 
-  async remove(companyId: string, id: string) {
-    const ids = await this.restaurantIds(companyId);
-    if (ids.length === 0) throw new NotFoundException();
+  async remove(restaurantId: string, id: string) {
     const res = await this.prisma.reservation.findFirst({
-      where: { id, restaurantId: { in: ids } },
+      where: { id, restaurantId },
     });
     if (!res) throw new NotFoundException();
     await this.prisma.reservation.delete({ where: { id } });

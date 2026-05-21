@@ -22,22 +22,22 @@ export class TablesController {
 
   @Get()
   list(@Req() req: Request) {
-    return this.svc.list((req as AuthedRequest).authUser.companyId);
+    return this.svc.list((req as AuthedRequest).authUser.restaurantId);
   }
 
   @Post()
   create(@Req() req: Request, @Body() body: Parameters<TablesService["create"]>[1]) {
-    return this.svc.create((req as AuthedRequest).authUser.companyId, body);
+    return this.svc.create((req as AuthedRequest).authUser.restaurantId, body);
   }
 
   @Put(":id")
   update(@Req() req: Request, @Param("id") id: string, @Body() body: Parameters<TablesService["update"]>[2]) {
-    return this.svc.update((req as AuthedRequest).authUser.companyId, id, body);
+    return this.svc.update((req as AuthedRequest).authUser.restaurantId, id, body);
   }
 
   @Delete(":id")
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@Req() req: Request, @Param("id") id: string) {
-    await this.svc.remove((req as AuthedRequest).authUser.companyId, id);
+    await this.svc.remove((req as AuthedRequest).authUser.restaurantId, id);
   }
 }

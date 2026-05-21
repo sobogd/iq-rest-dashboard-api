@@ -3,12 +3,6 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { OrdersEventsService } from "../orders-stream/orders-events.service";
 
-// Recomputes an order's total from its item snapshot. Matches the frontend's
-// calcItemPrice formula bit-for-bit:
-//   item_total = (basePriceSnapshot + sum(option.priceDelta * option.qty)) * (item.qty || 1)
-// Server is the source of truth for total — clients may submit `total` for
-// transitional reasons but the server always overrides on writes so two
-// devices can't disagree.
 interface OrderOption {
   priceDelta?: number | string | null;
   quantity?: number | null;
@@ -38,8 +32,12 @@ function calcOrderTotal(items: unknown): number {
     const qty = toNumber(raw.qty ?? 1);
     total += (base + extras) * qty;
   }
-  // Round to 2 decimals using cents to avoid float drift.
   return Math.round(total * 100) / 100;
+}
+
+interface Ctx {
+  companyId: string;
+  restaurantId: string;
 }
 
 @Injectable()
@@ -49,10 +47,7 @@ export class OrdersService {
     private readonly events: OrdersEventsService,
   ) {}
 
-  list(companyId: string, status?: string, from?: string, to?: string) {
-    // Optional date-range filter (analytics modal). `from` / `to` are ISO
-    // strings; when present we constrain on the `orderDate` column (a date,
-    // not a timestamp, so we widen to inclusive day boundaries).
+  list(ctx: Ctx, status?: string, from?: string, to?: string) {
     const range: { gte?: Date; lte?: Date } = {};
     if (from) {
       const d = new Date(from);
@@ -70,7 +65,7 @@ export class OrdersService {
     }
     return this.prisma.order.findMany({
       where: {
-        companyId,
+        restaurantId: ctx.restaurantId,
         deletedAt: null,
         ...(status ? { status } : {}),
         ...(range.gte || range.lte ? { orderDate: range } : {}),
@@ -79,8 +74,11 @@ export class OrdersService {
     });
   }
 
-  async create(companyId: string, body: { items?: unknown[]; total?: number; tableNumber?: number | null; customerName?: string | null }) {
-    const restaurant = await this.prisma.restaurant.findFirst({ where: { companyId }, select: { id: true, currency: true } });
+  async create(ctx: Ctx, body: { items?: unknown[]; total?: number; tableNumber?: number | null; customerName?: string | null }) {
+    const restaurant = await this.prisma.restaurant.findUnique({
+      where: { id: ctx.restaurantId },
+      select: { currency: true },
+    });
     if (!restaurant) throw new NotFoundException("Restaurant not found");
     const orderDate = new Date();
     orderDate.setUTCHours(0, 0, 0, 0);
@@ -88,17 +86,16 @@ export class OrdersService {
     const items = body.items ?? [];
     const total = calcOrderTotal(items);
 
-    // Retry on unique collision when two creates race on same (restaurant, day, number).
     for (let attempt = 0; attempt < 5; attempt++) {
       const last = await this.prisma.order.findFirst({
-        where: { restaurantId: restaurant.id, orderDate },
+        where: { restaurantId: ctx.restaurantId, orderDate },
         orderBy: { dailyNumber: "desc" },
         select: { dailyNumber: true },
       });
       const dailyNumber = (last?.dailyNumber ?? 0) + 1;
       const data: Prisma.OrderUncheckedCreateInput = {
-        companyId,
-        restaurantId: restaurant.id,
+        companyId: ctx.companyId,
+        restaurantId: ctx.restaurantId,
         items: items as Prisma.InputJsonValue,
         total: new Prisma.Decimal(total),
         currency: restaurant.currency,
@@ -126,22 +123,15 @@ export class OrdersService {
     throw new Error("Could not allocate daily order number");
   }
 
-  async patch(companyId: string, id: string, body: { status?: string; items?: unknown[]; total?: number; tableNumber?: number | null; paymentMethodId?: string | null }) {
-    const order = await this.prisma.order.findFirst({ where: { id, companyId, deletedAt: null } });
+  async patch(ctx: Ctx, id: string, body: { status?: string; items?: unknown[]; total?: number; tableNumber?: number | null; paymentMethodId?: string | null }) {
+    const order = await this.prisma.order.findFirst({ where: { id, restaurantId: ctx.restaurantId, deletedAt: null } });
     if (!order) throw new NotFoundException();
-    // Server-side total recalc. When `items` changes we always recompute
-    // from the new array; client-provided `total` is honoured only for the
-    // legacy items-untouched code path (e.g. status flip) to avoid silently
-    // accepting a wrong number.
     const totalUpdate =
       body.items !== undefined
         ? { total: new Prisma.Decimal(calcOrderTotal(body.items)) }
         : body.total !== undefined
         ? { total: new Prisma.Decimal(body.total) }
         : {};
-    // When the new status closes the order (completed/cancelled) and the
-    // previous one was active, remember the previous status so Reopen can
-    // restore exactly that.
     const isClosing = (s?: string) => s === "completed" || s === "cancelled";
     const statusBeforeUpdate =
       body.status !== undefined && isClosing(body.status) && !isClosing(order.status)
@@ -166,12 +156,9 @@ export class OrdersService {
     return updated;
   }
 
-  async reopen(companyId: string, id: string) {
-    const order = await this.prisma.order.findFirst({ where: { id, companyId, deletedAt: null } });
+  async reopen(ctx: Ctx, id: string) {
+    const order = await this.prisma.order.findFirst({ where: { id, restaurantId: ctx.restaurantId, deletedAt: null } });
     if (!order) throw new NotFoundException();
-    // Restore exactly the status the order had at close time. If we don't
-    // know (legacy closed orders), fall back to "in_progress" so it shows up
-    // on the kitchen board.
     const restored = order.statusBeforeClose || "in_progress";
     const updated = await this.prisma.order.update({
       where: { id },
@@ -185,8 +172,8 @@ export class OrdersService {
     return updated;
   }
 
-  async remove(companyId: string, id: string) {
-    const order = await this.prisma.order.findFirst({ where: { id, companyId, deletedAt: null } });
+  async remove(ctx: Ctx, id: string) {
+    const order = await this.prisma.order.findFirst({ where: { id, restaurantId: ctx.restaurantId, deletedAt: null } });
     if (!order) throw new NotFoundException();
     await this.prisma.order.update({ where: { id }, data: { deletedAt: new Date() } });
     await this.events.publish({
@@ -196,10 +183,8 @@ export class OrdersService {
     });
   }
 
-  // Atomic split: создаёт новый Order с выбранными items, исходный обновляет (items без выбранных).
-  // Возвращает { source, created }.
   async split(
-    companyId: string,
+    ctx: Ctx,
     id: string,
     body: { itemIds: string[]; sourceTotal?: number; createdTotal?: number },
   ) {
@@ -207,7 +192,7 @@ export class OrdersService {
     if (!Array.isArray(itemIds) || itemIds.length === 0) {
       throw new NotFoundException("No items selected");
     }
-    const order = await this.prisma.order.findFirst({ where: { id, companyId, deletedAt: null } });
+    const order = await this.prisma.order.findFirst({ where: { id, restaurantId: ctx.restaurantId, deletedAt: null } });
     if (!order) throw new NotFoundException();
 
     const allItems = Array.isArray(order.items) ? (order.items as Array<{ id: string }>) : [];
@@ -215,7 +200,6 @@ export class OrdersService {
     const kept = allItems.filter((it) => !takenSet.has(it.id));
     const taken = allItems.filter((it) => takenSet.has(it.id));
     if (taken.length === 0) throw new NotFoundException("No matching items");
-    // Server-side totals — ignore client values to keep money math honest.
     const sourceTotal = calcOrderTotal(kept);
     const createdTotal = calcOrderTotal(taken);
 
@@ -223,7 +207,6 @@ export class OrdersService {
     orderDate.setUTCHours(0, 0, 0, 0);
 
     return this.prisma.$transaction(async (tx) => {
-      // Allocate dailyNumber with retry on collision inside tx.
       let created;
       let lastErr: unknown = null;
       for (let attempt = 0; attempt < 5; attempt++) {

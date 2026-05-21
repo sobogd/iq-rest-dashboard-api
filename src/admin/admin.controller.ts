@@ -1117,6 +1117,210 @@ export class AdminController {
     return { negatives };
   }
 
+  /** Flat section — all ad groups across all campaigns. */
+  @Get("google-ads/page-groups")
+  async pageGroups(@Query("dateRange") filterDateRange?: string) {
+    const dateSql = this.dateRangeSql(filterDateRange);
+    const { search } = await this.gadsClient();
+    const STATUS_MAP: Record<string, "ENABLED" | "PAUSED"> = { ENABLED: "ENABLED", PAUSED: "PAUSED" };
+
+    const rows = await search(`
+      SELECT ad_group.id, ad_group.name, ad_group.status, ad_group.final_url_suffix,
+        ad_group.cpc_bid_micros,
+        campaign.id, campaign.name,
+        metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros
+      FROM ad_group WHERE ad_group.status != 'REMOVED' AND campaign.status != 'REMOVED'
+        AND segments.date ${dateSql}
+    `);
+    const adGroups: any[] = [];
+    const seen = new Set<string>();
+    for (const r of rows) {
+      const st = STATUS_MAP[r.adGroup.status];
+      if (!st) continue;
+      const m = r.metrics ?? {};
+      adGroups.push({
+        id: String(r.adGroup.id),
+        name: String(r.adGroup.name),
+        status: st,
+        campaignId: String(r.campaign.id),
+        campaignName: String(r.campaign.name),
+        suffix: r.adGroup.finalUrlSuffix || undefined,
+        defaultBid: r.adGroup.cpcBidMicros ? Number(r.adGroup.cpcBidMicros) / 1e6 : undefined,
+        impressions: Number(m.impressions ?? 0),
+        clicks: Number(m.clicks ?? 0),
+        conversions: Number(m.conversions ?? 0),
+        cost: Number(m.costMicros ?? 0) / 1e6,
+      });
+      seen.add(String(r.adGroup.id));
+    }
+    const allRows = await search(`
+      SELECT ad_group.id, ad_group.name, ad_group.status, ad_group.final_url_suffix,
+        ad_group.cpc_bid_micros, campaign.id, campaign.name
+      FROM ad_group WHERE ad_group.status != 'REMOVED' AND campaign.status != 'REMOVED'
+    `);
+    for (const r of allRows) {
+      const id = String(r.adGroup.id);
+      if (seen.has(id)) continue;
+      const st = STATUS_MAP[r.adGroup.status];
+      if (!st) continue;
+      adGroups.push({
+        id,
+        name: String(r.adGroup.name),
+        status: st,
+        campaignId: String(r.campaign.id),
+        campaignName: String(r.campaign.name),
+        suffix: r.adGroup.finalUrlSuffix || undefined,
+        defaultBid: r.adGroup.cpcBidMicros ? Number(r.adGroup.cpcBidMicros) / 1e6 : undefined,
+        impressions: 0, clicks: 0, conversions: 0, cost: 0,
+      });
+    }
+    return { adGroups };
+  }
+
+  /** Flat section — all keywords across all ad groups. */
+  @Get("google-ads/page-keywords")
+  async pageKeywords(@Query("dateRange") filterDateRange?: string) {
+    const dateSql = this.dateRangeSql(filterDateRange);
+    const { search } = await this.gadsClient();
+    const STATUS_MAP: Record<string, "ENABLED" | "PAUSED"> = { ENABLED: "ENABLED", PAUSED: "PAUSED" };
+    const MT_LABEL: Record<string, string> = { EXACT: "E", PHRASE: "P", BROAD: "B" };
+
+    const rows = await search(`
+      SELECT ad_group_criterion.criterion_id, ad_group_criterion.keyword.text,
+        ad_group_criterion.keyword.match_type, ad_group_criterion.status,
+        ad_group_criterion.cpc_bid_micros, ad_group_criterion.effective_cpc_bid_micros,
+        ad_group_criterion.quality_info.quality_score, ad_group_criterion.negative,
+        ad_group.id, ad_group.name, campaign.id, campaign.name,
+        metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros
+      FROM keyword_view WHERE ad_group_criterion.status != 'REMOVED'
+        AND ad_group.status != 'REMOVED' AND campaign.status != 'REMOVED'
+        AND segments.date ${dateSql}
+    `);
+    const keywords: any[] = [];
+    const seen = new Set<string>();
+    for (const r of rows) {
+      if (r.adGroupCriterion.negative === true) continue;
+      const st = STATUS_MAP[r.adGroupCriterion.status];
+      if (!st) continue;
+      const m = r.metrics ?? {};
+      const mtRaw = r.adGroupCriterion.keyword.matchType;
+      const mt = MT_LABEL[mtRaw] ?? "?";
+      const bidMicros = r.adGroupCriterion.cpcBidMicros ?? r.adGroupCriterion.effectiveCpcBidMicros;
+      const qs = r.adGroupCriterion.qualityInfo?.qualityScore;
+      const key = `${r.adGroup.id}:${r.adGroupCriterion.criterionId}`;
+      keywords.push({
+        id: key,
+        critId: String(r.adGroupCriterion.criterionId),
+        adGroupId: String(r.adGroup.id),
+        adGroupName: String(r.adGroup.name),
+        campaignId: String(r.campaign.id),
+        campaignName: String(r.campaign.name),
+        text: String(r.adGroupCriterion.keyword.text),
+        matchType: mt,
+        status: st,
+        impressions: Number(m.impressions ?? 0),
+        clicks: Number(m.clicks ?? 0),
+        conversions: Number(m.conversions ?? 0),
+        cost: Number(m.costMicros ?? 0) / 1e6,
+        qualityScore: typeof qs === "number" ? qs : undefined,
+        bid: bidMicros ? Number(bidMicros) / 1e6 : undefined,
+      });
+      seen.add(key);
+    }
+    const allRows = await search(`
+      SELECT ad_group_criterion.criterion_id, ad_group_criterion.keyword.text,
+        ad_group_criterion.keyword.match_type, ad_group_criterion.status,
+        ad_group_criterion.cpc_bid_micros, ad_group_criterion.effective_cpc_bid_micros,
+        ad_group_criterion.quality_info.quality_score, ad_group_criterion.negative,
+        ad_group.id, ad_group.name, campaign.id, campaign.name
+      FROM ad_group_criterion WHERE ad_group_criterion.type = 'KEYWORD'
+        AND ad_group_criterion.negative = FALSE
+        AND ad_group_criterion.status != 'REMOVED' AND ad_group.status != 'REMOVED'
+        AND campaign.status != 'REMOVED'
+    `);
+    for (const r of allRows) {
+      const key = `${r.adGroup.id}:${r.adGroupCriterion.criterionId}`;
+      if (seen.has(key)) continue;
+      const st = STATUS_MAP[r.adGroupCriterion.status];
+      if (!st) continue;
+      const mt = MT_LABEL[r.adGroupCriterion.keyword.matchType] ?? "?";
+      const bidMicros = r.adGroupCriterion.cpcBidMicros ?? r.adGroupCriterion.effectiveCpcBidMicros;
+      const qs = r.adGroupCriterion.qualityInfo?.qualityScore;
+      keywords.push({
+        id: key,
+        critId: String(r.adGroupCriterion.criterionId),
+        adGroupId: String(r.adGroup.id),
+        adGroupName: String(r.adGroup.name),
+        campaignId: String(r.campaign.id),
+        campaignName: String(r.campaign.name),
+        text: String(r.adGroupCriterion.keyword.text),
+        matchType: mt,
+        status: st,
+        impressions: 0, clicks: 0, conversions: 0, cost: 0,
+        qualityScore: typeof qs === "number" ? qs : undefined,
+        bid: bidMicros ? Number(bidMicros) / 1e6 : undefined,
+      });
+    }
+    return { keywords };
+  }
+
+  /** Flat section — search terms across all ad groups, grouped by (term, matched keyword). */
+  @Get("google-ads/page-search-terms")
+  async pageSearchTerms(@Query("dateRange") filterDateRange?: string) {
+    const dateSql = this.dateRangeSql(filterDateRange);
+    const { search } = await this.gadsClient();
+    const MT_LABEL: Record<string, string> = { EXACT: "E", PHRASE: "P", BROAD: "B" };
+    const ST_LABEL: Record<string, string> = { ADDED: "added", EXCLUDED: "excluded", NONE: "none", ADDED_EXCLUDED: "added_excluded", UNKNOWN: "unknown" };
+
+    const rows = await search(`
+      SELECT
+        search_term_view.search_term,
+        search_term_view.status,
+        segments.keyword.info.text,
+        segments.keyword.info.match_type,
+        ad_group.id, ad_group.name,
+        campaign.id, campaign.name,
+        metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros
+      FROM search_term_view
+      WHERE segments.date ${dateSql}
+        AND ad_group.status != 'REMOVED' AND campaign.status != 'REMOVED'
+    `);
+    const agg = new Map<string, any>();
+    for (const r of rows) {
+      const term = String(r.searchTermView?.searchTerm ?? "");
+      if (!term) continue;
+      const kwText = String(r.segments?.keyword?.info?.text ?? "");
+      const kwMt = MT_LABEL[r.segments?.keyword?.info?.matchType] ?? "?";
+      const adGroupId = String(r.adGroup?.id ?? "");
+      const key = `${term}|${kwText}|${kwMt}|${adGroupId}`;
+      const m = r.metrics ?? {};
+      const existing = agg.get(key);
+      if (existing) {
+        existing.impressions += Number(m.impressions ?? 0);
+        existing.clicks += Number(m.clicks ?? 0);
+        existing.conversions += Number(m.conversions ?? 0);
+        existing.cost += Number(m.costMicros ?? 0) / 1e6;
+      } else {
+        agg.set(key, {
+          searchTerm: term,
+          status: ST_LABEL[r.searchTermView?.status] ?? r.searchTermView?.status ?? "unknown",
+          matchedKeyword: kwText,
+          matchedMatchType: kwMt,
+          adGroupId,
+          adGroupName: String(r.adGroup?.name ?? ""),
+          campaignId: String(r.campaign?.id ?? ""),
+          campaignName: String(r.campaign?.name ?? ""),
+          impressions: Number(m.impressions ?? 0),
+          clicks: Number(m.clicks ?? 0),
+          conversions: Number(m.conversions ?? 0),
+          cost: Number(m.costMicros ?? 0) / 1e6,
+        });
+      }
+    }
+    const items = Array.from(agg.values()).sort((a, b) => b.impressions - a.impressions);
+    return { items };
+  }
+
   /** Firehose — everything needed for nav between all views, one shot.
    *  Returns ALL statuses (ENABLED + PAUSED). Frontend filters status client-side. */
   @Get("google-ads/all")

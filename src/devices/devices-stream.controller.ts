@@ -63,6 +63,12 @@ export class DevicesStreamController {
         safeWrite(`event: device-revoked\ndata: ${JSON.stringify(event)}\n\n`);
         return;
       }
+      if (event.action === "force-reload") {
+        // Admin-triggered "reload every paired tablet" — used to push
+        // hotfixed bundles without walking the floor.
+        safeWrite(`event: force-reload\ndata: ${JSON.stringify(event)}\n\n`);
+        return;
+      }
       safeWrite(`event: order\ndata: ${JSON.stringify(event)}\n\n`);
     });
 

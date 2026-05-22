@@ -312,4 +312,31 @@ export class DevicesService {
       data: { lastSeenAt: new Date() },
     });
   }
+
+  // ─── Super-admin: global page reload ──────────────────────────────────────
+  //
+  // Fans a force-reload event out to every paired device across every
+  // company. Used by Claude (superadmin) after deploying an urgent
+  // bundle fix — staff doesn't have to walk around their floors and
+  // refresh tabs by hand. Each restaurantId in the system gets its own
+  // publish; the SSE channel is restaurant-scoped so a single broadcast
+  // can't fan out to everyone at once.
+
+  async reloadAllGlobal(): Promise<{ devices: number; restaurants: number }> {
+    // Only restaurants that actually host a paired ACTIVE device — no
+    // point waking PG NOTIFY for empty rooms.
+    const rows = await this.prisma.device.findMany({
+      where: { status: "ACTIVE" },
+      select: { restaurantId: true },
+      distinct: ["restaurantId"],
+    });
+    for (const r of rows) {
+      await this.events.publish({
+        action: "force-reload",
+        restaurantId: r.restaurantId,
+      });
+    }
+    const devices = await this.prisma.device.count({ where: { status: "ACTIVE" } });
+    return { devices, restaurants: rows.length };
+  }
 }

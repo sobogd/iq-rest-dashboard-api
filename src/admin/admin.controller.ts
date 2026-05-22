@@ -24,6 +24,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { AdminGuard } from "./admin.guard";
 import { AuthService } from "../auth/auth.service";
 import { MailService } from "../mail/mail.service";
+import { DevicesService } from "../devices/devices.service";
 import { authCookieOptions } from "../common/session-utils";
 import type { AuthedRequest } from "../auth/auth.guard";
 
@@ -45,7 +46,18 @@ export class AdminController {
     private readonly auth: AuthService,
     private readonly config: ConfigService,
     private readonly mail: MailService,
+    private readonly devices: DevicesService,
   ) {}
+
+  // ────────────────── DEVICES ──────────────────
+
+  // Fan out a force-reload to every paired tablet across every company.
+  // Used after deploying an urgent kitchen-bundle fix — the kiosk SSE
+  // handler clears its caches and calls location.reload() on receipt.
+  @Post("devices/reload-all")
+  reloadAllDevices() {
+    return this.devices.reloadAllGlobal();
+  }
 
   // ────────────────── COMPANIES ──────────────────
 

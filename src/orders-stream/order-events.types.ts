@@ -2,7 +2,13 @@
 // Kept tiny on purpose — clients always have the full order objects from
 // their initial fetch and apply mutations / delete by id.
 
-export type OrderEventAction = "created" | "updated" | "deleted" | "split" | "device-revoked";
+export type OrderEventAction =
+  | "created"
+  | "updated"
+  | "deleted"
+  | "split"
+  | "device-revoked"
+  | "force-reload";
 
 export interface OrderEvent {
   action: OrderEventAction;

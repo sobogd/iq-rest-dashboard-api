@@ -116,6 +116,20 @@ function pickFields(raw: Record<string, unknown>): RestaurantInput {
     }
     out.menuLayout = v;
   }
+  if (out.slug !== undefined && out.slug !== null) {
+    // Normalise and re-check reserved set so a user-typed slug can't slip
+    // past the auto-allocator's reserve checks. Without this, posting
+    // `slug: "k"` directly would land tenants on `/m/k` which collides
+    // with the kitchen subdomain and other infrastructure reservations.
+    const cleaned = slugify(String(out.slug));
+    if (!cleaned) {
+      throw new BadRequestException("Invalid slug");
+    }
+    if (isReservedSlug(cleaned)) {
+      throw new BadRequestException("slug_reserved");
+    }
+    out.slug = cleaned;
+  }
   if (out.paymentMethods !== undefined) {
     if (!Array.isArray(out.paymentMethods)) {
       throw new BadRequestException("paymentMethods must be an array of strings");

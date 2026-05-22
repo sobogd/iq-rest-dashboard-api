@@ -13,6 +13,13 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   "ws", "wss", "api", "auth", "oauth", "sso", "id", "login", "logout",
   "signup", "signin", "otp", "register", "verify",
 
+  // device-kiosk subdomains — block before tenant resolution to avoid
+  // collisions with k.iq-rest.com (kitchen) and friends. `k` is short
+  // on purpose for touchscreen entry; `kitchen` is reserved alongside
+  // even though we don't use it, in case anyone bookmarked the old
+  // subdomain. `kds`/`pos`/`waiter` reserve room for future expansion.
+  "k", "kitchen", "kds", "pos", "waiter", "host", "bar", "till",
+
   // application areas
   "admin", "administrator", "root", "system", "internal", "private",
   "public", "app", "dashboard", "panel", "console", "settings", "config",

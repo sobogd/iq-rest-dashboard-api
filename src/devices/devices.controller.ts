@@ -141,21 +141,25 @@ export class DevicesController {
   async patchOrder(
     @Req() req: DevicedRequest,
     @Param("id") id: string,
-    @Body() body: { items?: unknown[]; total?: number },
+    @Body() body: {
+      items?: unknown[];
+      total?: number;
+      discount?: { type: string; value: number; reason?: string } | null;
+    },
   ) {
-    const allowed = new Set(["items", "total"]);
+    const allowed = new Set(["items", "total", "discount"]);
     for (const key of Object.keys(body || {})) {
       if (!allowed.has(key)) {
         throw new BadRequestException(`Field not allowed for devices: ${key}`);
       }
     }
-    if (!Array.isArray(body.items)) {
-      throw new BadRequestException("items array required");
+    if (body.items !== undefined && !Array.isArray(body.items)) {
+      throw new BadRequestException("items must be an array");
     }
     return this.orders.patch(
       { companyId: req.device.companyId, restaurantId: req.device.restaurantId },
       id,
-      { items: body.items, total: body.total },
+      { items: body.items, total: body.total, discount: body.discount },
     );
   }
 }

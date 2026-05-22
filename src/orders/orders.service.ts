@@ -7,11 +7,16 @@ interface OrderOption {
   priceDelta?: number | string | null;
   quantity?: number | null;
 }
+interface Discount {
+  type?: string | null;
+  value?: number | string | null;
+}
 interface OrderItem {
   basePriceSnapshot?: number | string | null;
   price?: number | string | null;
   qty?: number | null;
   options?: OrderOption[] | null;
+  discount?: Discount | null;
 }
 
 function toNumber(v: unknown): number {
@@ -20,19 +25,61 @@ function toNumber(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function calcOrderTotal(items: unknown): number {
-  if (!Array.isArray(items)) return 0;
-  let total = 0;
-  for (const raw of items as OrderItem[]) {
-    const base = toNumber(raw.basePriceSnapshot ?? raw.price);
-    const extras = (raw.options ?? []).reduce(
-      (sum, o) => sum + toNumber(o.priceDelta) * toNumber(o.quantity ?? 1),
-      0,
-    );
-    const qty = toNumber(raw.qty ?? 1);
-    total += (base + extras) * qty;
+// Apply a single discount to `base`. Percent values are clamped to [0,100]
+// so a typo in the dashboard can't drive an order negative; fixed values
+// are clamped to base for the same reason. Result rounded to cents.
+function applyDiscount(base: number, discount: Discount | null | undefined): number {
+  if (!discount) return 0;
+  const value = toNumber(discount.value);
+  if (value <= 0) return 0;
+  if (discount.type === "percent") {
+    const pct = Math.min(100, value);
+    return Math.round(base * (pct / 100) * 100) / 100;
   }
-  return Math.round(total * 100) / 100;
+  if (discount.type === "fixed") {
+    return Math.round(Math.min(base, value) * 100) / 100;
+  }
+  return 0;
+}
+
+function itemSubtotal(raw: OrderItem): number {
+  const base = toNumber(raw.basePriceSnapshot ?? raw.price);
+  const extras = (raw.options ?? []).reduce(
+    (sum, o) => sum + toNumber(o.priceDelta) * toNumber(o.quantity ?? 1),
+    0,
+  );
+  const qty = toNumber(raw.qty ?? 1);
+  return (base + extras) * qty;
+}
+
+function itemFinal(raw: OrderItem): number {
+  const sub = itemSubtotal(raw);
+  return Math.max(0, sub - applyDiscount(sub, raw.discount));
+}
+
+function calcOrderTotal(items: unknown, orderDiscount?: Discount | null): number {
+  if (!Array.isArray(items)) return 0;
+  let subtotal = 0;
+  for (const raw of items as OrderItem[]) subtotal += itemFinal(raw);
+  subtotal = Math.round(subtotal * 100) / 100;
+  const final = Math.max(0, subtotal - applyDiscount(subtotal, orderDiscount ?? null));
+  return Math.round(final * 100) / 100;
+}
+
+// Sum of all discounts (item-level + order-level) for a given items array +
+// order discount. Stored denormalised in Order.discountTotal so analytics
+// can sum without re-parsing every items JSON.
+function calcDiscountTotal(items: unknown, orderDiscount?: Discount | null): number {
+  if (!Array.isArray(items)) return 0;
+  let itemsDiscount = 0;
+  let subtotalAfterItem = 0;
+  for (const raw of items as OrderItem[]) {
+    const sub = itemSubtotal(raw);
+    itemsDiscount += applyDiscount(sub, raw.discount);
+    subtotalAfterItem += Math.max(0, sub - applyDiscount(sub, raw.discount));
+  }
+  const orderD = applyDiscount(Math.round(subtotalAfterItem * 100) / 100, orderDiscount ?? null);
+  return Math.round((itemsDiscount + orderD) * 100) / 100;
 }
 
 interface Ctx {
@@ -85,6 +132,7 @@ export class OrdersService {
 
     const items = body.items ?? [];
     const total = calcOrderTotal(items);
+    const discountTotal = calcDiscountTotal(items);
 
     for (let attempt = 0; attempt < 5; attempt++) {
       const last = await this.prisma.order.findFirst({
@@ -98,6 +146,7 @@ export class OrdersService {
         restaurantId: ctx.restaurantId,
         items: items as Prisma.InputJsonValue,
         total: new Prisma.Decimal(total),
+        discountTotal: discountTotal > 0 ? new Prisma.Decimal(discountTotal) : null,
         currency: restaurant.currency,
         tableNumber: body.tableNumber ?? null,
         customerName: body.customerName ?? null,
@@ -123,15 +172,25 @@ export class OrdersService {
     throw new Error("Could not allocate daily order number");
   }
 
-  async patch(ctx: Ctx, id: string, body: { status?: string; items?: unknown[]; total?: number; tableNumber?: number | null; paymentMethodId?: string | null }) {
+  async patch(ctx: Ctx, id: string, body: { status?: string; items?: unknown[]; total?: number; tableNumber?: number | null; paymentMethodId?: string | null; discount?: Discount | null }) {
     const order = await this.prisma.order.findFirst({ where: { id, restaurantId: ctx.restaurantId, deletedAt: null } });
     if (!order) throw new NotFoundException();
-    const totalUpdate =
-      body.items !== undefined
-        ? { total: new Prisma.Decimal(calcOrderTotal(body.items)) }
-        : body.total !== undefined
-        ? { total: new Prisma.Decimal(body.total) }
-        : {};
+    // Whichever side (items or discount) is changing in this patch, we
+    // re-derive total + discountTotal from the resulting combined state.
+    const nextItems = body.items !== undefined ? body.items : (order.items as unknown);
+    const nextDiscount =
+      body.discount !== undefined ? body.discount : (order.discount as Discount | null);
+    const recompute =
+      body.items !== undefined || body.discount !== undefined || body.total !== undefined;
+    const recomputed = recompute
+      ? {
+          total: new Prisma.Decimal(calcOrderTotal(nextItems, nextDiscount)),
+          discountTotal: (() => {
+            const v = calcDiscountTotal(nextItems, nextDiscount);
+            return v > 0 ? new Prisma.Decimal(v) : null;
+          })(),
+        }
+      : {};
     const isClosing = (s?: string) => s === "completed" || s === "cancelled";
     const statusBeforeUpdate =
       body.status !== undefined && isClosing(body.status) && !isClosing(order.status)
@@ -142,7 +201,10 @@ export class OrdersService {
       data: {
         ...(body.status !== undefined ? { status: body.status } : {}),
         ...(body.items !== undefined ? { items: body.items as Prisma.InputJsonValue } : {}),
-        ...totalUpdate,
+        ...(body.discount !== undefined
+          ? { discount: (body.discount === null ? Prisma.DbNull : body.discount) as Prisma.InputJsonValue | typeof Prisma.DbNull }
+          : {}),
+        ...recomputed,
         ...(body.tableNumber !== undefined ? { tableNumber: body.tableNumber } : {}),
         ...(body.paymentMethodId !== undefined ? { paymentMethodId: body.paymentMethodId } : {}),
         ...statusBeforeUpdate,

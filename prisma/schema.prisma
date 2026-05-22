@@ -436,6 +436,12 @@ model Order {
   statusBeforeClose String?
   // Payment method code chosen at close-time. Nullable for legacy orders.
   paymentMethodId String?
+  // Order-level discount + total amount of (item discounts + order discount).
+  // Stored separately from items so analytics queries don't need JSON parsing
+  // — sum(discountTotal) over orders gives "discounts given" for a period.
+  // Item-level discounts continue to live inside Order.items JSON.
+  discount        Json?
+  discountTotal   Decimal? @db.Decimal(10, 2)
   isExample       Boolean  @default(false)
   // Soft-delete marker. Hidden from operational lists but preserved so
   // analytics (revenue, top dishes, etc.) survive a delete.

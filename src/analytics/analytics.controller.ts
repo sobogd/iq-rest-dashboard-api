@@ -128,20 +128,12 @@ export class AnalyticsController {
       ? Prisma.sql`"companyId" = ${companyId}`
       : Prisma.sql`"restaurantId" = ${restaurantId}`;
 
-    const ordersEnabledWhere = isAll
-      ? { companyId, ordersEnabled: true }
-      : { id: restaurantId, ordersEnabled: true };
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      select: { createdAt: true },
+    });
 
-    const [company, ordersEnabledCount] = await Promise.all([
-      this.prisma.company.findUnique({
-        where: { id: companyId },
-        select: { createdAt: true },
-      }),
-      this.prisma.restaurant.count({ where: ordersEnabledWhere }),
-    ]);
-
-    const ordersFeatureOn = ordersEnabledCount > 0;
-    const showOrders = isAdmin && ordersFeatureOn;
+    const showOrders = isAdmin;
 
     const pvFilterWhere = isAll
       ? { companyId, createdAt: { gte: startDate, lt: endDate } }

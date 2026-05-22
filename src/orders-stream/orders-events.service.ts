@@ -5,7 +5,28 @@ import { Subject } from "rxjs";
 import {
   ORDERS_NOTIFY_CHANNEL,
   OrderEvent,
+  OrderItemSummary,
 } from "./order-events.types";
+
+function extractOrderId(order: unknown): string | null {
+  if (!order || typeof order !== "object") return null;
+  const id = (order as { id?: unknown }).id;
+  return typeof id === "string" ? id : null;
+}
+
+function extractItemSummary(order: unknown): OrderItemSummary[] | undefined {
+  if (!order || typeof order !== "object") return undefined;
+  const items = (order as { items?: unknown }).items;
+  if (!Array.isArray(items)) return undefined;
+  return items
+    .filter((it): it is Record<string, unknown> => typeof it === "object" && it !== null)
+    .map((it) => ({
+      id: typeof it.id === "string" ? it.id : "",
+      dishId: typeof it.dishId === "string" ? it.dishId : "",
+      status: typeof it.status === "string" ? it.status : "pending",
+    }))
+    .filter((it) => it.id !== "");
+}
 
 // Dedicated long-lived pg client that LISTENs on the orders channel. Prisma's
 // connection pool is not suitable because LISTEN is per-connection, and
@@ -74,10 +95,16 @@ export class OrdersEventsService implements OnModuleInit, OnModuleDestroy {
     }
     const payload = JSON.stringify(event);
     if (payload.length > 7800) {
+      // Strip the heavy snapshot fields (i18n names, options, notes) and
+      // ship just enough for the kitchen kiosk to diff item ids + run
+      // its category/status chime filter. Without itemSummary the kiosk
+      // would otherwise fall back to a full /devices/bootstrap and the
+      // new-item chime would be silently skipped.
       const slim: OrderEvent = {
         action: event.action,
         restaurantId: event.restaurantId,
-        orderId: event.orderId,
+        orderId: event.orderId ?? (extractOrderId(event.order) || undefined),
+        itemSummary: extractItemSummary(event.order),
       };
       await this.client.query(`SELECT pg_notify($1, $2)`, [
         ORDERS_NOTIFY_CHANNEL,

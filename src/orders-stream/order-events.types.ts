@@ -10,6 +10,12 @@ export type OrderEventAction =
   | "device-revoked"
   | "force-reload";
 
+export interface OrderItemSummary {
+  id: string;
+  dishId: string;
+  status: string;
+}
+
 export interface OrderEvent {
   action: OrderEventAction;
   restaurantId: string;
@@ -23,6 +29,11 @@ export interface OrderEvent {
   // against its own deviceId and force-logs-out on hit. Piggybacks on the
   // orders SSE channel so kitchen UIs don't need a second EventSource.
   deviceId?: string;
+  // Slim-mode kitchen summary. When the full order body would exceed the
+  // pg_notify 8000-char limit, the publisher drops `order` and ships
+  // this instead so the kitchen kiosk can still diff item ids + check
+  // its chime filter without round-tripping for a full bootstrap.
+  itemSummary?: OrderItemSummary[];
 }
 
 export const ORDERS_NOTIFY_CHANNEL = "orders_events";

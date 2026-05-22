@@ -13,6 +13,7 @@ import { TablesModule } from "./tables/tables.module";
 import { ReservationsModule } from "./reservations/reservations.module";
 import { OrdersModule } from "./orders/orders.module";
 import { OrdersStreamModule } from "./orders-stream/orders-stream.module";
+import { DevicesModule } from "./devices/devices.module";
 import { UploadModule } from "./upload/upload.module";
 import { TranslateModule } from "./translate/translate.module";
 import { SupportModule } from "./support/support.module";
@@ -42,6 +43,7 @@ import { HealthController } from "./health/health.controller";
     ReservationsModule,
     OrdersModule,
     OrdersStreamModule,
+    DevicesModule,
     UploadModule,
     TranslateModule,
     SupportModule,

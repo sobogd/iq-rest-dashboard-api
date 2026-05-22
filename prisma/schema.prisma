@@ -464,4 +464,55 @@ model GoogleAdsExclusion {
   @@map("google_ads_exclusions")
 }
 
+enum DeviceType {
+  KITCHEN
+  WAITER
+}
+
+enum DeviceStatus {
+  ACTIVE
+  REVOKED
+}
+
+/// Physical device (tablet / phone) paired to a restaurant for kiosk-style
+/// access — kitchen display, waiter terminal, etc. Auth is by long-lived
+/// device JWT (not user session) so a tablet survives staff turnover.
+model Device {
+  id            String       @id @default(cuid())
+  companyId     String
+  restaurantId  String
+  name          String
+  type          DeviceType
+  status        DeviceStatus @default(ACTIVE)
+  // Bumped on revoke; every authed request re-checks this against the JWT.
+  // Mismatch / REVOKED → 401, kitchen redirects to pairing screen.
+  tokenVersion  Int          @default(1)
+  pairedAt      DateTime?
+  lastSeenAt    DateTime?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  pairingCode   PairingCode?
+
+  @@index([companyId])
+  @@index([restaurantId])
+  @@map("devices")
+}
+
+/// One-time pairing code generated in the admin and entered on the tablet.
+/// TTL ~120s. Consumed on successful pair (usedAt set). One pending code per
+/// device at a time — regenerate replaces the row.
+model PairingCode {
+  code      String   @id
+  deviceId  String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  device    Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@map("pairing_codes")
+}
+
 

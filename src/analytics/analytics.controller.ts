@@ -113,11 +113,8 @@ export class AnalyticsController {
     @Query("period") periodRaw = "",
     @Query("scope") scope = "",
   ) {
-    const { companyId, email, restaurantId } = (req as AuthedRequest).authUser;
+    const { companyId, restaurantId } = (req as AuthedRequest).authUser;
     const { period, startDate, endDate, prevStartDate, prevEndDate } = monthWindow(periodRaw);
-
-    const adminDomain = (process.env.ADMIN_EMAIL_DOMAIN || "iq-rest.com").toLowerCase();
-    const isAdmin = !!email && email.toLowerCase().endsWith("@" + adminDomain);
 
     const isAll = scope === "all";
     // Resolve restaurant filter once for all queries.
@@ -132,8 +129,6 @@ export class AnalyticsController {
       where: { id: companyId },
       select: { createdAt: true },
     });
-
-    const showOrders = isAdmin;
 
     const pvFilterWhere = isAll
       ? { companyId, createdAt: { gte: startDate, lt: endDate } }
@@ -190,8 +185,7 @@ export class AnalyticsController {
       ? { companyId, isExample: false, status: "completed" }
       : { restaurantId, isExample: false, status: "completed" };
 
-    const orderQueries = showOrders
-      ? await Promise.all([
+    const orderQueries = await Promise.all([
           this.prisma.$queryRaw<{ revenue: string | null; orders: bigint }[]>`
             SELECT COALESCE(SUM(total), 0) AS revenue, COUNT(*) AS orders
             FROM orders
@@ -250,13 +244,12 @@ export class AnalyticsController {
             where: isAll ? { companyId } : { id: restaurantId },
             select: { id: true, defaultLanguage: true },
           }),
-        ])
-      : null;
+        ]);
 
     const totalScans = uniqSessionsRows.length;
 
     let ordersPayload: unknown = null;
-    if (orderQueries) {
+    {
       const [
         ordersAgg,
         ordersAggPrev,

@@ -18,7 +18,7 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   // on purpose for touchscreen entry; `kitchen` is reserved alongside
   // even though we don't use it, in case anyone bookmarked the old
   // subdomain. `kds`/`pos`/`waiter` reserve room for future expansion.
-  "k", "kitchen", "kds", "pos", "waiter", "host", "bar", "till",
+  "k", "w", "kitchen", "waiter", "kds", "pos", "host", "bar", "till",
 
   // application areas
   "admin", "administrator", "root", "system", "internal", "private",

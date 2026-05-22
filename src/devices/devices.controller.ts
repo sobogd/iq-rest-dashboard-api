@@ -3,7 +3,9 @@ import {
   Body,
   Controller,
   Delete,
+  forwardRef,
   Get,
+  Inject,
   Param,
   Patch,
   Post,
@@ -22,6 +24,7 @@ import { PrismaService } from "../prisma/prisma.service";
 export class DevicesController {
   constructor(
     private readonly devices: DevicesService,
+    @Inject(forwardRef(() => OrdersService))
     private readonly orders: OrdersService,
     private readonly prisma: PrismaService,
   ) {}

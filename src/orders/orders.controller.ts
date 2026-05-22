@@ -13,7 +13,8 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import type { Request } from "express";
-import { AuthGuard, type AuthedRequest } from "../auth/auth.guard";
+import { type AuthedRequest } from "../auth/auth.guard";
+import { UserOrDeviceGuard } from "../devices/user-or-device.guard";
 import { OrdersService } from "./orders.service";
 
 function ctx(req: Request) {
@@ -22,7 +23,7 @@ function ctx(req: Request) {
 }
 
 @Controller("orders")
-@UseGuards(AuthGuard)
+@UseGuards(UserOrDeviceGuard)
 export class OrdersController {
   constructor(private readonly svc: OrdersService) {}
 

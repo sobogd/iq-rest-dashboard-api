@@ -407,6 +407,7 @@ model UsageEvent {
   companyId String?  // server-side from iqr_session cookie when logged in
   ip        String?  // anonymized client IP (IPv4 last octet zeroed, IPv6 truncated to /64)
   is_google_ads Boolean @default(false) // arrival via gclid/gbraid/wbraid on the URL
+  is_facebook_ads Boolean @default(false) // arrival via fbclid on the URL (Facebook/Instagram ads)
   is_search     Boolean @default(false) // arrival from a search engine referrer (google/bing/yandex/…)
 
   @@index([at])
@@ -414,6 +415,7 @@ model UsageEvent {
   @@index([companyId, at])
   @@index([gclid])
   @@index([is_google_ads, at])
+  @@index([is_facebook_ads, at])
   @@index([is_search, at])
   @@map("usage_events")
 }

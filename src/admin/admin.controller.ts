@@ -540,6 +540,7 @@ export class AdminController {
         ip: true,
         is_search: true,
         is_google_ads: true,
+        is_facebook_ads: true,
       },
     });
 
@@ -590,6 +591,7 @@ export class AdminController {
         ip: r.ip,
         isSearch: r.is_search,
         isGoogleAds: r.is_google_ads,
+        isFacebookAds: r.is_facebook_ads,
       })),
     };
   }
@@ -619,7 +621,7 @@ export class AdminController {
         id: true, at: true, event: true,
         country: true, region: true, device: true, platform: true,
         gclid: true, ad_params: true, companyId: true, ip: true,
-        is_search: true, is_google_ads: true,
+        is_search: true, is_google_ads: true, is_facebook_ads: true,
       },
     });
 
@@ -657,6 +659,7 @@ export class AdminController {
         ip: r.ip,
         isSearch: r.is_search,
         isGoogleAds: r.is_google_ads,
+        isFacebookAds: r.is_facebook_ads,
       })),
     };
   }

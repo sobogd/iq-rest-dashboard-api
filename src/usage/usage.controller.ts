@@ -17,6 +17,7 @@ import { PrismaService } from "../prisma/prisma.service";
 
 const EVENT_REGEX = /^[a-z0-9_]{1,64}$/;
 const GCLID_EVENT_REGEX = /^l_gclid_[A-Za-z0-9_-]{1,256}$/;
+const FBCLID_EVENT_REGEX = /^l_fbclid_[A-Za-z0-9_.-]{1,512}$/;
 const REFERRER_HOST_REGEX =
   /(?:^|\.)(google|bing|yandex|duckduckgo|yahoo|baidu|ecosia|qwant|startpage|mojeek|brave)\.[a-z.]+$/i;
 const SESSION_COOKIE = "iqr_session";
@@ -109,18 +110,21 @@ export class UsageController {
     @Query("r") referrerHost: string | undefined,
     @Req() req: Request,
   ) {
-    // `l_gclid_<ID>` events arrive from Google Ads landings — store name as-is,
-    // bypass bot filtering so every paid click is recorded regardless of UA.
+    // `l_gclid_<ID>` / `l_fbclid_<ID>` events arrive from paid ad landings —
+    // store name as-is, bypass bot filtering so every paid click is recorded
+    // regardless of UA.
     const event = rawEvent;
     const isGoogleAds = GCLID_EVENT_REGEX.test(rawEvent);
+    const isFacebookAds = FBCLID_EVENT_REGEX.test(rawEvent);
+    const isPaidAds = isGoogleAds || isFacebookAds;
 
-    if (!isGoogleAds && !EVENT_REGEX.test(rawEvent)) {
+    if (!isPaidAds && !EVENT_REGEX.test(rawEvent)) {
       throw new BadRequestException("event invalid");
     }
 
     const ua = headerStr(req, "user-agent");
 
-    if (!isGoogleAds && detectBot(ua)) return;
+    if (!isPaidAds && detectBot(ua)) return;
 
     const { device, platform } = classifyDevice(ua);
 
@@ -176,6 +180,7 @@ export class UsageController {
         platform,
         gclid: null,
         is_google_ads: isGoogleAds,
+        is_facebook_ads: isFacebookAds,
         is_search: isSearch,
         companyId,
         ip,

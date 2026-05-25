@@ -92,14 +92,4 @@ export class SplitOrderDto {
   @IsArray()
   @IsString({ each: true })
   itemIds!: string[];
-
-  // Client-advisory only — the service recomputes both totals from the item
-  // split. Kept for wire-compat; safe to drop later.
-  @IsOptional()
-  @IsNumber()
-  sourceTotal?: number;
-
-  @IsOptional()
-  @IsNumber()
-  createdTotal?: number;
 }

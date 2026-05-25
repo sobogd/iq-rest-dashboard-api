@@ -261,7 +261,7 @@ export class OrdersService {
   async split(
     ctx: Ctx,
     id: string,
-    body: { itemIds: string[]; sourceTotal?: number; createdTotal?: number },
+    body: { itemIds: string[] },
   ) {
     const { itemIds } = body;
     if (!Array.isArray(itemIds) || itemIds.length === 0) {

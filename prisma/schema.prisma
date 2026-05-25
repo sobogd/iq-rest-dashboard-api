@@ -409,6 +409,7 @@ model UsageEvent {
   is_google_ads Boolean @default(false) // arrival via gclid/gbraid/wbraid on the URL
   is_facebook_ads Boolean @default(false) // arrival via fbclid on the URL (Facebook/Instagram ads)
   is_search     Boolean @default(false) // arrival from a search engine referrer (google/bing/yandex/…)
+  fbSentEvents String[] @default([]) // Meta CAPI event_names already sent from this fbclid event (manual admin send, dedup)
 
   @@index([at])
   @@index([event, at])

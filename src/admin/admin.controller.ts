@@ -541,6 +541,7 @@ export class AdminController {
         is_search: true,
         is_google_ads: true,
         is_facebook_ads: true,
+        fbSentEvents: true,
       },
     });
 
@@ -592,6 +593,7 @@ export class AdminController {
         isSearch: r.is_search,
         isGoogleAds: r.is_google_ads,
         isFacebookAds: r.is_facebook_ads,
+        fbSentEvents: r.fbSentEvents,
       })),
     };
   }
@@ -622,6 +624,7 @@ export class AdminController {
         country: true, region: true, device: true, platform: true,
         gclid: true, ad_params: true, companyId: true, ip: true,
         is_search: true, is_google_ads: true, is_facebook_ads: true,
+        fbSentEvents: true,
       },
     });
 
@@ -660,6 +663,7 @@ export class AdminController {
         isSearch: r.is_search,
         isGoogleAds: r.is_google_ads,
         isFacebookAds: r.is_facebook_ads,
+        fbSentEvents: r.fbSentEvents,
       })),
     };
   }
@@ -781,6 +785,83 @@ export class AdminController {
       });
     }
     return { ok: true, type, result: json };
+  }
+
+  /** Send a Meta Conversions API (CAPI) event built from a fbclid landing event.
+   *  Manual, live (no test_event_code). fbc is rebuilt from the fbclid embedded
+   *  in the event name (`l_fbclid_<ID>`) + the click time. Sent event_names are
+   *  recorded on UsageEvent.fbSentEvents for dedup. */
+  @Post("usage-events/:id/fb-send")
+  @HttpCode(HttpStatus.OK)
+  async fbSendEvent(@Param("id") id: string, @Body() body: { event_name?: string }) {
+    const ALLOWED = [
+      "PageView",
+      "ViewContent",
+      "Lead",
+      "InitiateCheckout",
+      "CompleteRegistration",
+      "Subscribe",
+      "Purchase",
+    ];
+    const eventName = (body?.event_name ?? "").trim();
+    if (!ALLOWED.includes(eventName)) {
+      throw new BadRequestException(`event_name must be one of: ${ALLOWED.join(", ")}`);
+    }
+
+    const ev = await this.prisma.usageEvent.findUnique({ where: { id } });
+    if (!ev) throw new NotFoundException("Event not found");
+
+    const m = /^l_fbclid_(.+)$/.exec(ev.event);
+    if (!m) throw new BadRequestException("Event is not a fbclid landing event");
+    const fbclid = m[1];
+
+    const token = this.config.get<string>("FB_ADS_TOKEN");
+    const pixelId = this.config.get<string>("FB_ADS_PIXEL_ID");
+    if (!token || !pixelId) {
+      throw new BadRequestException("FB_ADS_TOKEN / FB_ADS_PIXEL_ID not configured");
+    }
+
+    // fbc carries the original click timestamp; event_time is the send time
+    // (kept within Meta's 7-day window — older clicks are out of attribution).
+    const fbc = `fb.1.${ev.at.getTime()}.${fbclid}`;
+    const eventTime = Math.floor(Date.now() / 1000);
+
+    const userData: Record<string, unknown> = { fbc };
+    if (ev.ip) userData.client_ip_address = ev.ip;
+
+    const res = await fetch(
+      `https://graph.facebook.com/v21.0/${pixelId}/events?access_token=${token}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          data: [{
+            event_name: eventName,
+            event_time: eventTime,
+            action_source: "website",
+            event_source_url: "https://soqrmenu.com/",
+            user_data: userData,
+          }],
+        }),
+      },
+    );
+    const json = (await res.json().catch(() => ({}))) as {
+      events_received?: number;
+      messages?: unknown[];
+      error?: unknown;
+    };
+    if (!res.ok) {
+      throw new BadRequestException({ message: "Meta CAPI rejected the event", response: json });
+    }
+
+    const sentEvents = Array.from(new Set([...ev.fbSentEvents, eventName]));
+    if (!ev.fbSentEvents.includes(eventName)) {
+      await this.prisma.usageEvent.update({
+        where: { id },
+        data: { fbSentEvents: { push: eventName } },
+      });
+    }
+    return { ok: true, event_name: eventName, fbc, sentEvents, response: json };
   }
 
   // ────────────────── GOOGLE ADS ──────────────────

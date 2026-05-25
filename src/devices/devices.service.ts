@@ -268,6 +268,13 @@ export class DevicesService {
 
   private rateLimitPair(ip: string): boolean {
     const now = Date.now();
+    // Drop expired entries so the Map can't grow unbounded with every distinct
+    // IP that ever hit /pair. Cheap full sweep, gated on size.
+    if (this.pairAttempts.size > 1000) {
+      for (const [k, v] of this.pairAttempts) {
+        if (now > v.resetAt) this.pairAttempts.delete(k);
+      }
+    }
     const entry = this.pairAttempts.get(ip);
     if (!entry || now > entry.resetAt) {
       this.pairAttempts.set(ip, { count: 1, resetAt: now + PAIR_RATE_WINDOW_MS });

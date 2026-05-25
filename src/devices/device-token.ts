@@ -20,6 +20,11 @@ function getSecret(): Buffer {
   // config — checked-in by design.
   const raw = process.env.DEVICE_TOKEN_SECRET || process.env.JWT_SECRET;
   if (!raw) {
+    // In prod a missing secret means device tokens would be HMAC'd with a
+    // publicly-known string — i.e. forgeable. Fail hard instead.
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("DEVICE_TOKEN_SECRET or JWT_SECRET must be set in production");
+    }
     return Buffer.from("iqr-device-token-dev-secret-do-not-use-in-prod");
   }
   return Buffer.from(raw);

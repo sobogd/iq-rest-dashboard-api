@@ -150,8 +150,9 @@ export class DevicesController {
 
   // Kitchen-scoped order PATCH. Lets a paired tablet advance per-item statuses
   // without exposing the full /orders/:id surface (which can change payment
-  // method, close an order, mutate tableNumber, etc.). The body shape is
-  // hard-restricted to {items, total} — anything else is rejected.
+  // method, close an order, mutate tableNumber, etc.). The body is
+  // hard-restricted to {items, total, discount} — anything else is rejected,
+  // and RESERVATION devices are blocked outright.
   @UseGuards(DeviceGuard)
   @Patch("orders/:id")
   async patchOrder(

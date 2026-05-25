@@ -275,8 +275,15 @@ export class OrdersService {
     const kept = allItems.filter((it) => !takenSet.has(it.id));
     const taken = allItems.filter((it) => takenSet.has(it.id));
     if (taken.length === 0) throw new NotFoundException("No matching items");
-    const sourceTotal = calcOrderTotal(kept);
+    // Order-level discount stays with the source order; the split-off order
+    // starts clean (item-level discounts travel with their items). Recompute
+    // both totals AND discountTotal so the denormalised columns stay honest —
+    // previously the source kept its discount JSON but lost it from the total.
+    const orderDiscount = (order.discount as Discount | null) ?? null;
+    const sourceTotal = calcOrderTotal(kept, orderDiscount);
+    const sourceDiscountTotal = calcDiscountTotal(kept, orderDiscount);
     const createdTotal = calcOrderTotal(taken);
+    const createdDiscountTotal = calcDiscountTotal(taken);
 
     const orderDate = new Date();
     orderDate.setUTCHours(0, 0, 0, 0);
@@ -298,6 +305,7 @@ export class OrdersService {
               restaurantId: order.restaurantId,
               items: taken as unknown as Prisma.InputJsonValue,
               total: new Prisma.Decimal(createdTotal),
+              discountTotal: createdDiscountTotal > 0 ? new Prisma.Decimal(createdDiscountTotal) : null,
               currency: order.currency,
               tableNumber: order.tableNumber,
               customerName: order.customerName,
@@ -322,6 +330,7 @@ export class OrdersService {
         data: {
           items: kept as unknown as Prisma.InputJsonValue,
           total: new Prisma.Decimal(sourceTotal),
+          discountTotal: sourceDiscountTotal > 0 ? new Prisma.Decimal(sourceDiscountTotal) : null,
         },
       });
 

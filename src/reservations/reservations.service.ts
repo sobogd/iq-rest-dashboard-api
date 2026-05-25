@@ -14,9 +14,14 @@ export class ReservationsService {
   ) {}
 
   async list(restaurantId: string) {
+    // Newest-first with a safety ceiling so the calendar (admin) and the
+    // reservation kiosk can't pull an unbounded history in one shot. 2000
+    // most-recent bookings cover normal navigation; deep-past months beyond
+    // that would need an explicit date range (not wired yet).
     return this.prisma.reservation.findMany({
       where: { restaurantId },
       orderBy: [{ date: "desc" }, { startTime: "desc" }],
+      take: 2000,
     });
   }
 

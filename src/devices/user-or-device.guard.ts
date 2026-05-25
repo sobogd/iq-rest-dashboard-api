@@ -1,8 +1,10 @@
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from "@nestjs/common";
+import { CanActivate, ExecutionContext, ForbiddenException, Injectable, UnauthorizedException } from "@nestjs/common";
+import { Reflector } from "@nestjs/core";
 import type { Request } from "express";
 import { AuthGuard, type AuthedRequest } from "../auth/auth.guard";
-import { DevicesService } from "./devices.service";
-import { DeviceGuard, extractBearer } from "./device.guard";
+import { DevicesService, type DeviceAuth } from "./devices.service";
+import { extractBearer } from "./device.guard";
+import { DEVICE_TYPES_KEY } from "./device-types.decorator";
 
 // Read-only dual-auth guard. Used on the kitchen-relevant read endpoints
 // (orders list, categories, items, tables, restaurant) so the same SPA
@@ -18,6 +20,7 @@ export class UserOrDeviceGuard implements CanActivate {
   constructor(
     private readonly devices: DevicesService,
     private readonly auth: AuthGuard,
+    private readonly reflector: Reflector,
   ) {}
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
@@ -25,6 +28,16 @@ export class UserOrDeviceGuard implements CanActivate {
     const bearer = extractBearer(req);
     if (bearer) {
       const auth = await this.devices.resolveByToken(bearer);
+      // Per-route/-controller device-type allowlist. When set, a paired
+      // device whose type isn't listed is rejected — so a KITCHEN tablet
+      // can't drive the full /orders surface, nor a WAITER touch /reservations.
+      const allowed = this.reflector.getAllAndOverride<DeviceAuth["type"][] | undefined>(
+        DEVICE_TYPES_KEY,
+        [ctx.getHandler(), ctx.getClass()],
+      );
+      if (allowed && !allowed.includes(auth.type)) {
+        throw new ForbiddenException("device_type_not_allowed");
+      }
       (req as AuthedRequest).authUser = {
         userId: `device:${auth.deviceId}`,
         companyId: auth.companyId,

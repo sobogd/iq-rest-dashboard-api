@@ -94,7 +94,12 @@ export class OrdersService {
     private readonly events: OrdersEventsService,
   ) {}
 
-  list(ctx: Ctx, status?: string, from?: string, to?: string) {
+  // Safety ceiling so an unbounded history can't blow up the payload (the
+  // admin board + every kitchen/waiter bootstrap call this). The board and
+  // the KDS only ever render OPEN orders, so `openOnly` lets callers skip the
+  // completed/cancelled tail entirely — that's the common, cheap path.
+  list(ctx: Ctx, status?: string, from?: string, to?: string, openOnly = false) {
+    const MAX_ROWS = 1000;
     const range: { gte?: Date; lte?: Date } = {};
     if (from) {
       const d = new Date(from);
@@ -110,14 +115,22 @@ export class OrdersService {
         range.lte = d;
       }
     }
+    // A date range is self-bounding (analytics asks for a specific period and
+    // needs every order in it, completed included) — don't cap those. The cap
+    // guards the open-ended board/bootstrap queries that would otherwise grow
+    // with the restaurant's whole history.
+    const hasRange = !!(range.gte || range.lte);
     return this.prisma.order.findMany({
       where: {
         restaurantId: ctx.restaurantId,
         deletedAt: null,
         ...(status ? { status } : {}),
-        ...(range.gte || range.lte ? { orderDate: range } : {}),
+        // "open" = anything still on the board: not completed, not cancelled.
+        ...(openOnly && !status ? { status: { notIn: ["completed", "cancelled"] } } : {}),
+        ...(hasRange ? { orderDate: range } : {}),
       },
       orderBy: { createdAt: "desc" },
+      ...(hasRange ? {} : { take: MAX_ROWS }),
     });
   }
 

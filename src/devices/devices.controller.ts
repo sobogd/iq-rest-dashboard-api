@@ -106,7 +106,9 @@ export class DevicesController {
       // orders query for it. Kitchen/waiter still need it.
       isReservation
         ? Promise.resolve([])
-        : this.orders.list({ companyId, restaurantId }, undefined, undefined, undefined),
+        : // Kitchen/waiter boards only render open orders — skip the
+          // completed/cancelled tail so the bootstrap payload stays small.
+          this.orders.list({ companyId, restaurantId }, undefined, undefined, undefined, true),
       // Only the reservation kiosk needs the bookings list.
       isReservation
         ? this.prisma.reservation.findMany({
@@ -161,6 +163,10 @@ export class DevicesController {
       discount?: { type: string; value: number; reason?: string } | null;
     },
   ) {
+    // RESERVATION kiosks have no order surface at all.
+    if (req.device.type === "RESERVATION") {
+      throw new BadRequestException("Field not allowed for devices: orders");
+    }
     const allowed = new Set(["items", "total", "discount"]);
     for (const key of Object.keys(body || {})) {
       if (!allowed.has(key)) {

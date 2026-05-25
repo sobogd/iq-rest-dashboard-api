@@ -1,7 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Client } from "pg";
-import { Subject } from "rxjs";
 import {
   ORDERS_NOTIFY_CHANNEL,
   OrderEvent,
@@ -57,7 +56,11 @@ export class OrdersEventsService implements OnModuleInit, OnModuleDestroy {
   private reconnectAttempt = 0;
   private lastHeartbeatAt = 0;
   private destroyed = false;
-  private readonly subject = new Subject<OrderEvent>();
+  // Subscribers sharded by restaurantId. A single shared Subject would fan
+  // every NOTIFY out to every connected client (each filtering by id in JS) —
+  // O(total clients) per event. This Map makes dispatch O(subscribers for the
+  // one restaurant the event belongs to).
+  private readonly listeners = new Map<string, Set<(event: OrderEvent) => void>>();
 
   constructor(private readonly config: ConfigService) {}
 
@@ -75,13 +78,36 @@ export class OrdersEventsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  // Subscribe to order events for a given restaurant. Each call gets its own
-  // filtered observable; the underlying pg LISTEN is shared.
+  // Subscribe to order events for a given restaurant. The underlying pg LISTEN
+  // is shared; only this restaurant's handlers run when its events arrive.
   subscribe(restaurantId: string, handler: (event: OrderEvent) => void): () => void {
-    const sub = this.subject.subscribe((event) => {
-      if (event.restaurantId === restaurantId) handler(event);
-    });
-    return () => sub.unsubscribe();
+    let set = this.listeners.get(restaurantId);
+    if (!set) {
+      set = new Set();
+      this.listeners.set(restaurantId, set);
+    }
+    set.add(handler);
+    return () => {
+      const s = this.listeners.get(restaurantId);
+      if (!s) return;
+      s.delete(handler);
+      if (s.size === 0) this.listeners.delete(restaurantId);
+    };
+  }
+
+  // Fan a parsed event out to just the matching restaurant's handlers. Snapshot
+  // the set first so a handler that unsubscribes mid-dispatch can't disturb the
+  // iteration, and isolate each handler so one throw doesn't drop the rest.
+  private dispatch(event: OrderEvent): void {
+    const set = this.listeners.get(event.restaurantId);
+    if (!set || set.size === 0) return;
+    for (const handler of [...set]) {
+      try {
+        handler(event);
+      } catch (e) {
+        this.logger.warn(`order event handler threw: ${String(e)}`);
+      }
+    }
   }
 
   // Writes to Postgres NOTIFY so every dashboard-api instance (PM2 cluster)
@@ -139,7 +165,7 @@ export class OrdersEventsService implements OnModuleInit, OnModuleDestroy {
         if (msg.channel !== ORDERS_NOTIFY_CHANNEL) return;
         try {
           const parsed = JSON.parse(msg.payload) as OrderEvent;
-          this.subject.next(parsed);
+          this.dispatch(parsed);
         } catch (e) {
           this.logger.warn(`bad NOTIFY payload: ${String(e)}`);
         }

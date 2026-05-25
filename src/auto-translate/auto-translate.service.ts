@@ -103,7 +103,7 @@ export class AutoTranslateService {
     if (!restaurant) return;
     const [items, cats] = await Promise.all([
       this.prisma.item.findMany({ where: { restaurantId, deletedAt: null }, select: { id: true } }),
-      this.prisma.category.findMany({ where: { restaurantId }, select: { id: true } }),
+      this.prisma.category.findMany({ where: { restaurantId, deletedAt: null }, select: { id: true } }),
     ]);
     await parallelLimit(items, 5, async (it) => {
       try {

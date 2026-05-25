@@ -316,7 +316,7 @@ export class RestaurantService {
   /** Copy categories + items (with translations) from one restaurant to another. */
   private async duplicateMenu(fromRestaurantId: string, toRestaurantId: string, toCompanyId: string) {
     const cats = await this.prisma.category.findMany({
-      where: { restaurantId: fromRestaurantId },
+      where: { restaurantId: fromRestaurantId, deletedAt: null },
       orderBy: { sortOrder: "asc" },
     });
     const idMap = new Map<string, string>();

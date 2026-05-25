@@ -62,7 +62,7 @@ export class ItemsService {
 
   async create(ctx: Ctx, body: ItemUpsert) {
     const cat = await this.prisma.category.findFirst({
-      where: { id: body.categoryId, restaurantId: ctx.restaurantId },
+      where: { id: body.categoryId, restaurantId: ctx.restaurantId, deletedAt: null },
       select: { isGroup: true },
     });
     if (!cat) throw new BadRequestException("Category not found");
@@ -109,7 +109,7 @@ export class ItemsService {
     if (body.imageUrl !== undefined) data.imageUrl = body.imageUrl ?? null;
     if (body.categoryId !== undefined) {
       const targetCat = await this.prisma.category.findFirst({
-        where: { id: body.categoryId, restaurantId: ctx.restaurantId },
+        where: { id: body.categoryId, restaurantId: ctx.restaurantId, deletedAt: null },
         select: { isGroup: true },
       });
       if (!targetCat) throw new BadRequestException("Category not found");

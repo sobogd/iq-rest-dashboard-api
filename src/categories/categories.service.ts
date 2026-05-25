@@ -37,7 +37,7 @@ export class CategoriesService {
 
   list(ctx: Ctx) {
     return this.prisma.category.findMany({
-      where: { restaurantId: ctx.restaurantId },
+      where: { restaurantId: ctx.restaurantId, deletedAt: null },
       orderBy: { sortOrder: "asc" },
       take: 2000,
     });
@@ -50,12 +50,12 @@ export class CategoriesService {
       throw new BadRequestException("A group cannot itself have a parent group");
     }
     if (parentId) {
-      const parent = await this.prisma.category.findFirst({ where: { id: parentId, restaurantId: ctx.restaurantId } });
+      const parent = await this.prisma.category.findFirst({ where: { id: parentId, restaurantId: ctx.restaurantId, deletedAt: null } });
       if (!parent) throw new BadRequestException("Parent group not found");
       if (!parent.isGroup) throw new BadRequestException("Parent must be a group");
     }
     const max = await this.prisma.category.aggregate({
-      where: { restaurantId: ctx.restaurantId, parentId },
+      where: { restaurantId: ctx.restaurantId, parentId, deletedAt: null },
       _max: { sortOrder: true },
     });
     const created = await this.prisma.category.create({
@@ -81,15 +81,22 @@ export class CategoriesService {
 
   async update(ctx: Ctx, id: string, body: CategoryUpdateBody) {
     const cat = await this.prisma.category.findFirst({
-      where: { id, restaurantId: ctx.restaurantId },
-      include: { _count: { select: { children: true, items: true } } },
+      where: { id, restaurantId: ctx.restaurantId, deletedAt: null },
+      include: {
+        _count: {
+          select: {
+            children: { where: { deletedAt: null } },
+            items: { where: { deletedAt: null } },
+          },
+        },
+      },
     });
     if (!cat) throw new NotFoundException();
     const sourceNameChanged = body.name !== undefined && body.name !== cat.name;
 
     if (body.parentId !== undefined && body.parentId !== null) {
       if (body.parentId === id) throw new BadRequestException("Category cannot be its own parent");
-      const parent = await this.prisma.category.findFirst({ where: { id: body.parentId, restaurantId: ctx.restaurantId } });
+      const parent = await this.prisma.category.findFirst({ where: { id: body.parentId, restaurantId: ctx.restaurantId, deletedAt: null } });
       if (!parent) throw new BadRequestException("Parent group not found");
       if (!parent.isGroup) throw new BadRequestException("Parent must be a group");
       if (cat.isGroup) throw new BadRequestException("A group cannot itself have a parent group");
@@ -112,7 +119,7 @@ export class CategoriesService {
       body.sortOrder === undefined
     ) {
       const max = await this.prisma.category.aggregate({
-        where: { restaurantId: ctx.restaurantId, parentId: body.parentId ?? null },
+        where: { restaurantId: ctx.restaurantId, parentId: body.parentId ?? null, deletedAt: null },
         _max: { sortOrder: true },
       });
       movedSortOrder = (max._max.sortOrder ?? -1) + 1;
@@ -150,22 +157,32 @@ export class CategoriesService {
   }
 
   async remove(ctx: Ctx, id: string) {
-    const cat = await this.prisma.category.findFirst({ where: { id, restaurantId: ctx.restaurantId } });
+    const cat = await this.prisma.category.findFirst({ where: { id, restaurantId: ctx.restaurantId, deletedAt: null } });
     if (!cat) throw new NotFoundException();
-    // Just drop the category. The FK is ON DELETE SET NULL, so its items stay
-    // ALIVE and orphaned (categoryId -> null) — they keep resolving orders'
-    // dishId + analytics, and the dashboard surfaces them in a synthetic
-    // "No category" bucket so the owner can re-file or delete them. (Groups
-    // have no items; their child categories bubble to top-level via the parent
-    // SetNull relation.)
-    await this.prisma.category.delete({ where: { id } });
+    // Soft-delete: just mark the category deleted. Its items keep their
+    // categoryId and simply stop rendering (their category is hidden) — orders
+    // are self-contained snapshots, so nothing downstream breaks. Deleting a
+    // group bubbles its live child categories back to top-level so they stay
+    // visible (matches the previous hard-delete SetNull behaviour).
+    const now = new Date();
+    if (cat.isGroup) {
+      await this.prisma.$transaction([
+        this.prisma.category.updateMany({
+          where: { parentId: id, restaurantId: ctx.restaurantId, deletedAt: null },
+          data: { parentId: null },
+        }),
+        this.prisma.category.update({ where: { id }, data: { deletedAt: now } }),
+      ]);
+    } else {
+      await this.prisma.category.update({ where: { id }, data: { deletedAt: now } });
+    }
   }
 
   async reorder(ctx: Ctx, items: { id: string; sortOrder: number }[]) {
     await this.prisma.$transaction(
       items.map((it) =>
         this.prisma.category.updateMany({
-          where: { id: it.id, restaurantId: ctx.restaurantId },
+          where: { id: it.id, restaurantId: ctx.restaurantId, deletedAt: null },
           data: { sortOrder: it.sortOrder },
         }),
       ),

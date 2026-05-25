@@ -91,7 +91,7 @@ export class DevicesController {
     const [restaurant, categories, items, tables, orders, reservations] = await Promise.all([
       this.prisma.restaurant.findUnique({ where: { id: restaurantId } }),
       this.prisma.category.findMany({
-        where: { restaurantId, isActive: true },
+        where: { restaurantId, isActive: true, deletedAt: null },
         orderBy: { sortOrder: "asc" },
       }),
       this.prisma.item.findMany({

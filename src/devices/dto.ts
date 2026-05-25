@@ -5,8 +5,8 @@ export class CreateDeviceDto {
   @Length(1, 80)
   name!: string;
 
-  @IsEnum(["KITCHEN", "WAITER"] as const)
-  type!: "KITCHEN" | "WAITER";
+  @IsEnum(["KITCHEN", "WAITER", "RESERVATION"] as const)
+  type!: "KITCHEN" | "WAITER" | "RESERVATION";
 
   @IsOptional()
   @IsString()

@@ -87,7 +87,8 @@ export class DevicesController {
   @Get("bootstrap")
   async bootstrap(@Req() req: DevicedRequest) {
     const { restaurantId, companyId } = req.device;
-    const [restaurant, categories, items, tables, orders] = await Promise.all([
+    const isReservation = req.device.type === "RESERVATION";
+    const [restaurant, categories, items, tables, orders, reservations] = await Promise.all([
       this.prisma.restaurant.findUnique({ where: { id: restaurantId } }),
       this.prisma.category.findMany({
         where: { restaurantId, isActive: true },
@@ -101,7 +102,19 @@ export class DevicesController {
         where: { restaurantId, isActive: true, deletedAt: null },
         orderBy: { sortOrder: "asc" },
       }),
-      this.orders.list({ companyId, restaurantId }, undefined, undefined, undefined),
+      // Reservation kiosk doesn't render the orders board — skip the heavier
+      // orders query for it. Kitchen/waiter still need it.
+      isReservation
+        ? Promise.resolve([])
+        : this.orders.list({ companyId, restaurantId }, undefined, undefined, undefined),
+      // Only the reservation kiosk needs the bookings list.
+      isReservation
+        ? this.prisma.reservation.findMany({
+            where: { restaurantId },
+            orderBy: [{ date: "desc" }, { startTime: "desc" }],
+            include: { table: { select: { number: true, zone: true } } },
+          })
+        : Promise.resolve([]),
     ]);
     if (!restaurant) {
       throw new BadRequestException("Restaurant not found");
@@ -117,6 +130,7 @@ export class DevicesController {
       items,
       tables,
       orders,
+      reservations,
     };
   }
 

@@ -1,18 +1,37 @@
 import { Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { MailService } from "../mail/mail.service";
+import { OrdersEventsService } from "../orders-stream/orders-events.service";
 import type { ReservationStatus } from "./dto";
 
 @Injectable()
 export class ReservationsService {
   private readonly logger = new Logger(ReservationsService.name);
-  constructor(private readonly prisma: PrismaService, private readonly mail: MailService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mail: MailService,
+    private readonly events: OrdersEventsService,
+  ) {}
 
   async list(restaurantId: string) {
     return this.prisma.reservation.findMany({
       where: { restaurantId },
       orderBy: [{ date: "desc" }, { startTime: "desc" }],
     });
+  }
+
+  // Re-fetch with the table relation the reservation kiosk expects, then push
+  // it down the shared orders SSE channel so paired RESERVATION tablets update
+  // live without polling.
+  private async publishBookingUpdated(restaurantId: string, id: string) {
+    const booking = await this.prisma.reservation.findUnique({
+      where: { id },
+      include: { table: { select: { number: true, zone: true } } },
+    });
+    if (!booking) return;
+    await this.events
+      .publish({ action: "booking-updated", restaurantId, booking })
+      .catch((err) => this.logger.warn(`booking-updated publish failed: ${err?.message || err}`));
   }
 
   async setStatus(restaurantId: string, id: string, status: ReservationStatus) {
@@ -43,6 +62,8 @@ export class ReservationsService {
         .catch((err) => this.logger.warn(`reservation status email failed: ${err?.message || err}`));
     }
 
+    await this.publishBookingUpdated(restaurantId, id);
+
     return updated;
   }
 
@@ -52,5 +73,8 @@ export class ReservationsService {
     });
     if (!res) throw new NotFoundException();
     await this.prisma.reservation.delete({ where: { id } });
+    await this.events
+      .publish({ action: "booking-deleted", restaurantId, bookingId: id })
+      .catch((err) => this.logger.warn(`booking-deleted publish failed: ${err?.message || err}`));
   }
 }

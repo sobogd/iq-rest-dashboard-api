@@ -11,12 +11,16 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import type { Request } from "express";
-import { AuthGuard, type AuthedRequest } from "../auth/auth.guard";
+import type { AuthedRequest } from "../auth/auth.guard";
+import { UserOrDeviceGuard } from "../devices/user-or-device.guard";
 import { ReservationsService } from "./reservations.service";
 import { SetStatusDto } from "./dto";
 
+// Dual auth: cookie-session admin OR a paired device token. Mirrors
+// OrdersController so the same ReservationsPage renders in both the admin
+// tab and the RESERVATION kiosk.
 @Controller("reservations")
-@UseGuards(AuthGuard)
+@UseGuards(UserOrDeviceGuard)
 export class ReservationsController {
   constructor(private readonly svc: ReservationsService) {}
 

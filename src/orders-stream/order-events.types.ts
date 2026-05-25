@@ -8,7 +8,12 @@ export type OrderEventAction =
   | "deleted"
   | "split"
   | "device-revoked"
-  | "force-reload";
+  | "force-reload"
+  // Reservation kiosk events. Ride the same orders SSE channel so a paired
+  // tablet needs only one EventSource regardless of device type.
+  | "booking-created"
+  | "booking-updated"
+  | "booking-deleted";
 
 export interface OrderItemSummary {
   id: string;
@@ -34,6 +39,10 @@ export interface OrderEvent {
   // this instead so the kitchen kiosk can still diff item ids + check
   // its chime filter without round-tripping for a full bootstrap.
   itemSummary?: OrderItemSummary[];
+  // Full reservation payload for booking-created / booking-updated.
+  booking?: unknown;
+  // Set when action === "booking-deleted".
+  bookingId?: string;
 }
 
 export const ORDERS_NOTIFY_CHANNEL = "orders_events";

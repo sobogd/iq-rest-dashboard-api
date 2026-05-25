@@ -476,6 +476,7 @@ model GoogleAdsExclusion {
 enum DeviceType {
   KITCHEN
   WAITER
+  RESERVATION
 }
 
 enum DeviceStatus {

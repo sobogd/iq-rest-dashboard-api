@@ -22,7 +22,7 @@ export interface DeviceAuth {
   deviceId: string;
   companyId: string;
   restaurantId: string;
-  type: "KITCHEN" | "WAITER";
+  type: "KITCHEN" | "WAITER" | "RESERVATION";
 }
 
 @Injectable()
@@ -91,7 +91,7 @@ export class DevicesService {
     companyId: string;
     restaurantId: string; // active restaurant from AuthGuard
     name: string;
-    type: "KITCHEN" | "WAITER";
+    type: "KITCHEN" | "WAITER" | "RESERVATION";
     overrideRestaurantId?: string;
   }) {
     await this.assertCompanyMayUseDevices(input.companyId);

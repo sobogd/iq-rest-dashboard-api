@@ -39,6 +39,7 @@ export class CategoriesService {
     return this.prisma.category.findMany({
       where: { restaurantId: ctx.restaurantId },
       orderBy: { sortOrder: "asc" },
+      take: 2000,
     });
   }
 
@@ -100,10 +101,28 @@ export class CategoriesService {
       throw new BadRequestException("Cannot convert to leaf: group still has sub-categories");
     }
 
+    // Moving to a different parent (group ↔ top-level) must re-seat the category
+    // at the end of its new sibling list — otherwise it keeps its old sortOrder
+    // and collides/misorders among the new siblings. Skip when the caller sent
+    // an explicit sortOrder (a drag-reorder), which already places it.
+    let movedSortOrder: number | undefined;
+    if (
+      body.parentId !== undefined &&
+      body.parentId !== cat.parentId &&
+      body.sortOrder === undefined
+    ) {
+      const max = await this.prisma.category.aggregate({
+        where: { restaurantId: ctx.restaurantId, parentId: body.parentId ?? null },
+        _max: { sortOrder: true },
+      });
+      movedSortOrder = (max._max.sortOrder ?? -1) + 1;
+    }
+
     const data: Prisma.CategoryUpdateInput = {
       ...(body.name !== undefined ? { name: body.name } : {}),
       ...(body.isActive !== undefined ? { isActive: body.isActive } : {}),
       ...(body.sortOrder !== undefined ? { sortOrder: body.sortOrder } : {}),
+      ...(movedSortOrder !== undefined ? { sortOrder: movedSortOrder } : {}),
       ...(body.isGroup !== undefined ? { isGroup: body.isGroup } : {}),
       ...(body.parentId !== undefined
         ? body.parentId === null
@@ -133,6 +152,12 @@ export class CategoriesService {
   async remove(ctx: Ctx, id: string) {
     const cat = await this.prisma.category.findFirst({ where: { id, restaurantId: ctx.restaurantId } });
     if (!cat) throw new NotFoundException();
+    // Just drop the category. The FK is ON DELETE SET NULL, so its items stay
+    // ALIVE and orphaned (categoryId -> null) — they keep resolving orders'
+    // dishId + analytics, and the dashboard surfaces them in a synthetic
+    // "No category" bucket so the owner can re-file or delete them. (Groups
+    // have no items; their child categories bubble to top-level via the parent
+    // SetNull relation.)
     await this.prisma.category.delete({ where: { id } });
   }
 

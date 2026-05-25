@@ -16,6 +16,13 @@ import {
 import type { Request } from "express";
 import { AuthGuard, type AuthedRequest } from "../auth/auth.guard";
 import { ItemsService } from "./items.service";
+import {
+  CreateItemDto,
+  PatchItemDto,
+  ReorderBulkDto,
+  ReorderItemDto,
+  UpdateItemDto,
+} from "./dto";
 import { callGeminiImage, uploadGeneratedImage } from "../common/gemini-image";
 import { consumeAiImageQuota, refundAiImageUsage } from "../common/ai-quota";
 import { PrismaService } from "../prisma/prisma.service";
@@ -36,17 +43,17 @@ export class ItemsController {
   }
 
   @Post()
-  create(@Req() req: Request, @Body() body: Parameters<ItemsService["create"]>[1]) {
+  create(@Req() req: Request, @Body() body: CreateItemDto) {
     return this.svc.create(ctx(req), body);
   }
 
   @Put(":id")
-  update(@Req() req: Request, @Param("id") id: string, @Body() body: Parameters<ItemsService["update"]>[2]) {
+  update(@Req() req: Request, @Param("id") id: string, @Body() body: UpdateItemDto) {
     return this.svc.update(ctx(req), id, body);
   }
 
   @Patch(":id")
-  patch(@Req() req: Request, @Param("id") id: string, @Body() body: { isActive?: boolean }) {
+  patch(@Req() req: Request, @Param("id") id: string, @Body() body: PatchItemDto) {
     return this.svc.patch(ctx(req), id, body);
   }
 
@@ -57,15 +64,12 @@ export class ItemsController {
   }
 
   @Post("reorder")
-  reorder(@Req() req: Request, @Body() body: { itemId: string; direction: "up" | "down" }) {
+  reorder(@Req() req: Request, @Body() body: ReorderItemDto) {
     return this.svc.reorder(ctx(req), body.itemId, body.direction);
   }
 
   @Post("reorder-bulk")
-  reorderBulk(
-    @Req() req: Request,
-    @Body() body: { items: { id: string; sortOrder: number }[] },
-  ) {
+  reorderBulk(@Req() req: Request, @Body() body: ReorderBulkDto) {
     return this.svc.reorderBulk(ctx(req), body.items);
   }
 
@@ -92,9 +96,21 @@ export class ItemsController {
 
     let sourceB64: string | undefined;
     if (sourceImageUrl) {
+      // SSRF guard: only fetch from our own S3 bucket (the URL always comes
+      // from a previously-uploaded item image). Anything else — internal
+      // hosts, cloud metadata endpoints — is rejected outright.
+      const allowedBase = `${process.env.S3_HOST}/${process.env.S3_NAME}/`;
+      if (!sourceImageUrl.startsWith(allowedBase)) {
+        throw new BadRequestException("Invalid source image URL");
+      }
       const imgRes = await fetch(sourceImageUrl, { cache: "no-store" });
       if (!imgRes.ok) throw new BadRequestException("Failed to fetch source image");
-      sourceB64 = Buffer.from(await imgRes.arrayBuffer()).toString("base64");
+      const declared = Number(imgRes.headers.get("content-length") || 0);
+      const MAX_BYTES = 15_000_000;
+      if (declared > MAX_BYTES) throw new BadRequestException("Source image too large");
+      const buf = Buffer.from(await imgRes.arrayBuffer());
+      if (buf.length > MAX_BYTES) throw new BadRequestException("Source image too large");
+      sourceB64 = buf.toString("base64");
     }
 
     let prompt: string;

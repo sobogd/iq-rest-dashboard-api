@@ -56,6 +56,7 @@ export class ItemsService {
     return this.prisma.item.findMany({
       where: { restaurantId: ctx.restaurantId, deletedAt: null },
       orderBy: { sortOrder: "asc" },
+      take: 2000,
     });
   }
 

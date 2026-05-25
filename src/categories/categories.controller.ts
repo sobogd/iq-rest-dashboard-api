@@ -14,6 +14,7 @@ import {
 import type { Request } from "express";
 import { AuthGuard, type AuthedRequest } from "../auth/auth.guard";
 import { CategoriesService } from "./categories.service";
+import { CreateCategoryDto, ReorderDto, UpdateCategoryDto } from "./dto";
 
 function ctx(req: Request) {
   const { companyId, restaurantId } = (req as AuthedRequest).authUser;
@@ -31,16 +32,12 @@ export class CategoriesController {
   }
 
   @Post()
-  create(@Req() req: Request, @Body() body: { name: string; translations?: Record<string, { name: string }> | null; isActive?: boolean }) {
+  create(@Req() req: Request, @Body() body: CreateCategoryDto) {
     return this.svc.create(ctx(req), body);
   }
 
   @Put(":id")
-  update(
-    @Req() req: Request,
-    @Param("id") id: string,
-    @Body() body: { name?: string; translations?: Record<string, { name: string }> | null; isActive?: boolean; sortOrder?: number },
-  ) {
+  update(@Req() req: Request, @Param("id") id: string, @Body() body: UpdateCategoryDto) {
     return this.svc.update(ctx(req), id, body);
   }
 
@@ -51,7 +48,7 @@ export class CategoriesController {
   }
 
   @Post("reorder")
-  reorder(@Req() req: Request, @Body() body: { items: { id: string; sortOrder: number }[] }) {
+  reorder(@Req() req: Request, @Body() body: ReorderDto) {
     return this.svc.reorder(ctx(req), body.items);
   }
 }

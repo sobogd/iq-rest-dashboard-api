@@ -352,6 +352,9 @@ export class RestaurantService {
       orderBy: { sortOrder: "asc" },
     });
     for (const it of items) {
+      // Orphaned items (categoryId null after a category delete) aren't part of
+      // any category tree — skip them when cloning the menu.
+      if (!it.categoryId) continue;
       const newCatId = idMap.get(it.categoryId);
       if (!newCatId) continue;
       await this.prisma.item.create({

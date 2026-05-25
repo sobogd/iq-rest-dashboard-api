@@ -318,13 +318,16 @@ model Item {
   // Soft-delete marker. Hidden from menu lists, but kept around so orders'
   // dishId references and historical analytics can still resolve the row.
   deletedAt    DateTime?
-  categoryId   String
+  // Nullable + SetNull: deleting a category must NOT hard-delete its items.
+  // Orders' dishId + historical analytics still resolve the row; the item is
+  // soft-deleted and orphaned (categoryId -> null) instead of cascade-removed.
+  categoryId   String?
   companyId    String
   restaurantId String
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  category   Category   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  category   Category?  @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
   restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
 

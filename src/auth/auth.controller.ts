@@ -12,7 +12,7 @@ import {
 import { ConfigService } from "@nestjs/config";
 import type { Request, Response } from "express";
 import { AuthService } from "./auth.service";
-import { GoogleAuthDto, SendOtpDto, VerifyOtpDto } from "./dto";
+import { AppleCallbackDto, GoogleAuthDto, SendOtpDto, VerifyOtpDto } from "./dto";
 import { authCookieOptions } from "../common/session-utils";
 import { getRequestCurrency } from "../common/geo";
 
@@ -149,6 +149,81 @@ export class AuthController {
       return res.redirect(302, target);
     } catch {
       return res.redirect(302, `${landingBase}/${locale}?google_error=1`);
+    }
+  }
+
+  /**
+   * Sign in with Apple — full-page-redirect callback. The landing builds an
+   * appleid.apple.com/auth/authorize URL with `redirect_uri=<this>`,
+   * `response_mode=form_post` and `state=<base64url(json)>`. Apple POSTs the
+   * browser back here (urlencoded) with `code`, `state` and — only on the
+   * first authorization — a `user` JSON blob carrying the name. We exchange
+   * the code, set the session cookies on .iq-rest.com, then 302 to the
+   * dashboard. Mirrors googleCallback.
+   */
+  @Post("apple/callback")
+  async appleCallback(
+    @Body() body: AppleCallbackDto,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const landingBase = this.config.get<string>("LANDING_URL") || "https://iq-rest.com";
+    const dashboardBase = this.config.get<string>("DASHBOARD_URL") || "https://dashboard.iq-rest.com";
+    const apiBase = this.config.get<string>("API_PUBLIC_URL") || "https://dashboard-api.iq-rest.com";
+
+    let parsedState: { locale?: string; signupContext?: { cuisine: string; restaurantName: string } } = {};
+    try {
+      if (body.state) {
+        parsedState = JSON.parse(Buffer.from(body.state, "base64url").toString("utf8"));
+      }
+    } catch {
+      // Malformed state — fall through with empty defaults.
+    }
+    const locale = parsedState.locale || "en";
+
+    if (body.error || !body.code) {
+      return res.redirect(302, `${landingBase}/${locale}`);
+    }
+
+    // Name arrives only on the first authorization, as a JSON string.
+    let displayName: string | null = null;
+    if (body.user) {
+      try {
+        const parsed = JSON.parse(body.user) as { name?: { firstName?: string; lastName?: string } };
+        const first = parsed.name?.firstName?.trim() || "";
+        const last = parsed.name?.lastName?.trim() || "";
+        displayName = `${first} ${last}`.trim() || null;
+      } catch {
+        // Ignore malformed name blob — falls back to the email local part.
+      }
+    }
+
+    try {
+      const idToken = await this.auth.exchangeAppleCode(
+        body.code,
+        `${apiBase}/api/auth/apple/callback`,
+      );
+      const acceptLang = req.headers["accept-language"]?.toString().split(",")[0]?.split("-")[0];
+      const currency = getRequestCurrency(req);
+      const result = await this.auth.verifyAppleCredential(
+        idToken,
+        displayName,
+        parsedState.signupContext,
+        currency,
+        locale || acceptLang || null,
+      );
+      const domain = this.config.get<string>("COOKIE_DOMAIN") || undefined;
+      const opts = authCookieOptions(domain);
+      res.cookie(SESSION_COOKIE, result.token, opts);
+      res.cookie(EMAIL_COOKIE, result.email, { ...opts, httpOnly: false });
+      res.cookie(LEGACY_SESSION_COOKIE, result.token, opts);
+      res.cookie(LEGACY_EMAIL_COOKIE, result.email, { ...opts, httpOnly: false });
+      const target = result.legacyDashboard
+        ? `${landingBase}/${locale}/dashboard`
+        : `${dashboardBase}/${locale}/dashboard`;
+      return res.redirect(302, target);
+    } catch {
+      return res.redirect(302, `${landingBase}/${locale}?apple_error=1`);
     }
   }
 

@@ -55,3 +55,29 @@ export class GoogleAuthDto {
   @Type(() => SignupContextDto)
   signupContext?: SignupContextDto;
 }
+
+// Apple posts these fields (application/x-www-form-urlencoded) to the
+// redirect URI. `user` is a JSON string sent only on the user's FIRST
+// authorization; everything else is present every time.
+export class AppleCallbackDto {
+  @IsOptional()
+  @IsString()
+  code?: string;
+
+  @IsOptional()
+  @IsString()
+  id_token?: string;
+
+  @IsOptional()
+  @IsString()
+  state?: string;
+
+  /** JSON string: {"name":{"firstName":"…","lastName":"…"},"email":"…"} */
+  @IsOptional()
+  @IsString()
+  user?: string;
+
+  @IsOptional()
+  @IsString()
+  error?: string;
+}

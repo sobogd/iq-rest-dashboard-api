@@ -560,4 +560,116 @@ export class AuthService implements OnModuleDestroy {
     const legacyDashboard = isLegacyEmail(email);
     return { token, userId: user.id, email, onboardingStep: finalStep, isNewUser, legacyDashboard };
   }
+
+  private appleConfig(): import("./apple-auth").AppleConfig {
+    const teamId = this.config.get<string>("APPLE_TEAM_ID");
+    const keyId = this.config.get<string>("APPLE_KEY_ID");
+    const servicesId = this.config.get<string>("APPLE_SERVICES_ID");
+    const privateKey = this.config.get<string>("APPLE_PRIVATE_KEY");
+    if (!teamId || !keyId || !servicesId || !privateKey) {
+      throw new HttpException("Apple auth not configured", HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+    return { teamId, keyId, servicesId, privateKey };
+  }
+
+  /** Exchange an Apple authorization code for an id_token. The redirect URI
+   *  must byte-match the one registered on the Services ID and used in the
+   *  authorize request. */
+  async exchangeAppleCode(code: string, redirectUri: string): Promise<string> {
+    const { exchangeAppleCode } = await import("./apple-auth");
+    try {
+      return await exchangeAppleCode(this.appleConfig(), code, redirectUri);
+    } catch {
+      throw new BadRequestException("Invalid Apple authorization code");
+    }
+  }
+
+  /** Mirror of verifyGoogleCredential for Sign in with Apple. Verifies the
+   *  id_token, then runs the exact same find-or-create + session-issue path.
+   *  `displayName` carries the name Apple only sends on the FIRST sign-in
+   *  (parsed from the form_post `user` field); it seeds the company name for
+   *  brand-new accounts and is ignored thereafter. */
+  async verifyAppleCredential(
+    idToken: string,
+    displayName: string | null,
+    signupContext?: SignupContext,
+    currency?: string,
+    locale?: string | null,
+  ): Promise<{
+    token: string;
+    userId: string;
+    email: string;
+    onboardingStep: number;
+    isNewUser: boolean;
+    legacyDashboard: boolean;
+  }> {
+    if (!idToken) throw new BadRequestException("Missing credential");
+    const { verifyAppleIdToken } = await import("./apple-auth");
+    let identity: import("./apple-auth").AppleIdentity;
+    try {
+      identity = await verifyAppleIdToken(this.appleConfig(), idToken);
+    } catch {
+      throw new BadRequestException("Invalid Apple token");
+    }
+    if (!identity.email) throw new BadRequestException("Invalid Apple token");
+
+    const email = identity.email.trim().toLowerCase();
+    const companyName = (displayName && displayName.trim()) || email.split("@")[0];
+
+    let user = await this.prisma.user.findUnique({
+      where: { email },
+      include: { companies: { take: 1, include: { company: { select: { id: true, onboardingStep: true, createdAt: true } } } } },
+    });
+    let isNewUser = false;
+
+    if (!user) {
+      isNewUser = true;
+      const normalizedLocale = locale ? this.i18n.urlLocale(locale) : null;
+      const created = await this.prisma.$transaction(async (tx) => {
+        const newUser = await tx.user.create({
+          data: { email, ...(normalizedLocale ? { preferredLocale: normalizedLocale } : {}) },
+        });
+        const company = await tx.company.create({
+          data: {
+            name: companyName,
+            onboardingStep: 0,
+            trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+          },
+        });
+        await tx.userCompany.create({
+          data: { userId: newUser.id, companyId: company.id, role: "owner" },
+        });
+        return newUser;
+      });
+      user = await this.prisma.user.findUnique({
+        where: { id: created.id },
+        include: { companies: { take: 1, include: { company: { select: { id: true, onboardingStep: true, createdAt: true } } } } },
+      });
+    }
+
+    if (!user) throw new HttpException("Failed to load user", HttpStatus.INTERNAL_SERVER_ERROR);
+
+    const token = generateSessionToken();
+    const tokenHash = hashSessionToken(token);
+    let pending = this.normalizeSignupContext(signupContext, currency);
+    if (isNewUser && Object.keys(pending).length === 0) {
+      pending = this.defaultSignupContext(email, currency);
+    }
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { sessionToken: tokenHash, ...pending },
+    });
+    await this.prisma.session.create({
+      data: {
+        userId: user.id,
+        tokenHash,
+        expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
+      },
+    });
+
+    const seeded = await this.applyPendingAndMaybeSeed(user.id, locale ?? null);
+    const finalStep = seeded ? 3 : user.companies[0]?.company?.onboardingStep ?? 0;
+    const legacyDashboard = isLegacyEmail(email);
+    return { token, userId: user.id, email, onboardingStep: finalStep, isNewUser, legacyDashboard };
+  }
 }

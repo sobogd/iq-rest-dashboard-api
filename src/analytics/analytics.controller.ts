@@ -242,8 +242,19 @@ export class AnalyticsController {
           }),
           this.prisma.restaurant.findMany({
             where: isAll ? { companyId } : { id: restaurantId },
-            select: { id: true, defaultLanguage: true },
+            select: { id: true, defaultLanguage: true, paymentMethods: true },
           }),
+          // Revenue + order count grouped by the payment method chosen at close.
+          this.prisma.$queryRaw<{ method: string | null; revenue: string; orders: bigint }[]>`
+            SELECT "paymentMethodId" AS method,
+                   COALESCE(SUM(total), 0) AS revenue,
+                   COUNT(*) AS orders
+            FROM orders
+            WHERE ${orderScopeWhere}
+              AND "createdAt" >= ${startDate} AND "createdAt" < ${endDate}
+              AND "isExample" = false AND status = 'completed'
+            GROUP BY "paymentMethodId"
+          `,
         ]);
 
     const totalScans = uniqSessionsRows.length;
@@ -258,12 +269,25 @@ export class AnalyticsController {
         ordersByHourRaw,
         ordersForItems,
         restaurantsForLang,
+        ordersByPaymentRaw,
       ] = orderQueries;
 
       const restaurantDefaultLang = new Map<string, string>();
+      const paymentMethodSet = new Set<string>();
       for (const r of restaurantsForLang) {
         restaurantDefaultLang.set(r.id, r.defaultLanguage || "en");
+        for (const m of r.paymentMethods ?? []) paymentMethodSet.add(m);
       }
+      // Enabled payment methods across the resolved scope. The UI shows the
+      // breakdown only when more than one method is enabled.
+      const paymentMethods = [...paymentMethodSet];
+      const byPaymentMethod = ordersByPaymentRaw
+        .map((r) => ({
+          method: r.method ?? "unspecified",
+          revenue: Number(r.revenue),
+          orders: Number(r.orders),
+        }))
+        .sort((a, b) => b.revenue - a.revenue);
 
       const revenue = Number(ordersAgg[0]?.revenue ?? 0);
       const orders = Number(ordersAgg[0]?.orders ?? 0);
@@ -343,6 +367,8 @@ export class AnalyticsController {
         topByRevenue: topItemsByRevenue,
         topByQuantity: topItemsByQuantity,
         sizeBuckets,
+        paymentMethods,
+        byPaymentMethod,
       };
     }
 

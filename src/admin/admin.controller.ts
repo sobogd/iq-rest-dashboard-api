@@ -26,6 +26,7 @@ import { AuthService } from "../auth/auth.service";
 import { MailService } from "../mail/mail.service";
 import { DevicesService } from "../devices/devices.service";
 import { authCookieOptions } from "../common/session-utils";
+import { validateEmail } from "../common/validate-email";
 import type { AuthedRequest } from "../auth/auth.guard";
 
 const SESSION_COOKIE = "iqr_session";
@@ -270,6 +271,124 @@ export class AdminController {
       }
     }
     return { success: true };
+  }
+
+  // ────────────────── RESTAURANT GRANTS ──────────────────
+  // Cross-company access: grant a user (by email) the right to manage a
+  // restaurant owned by another company. The restaurant's owner is unchanged;
+  // AuthGuard derives the active company from the selected restaurant and
+  // flags it viaGrant (billing + delete hidden). See RestaurantAccess model.
+
+  @Get("restaurant-grants")
+  async listRestaurantGrants() {
+    const grants = await this.prisma.restaurantAccess.findMany({
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        role: true,
+        createdAt: true,
+        user: { select: { id: true, email: true } },
+        restaurant: {
+          select: { id: true, title: true, slug: true, company: { select: { id: true, name: true } } },
+        },
+      },
+    });
+    return grants.map((g) => ({
+      id: g.id,
+      role: g.role,
+      createdAt: g.createdAt.toISOString(),
+      userId: g.user.id,
+      userEmail: g.user.email,
+      restaurantId: g.restaurant.id,
+      restaurantTitle: g.restaurant.title,
+      restaurantSlug: g.restaurant.slug,
+      ownerCompanyId: g.restaurant.company.id,
+      ownerCompanyName: g.restaurant.company.name,
+    }));
+  }
+
+  // Searchable restaurant picker for the grant form (title/slug, max 50).
+  @Get("restaurant-grants/restaurants")
+  async grantRestaurantOptions(@Query("q") q = "") {
+    const term = (q || "").trim();
+    const restaurants = await this.prisma.restaurant.findMany({
+      where: term
+        ? {
+            OR: [
+              { title: { contains: term, mode: "insensitive" } },
+              { slug: { contains: term, mode: "insensitive" } },
+            ],
+          }
+        : undefined,
+      orderBy: { createdAt: "desc" },
+      take: 50,
+      select: { id: true, title: true, slug: true, company: { select: { id: true, name: true } } },
+    });
+    return restaurants.map((r) => ({
+      id: r.id,
+      title: r.title,
+      slug: r.slug,
+      companyId: r.company.id,
+      companyName: r.company.name,
+    }));
+  }
+
+  @Post("restaurant-grants")
+  async createRestaurantGrant(
+    @Body() body: { email?: string; restaurantId?: string; role?: string },
+  ) {
+    const email = validateEmail(body.email);
+    const restaurantId = (body.restaurantId || "").trim();
+    if (!email) throw new BadRequestException("Valid email required");
+    if (!restaurantId) throw new BadRequestException("restaurantId required");
+
+    const restaurant = await this.prisma.restaurant.findUnique({
+      where: { id: restaurantId },
+      select: { id: true, companyId: true },
+    });
+    if (!restaurant) throw new NotFoundException("Restaurant not found");
+
+    // Find or create the grantee. A brand-new user gets an empty company
+    // (onboardingStep already complete, NO seeded restaurant) so resolveSession
+    // works and their first OTP login lands straight on the granted restaurant.
+    let user = await this.prisma.user.findUnique({
+      where: { email },
+      select: { id: true },
+    });
+    if (!user) {
+      user = await this.prisma.$transaction(async (tx) => {
+        const u = await tx.user.create({ data: { email } });
+        const c = await tx.company.create({ data: { name: "Guest", onboardingStep: 3 } });
+        await tx.userCompany.create({ data: { userId: u.id, companyId: c.id, role: "owner" } });
+        return { id: u.id };
+      });
+    }
+
+    // Block granting a restaurant the user already owns (their own company) —
+    // that would be a no-op self-grant and confuse the owned/viaGrant logic.
+    const ownsIt = await this.prisma.userCompany.findFirst({
+      where: { userId: user.id, companyId: restaurant.companyId },
+      select: { id: true },
+    });
+    if (ownsIt) {
+      throw new BadRequestException("User already owns this restaurant's company");
+    }
+
+    const grant = await this.prisma.restaurantAccess.upsert({
+      where: { userId_restaurantId: { userId: user.id, restaurantId } },
+      create: { userId: user.id, restaurantId, role: body.role || "manager" },
+      update: { role: body.role || "manager" },
+      select: { id: true },
+    });
+    return { id: grant.id, userId: user.id };
+  }
+
+  @Delete("restaurant-grants/:id")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async deleteRestaurantGrant(@Param("id") id: string) {
+    await this.prisma.restaurantAccess.delete({ where: { id } }).catch(() => {
+      throw new NotFoundException("Grant not found");
+    });
   }
 
   // ────────────────── COMPANY MESSAGES ──────────────────

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  ForbiddenException,
   Headers,
   HttpCode,
   HttpStatus,
@@ -39,7 +40,8 @@ export class StripeController {
     @Req() req: Request,
     @Body() body: { priceLookupKey?: string; locale?: string; currency?: string },
   ) {
-    const { companyId } = (req as AuthedRequest).authUser;
+    const { companyId, viaGrant } = (req as AuthedRequest).authUser;
+    if (viaGrant) throw new ForbiddenException("Billing is managed by the restaurant owner");
     const stripe = getStripe();
     const company = await this.prisma.company.findUnique({ where: { id: companyId } });
     if (!company) throw new BadRequestException("Company not found");
@@ -128,7 +130,8 @@ export class StripeController {
   @Post("processing")
   @UseGuards(AuthGuard)
   async setProcessing(@Req() req: Request) {
-    const { companyId } = (req as AuthedRequest).authUser;
+    const { companyId, viaGrant } = (req as AuthedRequest).authUser;
+    if (viaGrant) throw new ForbiddenException("Billing is managed by the restaurant owner");
     await this.prisma.company.update({
       where: { id: companyId },
       data: { paymentProcessing: true },
@@ -139,7 +142,8 @@ export class StripeController {
   @Post("portal")
   @UseGuards(AuthGuard)
   async createPortal(@Req() req: Request, @Body() body: { locale?: string }) {
-    const { companyId } = (req as AuthedRequest).authUser;
+    const { companyId, viaGrant } = (req as AuthedRequest).authUser;
+    if (viaGrant) throw new ForbiddenException("Billing is managed by the restaurant owner");
     const stripe = getStripe();
     const company = await this.prisma.company.findUnique({ where: { id: companyId } });
     if (!company || !company.stripeCustomerId) {

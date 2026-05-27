@@ -30,6 +30,7 @@ model User {
   companies       UserCompany[]
   supportMessages SupportMessage[]
   sessions        Session[]
+  restaurantAccess RestaurantAccess[]
 
   @@map("users")
 }
@@ -205,10 +206,33 @@ model Restaurant {
   categories   Category[]
   items        Item[]
   pageViews    PageView[]
+  access       RestaurantAccess[]
 
   @@index([companyId])
   @@index([slug])
   @@map("restaurants")
+}
+
+// Cross-company restaurant grant. Lets a contractor user manage a restaurant
+// owned by another company without joining that company. The restaurant's
+// companyId (owner) is unchanged; AuthGuard derives the active companyId from
+// the selected restaurant, so a granted restaurant runs in the OWNER's company
+// context (their data, limits, AI quota, billing). Billing management and
+// restaurant deletion are blocked for granted access (viaGrant) — see guard.
+model RestaurantAccess {
+  id           String   @id @default(cuid())
+  userId       String
+  restaurantId String
+  role         String   @default("manager")
+  createdAt    DateTime @default(now())
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, restaurantId])
+  @@index([userId])
+  @@index([restaurantId])
+  @@map("restaurant_access")
 }
 
 model Table {

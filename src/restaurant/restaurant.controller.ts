@@ -152,7 +152,7 @@ export class RestaurantController {
 
   @Get("restaurant/subscription")
   async subscription(@Req() req: Request) {
-    const { companyId, restaurantId } = (req as AuthedRequest).authUser;
+    const { companyId, restaurantId, viaGrant } = (req as AuthedRequest).authUser;
     const company = await this.prisma.company.findUnique({ where: { id: companyId } });
     if (!company) return null;
     const usage = await getAiImageUsage(this.prisma, restaurantId);
@@ -165,6 +165,9 @@ export class RestaurantController {
       trialEndsAt: company.trialEndsAt?.toISOString() ?? null,
       aiImagesUsed: usage.aiImagesUsed,
       aiImagesLimit: usage.aiImagesLimit,
+      // Plan/usage still drive feature gating for the active restaurant, but a
+      // contractor managing it via grant must not see/manage the owner's billing.
+      canManageBilling: !viaGrant,
     };
   }
 
@@ -179,15 +182,20 @@ export class RestaurantController {
 
   @Get("restaurants")
   async list(@Req() req: Request) {
-    const { companyId, restaurantId } = (req as AuthedRequest).authUser;
+    const { userId, ownCompanyId, restaurantId, viaGrant } = (req as AuthedRequest).authUser;
+    // Plan gating keys off the user's OWN company (can they add restaurants),
+    // not the active restaurant's company which may be an owner they manage.
     const company = await this.prisma.company.findUnique({
-      where: { id: companyId },
+      where: { id: ownCompanyId },
       select: { plan: true, subscriptionStatus: true },
     });
-    const list = await this.svc.listForCompany(companyId);
+    const list = await this.svc.listForUser(userId, ownCompanyId);
     return {
       activeId: restaurantId,
       isPaid: company ? isPaidActive(company) : false,
+      // Billing UI is shown only when the active restaurant is the user's own;
+      // a granted (managed-for-owner) restaurant hides billing.
+      canManageBilling: !viaGrant,
       restaurants: list,
     };
   }
@@ -198,8 +206,10 @@ export class RestaurantController {
     @Res({ passthrough: true }) res: Response,
     @Body() body: { name: string; duplicateFromId?: string | null },
   ) {
-    const { companyId } = (req as AuthedRequest).authUser;
-    const created = await this.svc.createForCompany(companyId, body);
+    // New restaurants always land under the user's OWN company, never the
+    // company of a restaurant they merely manage via grant.
+    const { ownCompanyId } = (req as AuthedRequest).authUser;
+    const created = await this.svc.createForCompany(ownCompanyId, body);
     // Auto-switch the cookie so the next request lands on the new restaurant.
     res.cookie(ACTIVE_RESTAURANT_COOKIE, created.id, {
       httpOnly: false,
@@ -216,12 +226,22 @@ export class RestaurantController {
     @Res({ passthrough: true }) res: Response,
     @Body() body: { id: string },
   ) {
-    const { companyId } = (req as AuthedRequest).authUser;
+    const { userId, ownCompanyId } = (req as AuthedRequest).authUser;
     if (!body?.id) throw new BadRequestException("id required");
-    const restaurant = await this.prisma.restaurant.findFirst({
-      where: { id: body.id, companyId },
+    // Allowed targets: a restaurant of the user's own company, OR one granted
+    // to them across companies.
+    const owned = await this.prisma.restaurant.findFirst({
+      where: { id: body.id, companyId: ownCompanyId },
       select: { id: true },
     });
+    const restaurant =
+      owned ??
+      (await this.prisma.restaurantAccess
+        .findUnique({
+          where: { userId_restaurantId: { userId, restaurantId: body.id } },
+          select: { restaurantId: true },
+        })
+        .then((g) => (g ? { id: g.restaurantId } : null)));
     if (!restaurant) throw new ForbiddenException("Not your restaurant");
     res.cookie(ACTIVE_RESTAURANT_COOKIE, restaurant.id, {
       httpOnly: false,
@@ -235,7 +255,10 @@ export class RestaurantController {
   @Delete("restaurants/:id")
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@Req() req: Request, @Param("id") id: string) {
-    const { companyId } = (req as AuthedRequest).authUser;
-    await this.svc.deleteForCompany(companyId, id);
+    // Scope by the user's OWN company: deleteForCompany only finds a restaurant
+    // whose companyId matches, so a granted restaurant (owned by another
+    // company) is invisible here → contractors can't delete what they manage.
+    const { ownCompanyId } = (req as AuthedRequest).authUser;
+    await this.svc.deleteForCompany(ownCompanyId, id);
   }
 }

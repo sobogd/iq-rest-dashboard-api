@@ -177,6 +177,36 @@ export class RestaurantService {
   }
 
   /**
+   * Switcher list: the user's OWN restaurants (FREE-gated to 1, as before) plus
+   * every restaurant GRANTED to them across companies (never FREE-gated — the
+   * owner's plan governs those). Each row is tagged `owned` so the UI can hide
+   * delete/billing affordances on granted restaurants.
+   */
+  async listForUser(userId: string, ownCompanyId: string) {
+    const [company, owned, granted] = await Promise.all([
+      this.prisma.company.findUnique({
+        where: { id: ownCompanyId },
+        select: { plan: true, subscriptionStatus: true },
+      }),
+      this.prisma.restaurant.findMany({
+        where: { companyId: ownCompanyId },
+        orderBy: { createdAt: "asc" },
+      }),
+      this.prisma.restaurantAccess.findMany({
+        where: { userId },
+        select: { restaurant: true },
+        orderBy: { restaurant: { createdAt: "asc" } },
+      }),
+    ]);
+    const paid = company ? isPaidActive(company) : false;
+    const ownedList = !paid && owned.length > 1 ? owned.slice(0, 1) : owned;
+    return [
+      ...ownedList.map((r) => ({ ...r, owned: true })),
+      ...granted.map((g) => ({ ...g.restaurant, owned: false })),
+    ];
+  }
+
+  /**
    * Update active restaurant. If no restaurant exists for the company, create
    * one (legacy onboarding path — pre-seed users hit POST /restaurant before
    * any restaurant exists).

@@ -45,6 +45,10 @@ export class UserOrDeviceGuard implements CanActivate {
         onboardingStep: 3,
         restaurantId: auth.restaurantId,
         primaryRestaurantId: auth.restaurantId,
+        // A paired device is bound directly to its own restaurant/company —
+        // there is no cross-company grant in the device path.
+        ownCompanyId: auth.companyId,
+        viaGrant: false,
       };
       // Heartbeat — fire-and-forget so a stalled write doesn't slow requests.
       void this.devices.heartbeat(auth.deviceId).catch(() => undefined);

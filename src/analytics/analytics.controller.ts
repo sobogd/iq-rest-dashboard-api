@@ -113,10 +113,13 @@ export class AnalyticsController {
     @Query("period") periodRaw = "",
     @Query("scope") scope = "",
   ) {
-    const { companyId, restaurantId } = (req as AuthedRequest).authUser;
+    const { companyId, restaurantId, viaGrant } = (req as AuthedRequest).authUser;
     const { period, startDate, endDate, prevStartDate, prevEndDate } = monthWindow(periodRaw);
 
-    const isAll = scope === "all";
+    // scope=all aggregates across every restaurant of the company. A user
+    // viewing a restaurant granted to them via cross-company access must never
+    // see the owner's other restaurants — force single-restaurant scope.
+    const isAll = scope === "all" && !viaGrant;
     // Resolve restaurant filter once for all queries.
     const pvScopeWhere = isAll
       ? Prisma.sql`"companyId" = ${companyId}`

@@ -90,12 +90,16 @@ export class DevicesController {
     const isReservation = req.device.type === "RESERVATION";
     const [restaurant, categories, items, tables, orders, reservations] = await Promise.all([
       this.prisma.restaurant.findUnique({ where: { id: restaurantId } }),
+      // Include disabled (isActive:false) categories/items: staff devices must
+      // be able to add hidden dishes to in-house orders, matching the full
+      // admin orders picker. The `isActive` flag rides along so the UI can grey
+      // them out. Public menu (soqrmenuweb) is separate and still hides these.
       this.prisma.category.findMany({
-        where: { restaurantId, isActive: true, deletedAt: null },
+        where: { restaurantId, deletedAt: null },
         orderBy: { sortOrder: "asc" },
       }),
       this.prisma.item.findMany({
-        where: { restaurantId, isActive: true, deletedAt: null },
+        where: { restaurantId, deletedAt: null },
         orderBy: { sortOrder: "asc" },
       }),
       this.prisma.table.findMany({

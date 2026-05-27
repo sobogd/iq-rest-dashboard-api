@@ -54,6 +54,12 @@ function isLegacyEmail(email: string | null | undefined): boolean {
   return LEGACY_EMAIL_HASHES.has(hashLegacyEmail(email));
 }
 
+// Demo account: a fixed credential so we can hand out read-the-product access
+// without provisioning a real mailbox. The fixed code skips OTP verification
+// and no email is sent for it. Intentional backdoor scoped to this one email.
+const DEMO_EMAIL = "demo@iq-rest.com";
+const DEMO_CODE = "000000";
+
 @Injectable()
 export class AuthService implements OnModuleDestroy {
   private sendAttempts = new Map<string, { count: number; resetAt: number }>();
@@ -183,7 +189,10 @@ export class AuthService implements OnModuleDestroy {
       }
     }
 
-    await this.mail.sendOtp({ email, code, locale });
+    // Demo account accepts the fixed DEMO_CODE in verifyOtp — no real email.
+    if (email !== DEMO_EMAIL) {
+      await this.mail.sendOtp({ email, code, locale });
+    }
     return { isNewUser };
   }
 
@@ -294,32 +303,43 @@ export class AuthService implements OnModuleDestroy {
       include: { companies: { take: 1, include: { company: true } } },
     });
 
-    if (!user || !user.otp || !user.otpExpiresAt) {
+    // Demo account: skip all OTP validation when the fixed code is given. The
+    // row itself must exist (sendOtp creates it on first login), but its otp /
+    // expiry / attempt counters are irrelevant for the bypass.
+    const isDemoBypass = email === DEMO_EMAIL && code === DEMO_CODE;
+
+    if (!user) {
       throw new BadRequestException("INVALID_CODE");
     }
 
-    if (user.otpAttempts >= MAX_OTP_ATTEMPTS) {
-      await this.prisma.user.update({
-        where: { email },
-        data: { otp: null, otpExpiresAt: null, otpAttempts: 0 },
-      });
-      throw new HttpException("TOO_MANY_ATTEMPTS", HttpStatus.TOO_MANY_REQUESTS);
-    }
+    if (!isDemoBypass) {
+      if (!user.otp || !user.otpExpiresAt) {
+        throw new BadRequestException("INVALID_CODE");
+      }
 
-    if (user.otpExpiresAt < new Date()) {
-      await this.prisma.user.update({
-        where: { email },
-        data: { otp: null, otpExpiresAt: null, otpAttempts: 0 },
-      });
-      throw new BadRequestException("CODE_EXPIRED");
-    }
+      if (user.otpAttempts >= MAX_OTP_ATTEMPTS) {
+        await this.prisma.user.update({
+          where: { email },
+          data: { otp: null, otpExpiresAt: null, otpAttempts: 0 },
+        });
+        throw new HttpException("TOO_MANY_ATTEMPTS", HttpStatus.TOO_MANY_REQUESTS);
+      }
 
-    if (!safeCompare(user.otp, hashOTP(code))) {
-      await this.prisma.user.update({
-        where: { email },
-        data: { otpAttempts: { increment: 1 } },
-      });
-      throw new BadRequestException("INVALID_CODE");
+      if (user.otpExpiresAt < new Date()) {
+        await this.prisma.user.update({
+          where: { email },
+          data: { otp: null, otpExpiresAt: null, otpAttempts: 0 },
+        });
+        throw new BadRequestException("CODE_EXPIRED");
+      }
+
+      if (!safeCompare(user.otp, hashOTP(code))) {
+        await this.prisma.user.update({
+          where: { email },
+          data: { otpAttempts: { increment: 1 } },
+        });
+        throw new BadRequestException("INVALID_CODE");
+      }
     }
 
     // Success — issue session token.

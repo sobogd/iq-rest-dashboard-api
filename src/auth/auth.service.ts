@@ -7,7 +7,6 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { createHash } from "crypto";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { MailService } from "../mail/mail.service";
@@ -32,26 +31,12 @@ const SEND_LIMIT_MAX = 5;
 const VERIFY_LIMIT_WINDOW = 15 * 60 * 1000;
 const VERIFY_LIMIT_MAX = 10;
 
-// Specific accounts that stay on the legacy monolith dashboard at iq-rest.com/<locale>/dashboard.
-// Stored as salted SHA-256 hashes so the addresses are not visible in the repo. Bump LEGACY_SALT
-// to invalidate every entry at once (e.g. after rotating who's on legacy).
-const LEGACY_SALT = "iqr-legacy-v1";
-const LEGACY_EMAIL_HASHES = new Set<string>([
-  "4308dbfd8111b3a6cfc8655dc23c843d2ffbd3541831315f2ffe240421ab7169",
-  "7f9765f0ff8e32b88b54a14b4ba773a5b782e653b139dd47d3c78e9188aad5eb",
-  // "8f9e4fafa7606a6757c532ad0b0d66e882dd6d53deda494b3af481244c65aa5d", // support@iq-rest.com — TEMP off, admin testing new dashboard
-  "bfd849ef637d5f481afecc13b46f5bcab6b19f271f733a8d4a377ea1b6a28338", // sobogd@gmail.com — test routing to legacy dashboard
-]);
-
-function hashLegacyEmail(email: string): string {
-  return createHash("sha256")
-    .update(LEGACY_SALT + ":" + email.trim().toLowerCase())
-    .digest("hex");
-}
-
-function isLegacyEmail(email: string | null | undefined): boolean {
-  if (!email) return false;
-  return LEGACY_EMAIL_HASHES.has(hashLegacyEmail(email));
+// Legacy in-landing dashboard at iq-rest.com/<locale>/dashboard was torn down
+// on 2026-05-28 — the path now 301s to dashboard.iq-rest.com. Keep
+// `legacyDashboard: false` in the response shape for backward compat with any
+// in-flight SPA that still reads it.
+function isLegacyEmail(_email: string | null | undefined): boolean {
+  return false;
 }
 
 // Demo account: a fixed credential so we can hand out read-the-product access

@@ -116,7 +116,7 @@ export class ScanMenuController {
 
   @Post("parse")
   async parse(@Req() req: Request, @Body() body: { images?: string[]; image?: string }) {
-    const { companyId } = (req as AuthedRequest).authUser;
+    const { restaurantId } = (req as AuthedRequest).authUser;
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       throw new HttpException("Gemini API key not configured", HttpStatus.INTERNAL_SERVER_ERROR);
@@ -142,7 +142,7 @@ export class ScanMenuController {
           const base64Data = file.split(",")[1];
           const buffer = Buffer.from(base64Data, "base64");
           const ext = mime === "application/pdf" ? "pdf" : mime.split("/")[1] || "bin";
-          const key = s3Key("scan_onboarding", companyId, `${timestamp}-${i}.${ext}`);
+          const key = s3Key("scan_onboarding", restaurantId, `${timestamp}-${i}.${ext}`);
           await s3Client.send(
             new PutObjectCommand({
               Bucket: s3Bucket,
@@ -212,7 +212,7 @@ export class ScanMenuController {
     @Req() req: Request,
     @Body() body: { categories?: ScannedCategory[]; replaceExisting?: boolean },
   ) {
-    const { companyId, restaurantId } = (req as AuthedRequest).authUser;
+    const { restaurantId } = (req as AuthedRequest).authUser;
 
     const incoming = (body.categories ?? []).filter(
       (c) => c.name && Array.isArray(c.items) && c.items.length > 0,
@@ -247,7 +247,6 @@ export class ScanMenuController {
           name: cat.name,
           sortOrder: existingCategoriesCount + i,
           isActive: true,
-          companyId,
           restaurantId,
         },
       });
@@ -262,7 +261,6 @@ export class ScanMenuController {
           sortOrder: j,
           isActive: true,
           categoryId: category.id,
-          companyId,
           restaurantId,
         }));
 

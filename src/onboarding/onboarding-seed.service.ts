@@ -71,57 +71,32 @@ export class OnboardingSeedService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Seed a brand-new company with a template restaurant + categories + items + tables + sample
+  /** Seed a brand-new user with a template restaurant + categories + items + tables + sample
    *  orders and reservations. All seeded records are flagged isExample=true so the user can wipe
-   *  them with one click. Idempotent: aborts if the company already has a restaurant.
+   *  them with one click. Idempotent: aborts if the user already has an attached restaurant.
    *
-   *  Also creates a RestaurantUser row linking the owner so the new per-restaurant
-   *  membership model has the right initial state, and copies the parent Company's
-   *  plan/trial fields onto the new Restaurant (per-restaurant billing migration). */
+   *  The new restaurant is the user's FIRST → it gets a fresh 14-day trial.
+   *  Subsequent restaurants (created via restaurant.controller.createForCompany)
+   *  start FREE without a trial. */
   async seedTemplate(params: {
-    companyId: string;
     userId: string;
     cuisine: CuisineKey;
     restaurantName: string;
     currency: string;
     locale: string | null | undefined;
   }): Promise<{ restaurantId: string } | null> {
-    const { companyId, userId, cuisine, restaurantName, currency } = params;
+    const { userId, cuisine, restaurantName, currency } = params;
     const seedLocale = pickSeedLocale(params.locale);
     const template = cuisineTemplates[cuisine];
 
-    const existing = await this.prisma.restaurant.findFirst({
-      where: { companyId },
-      select: { id: true },
+    const existing = await this.prisma.restaurantUser.findFirst({
+      where: { userId },
+      select: { restaurantId: true },
     });
     if (existing) {
-      this.logger.log(`Skipping seed for company ${companyId} — restaurant already exists`);
-      // Still ensure the RestaurantUser row exists so an already-seeded
-      // restaurant is reachable via the new flat-access model.
-      await this.prisma.restaurantUser.upsert({
-        where: { restaurantId_userId: { restaurantId: existing.id, userId } },
-        create: { restaurantId: existing.id, userId },
-        update: {},
-      }).catch(() => undefined);
+      this.logger.log(`Skipping seed for user ${userId} — restaurant already attached`);
       return null;
     }
-
-    // Mirror the Company's billing/trial fields onto the new restaurant — for
-    // a brand-new account this seeds the same 14-day trial that signup wrote
-    // onto the Company. Subsequent restaurants (via restaurant.controller) do
-    // NOT inherit a trial — only the FIRST restaurant gets one.
-    const parentCompany = await this.prisma.company.findUnique({
-      where: { id: companyId },
-      select: {
-        plan: true,
-        billingCycle: true,
-        subscriptionStatus: true,
-        currentPeriodEnd: true,
-        paymentProcessing: true,
-        stripeSubscriptionId: true,
-        trialEndsAt: true,
-      },
-    });
 
     const subtitle = pick(template.subtitle, seedLocale);
     // Always offer English as a secondary language; deduplicate in case seedLocale is en.
@@ -132,7 +107,6 @@ export class OnboardingSeedService {
     return this.prisma.$transaction(async (tx) => {
       const restaurant = await tx.restaurant.create({
         data: {
-          companyId,
           title: restaurantName,
           subtitle,
           slug,
@@ -147,18 +121,11 @@ export class OnboardingSeedService {
           ordersEnabled: true,
           reservationsEnabled: true,
           ...(template.backgroundUrl ? { source: template.backgroundUrl, backgroundType: "image" } : {}),
-          // Inherit billing/trial from the Company (this is the FIRST restaurant
-          // of the account → it gets the 14-day trial that was written on
-          // Company at signup).
-          ...(parentCompany ? {
-            plan: parentCompany.plan,
-            billingCycle: parentCompany.billingCycle,
-            subscriptionStatus: parentCompany.subscriptionStatus,
-            currentPeriodEnd: parentCompany.currentPeriodEnd,
-            paymentProcessing: parentCompany.paymentProcessing,
-            stripeSubscriptionId: parentCompany.stripeSubscriptionId,
-            trialEndsAt: parentCompany.trialEndsAt,
-          } : {}),
+          // FIRST restaurant of the account → 14-day trial. Subsequent ones
+          // (createForCompany) start with no trial.
+          plan: "FREE",
+          subscriptionStatus: "INACTIVE",
+          trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
         },
       });
 
@@ -179,7 +146,6 @@ export class OnboardingSeedService {
       for (const cat of template.categories) {
         const created = await tx.category.create({
           data: {
-            companyId,
             restaurantId: restaurant.id,
             name: pick(cat.name, seedLocale)!,
             translations: buildNameTranslations(cat.name, seedLocale),
@@ -206,7 +172,6 @@ export class OnboardingSeedService {
         }
         const created = await tx.item.create({
           data: {
-            companyId,
             restaurantId: restaurant.id,
             categoryId: category.id,
             name: pick(item.name, seedLocale)!,
@@ -298,7 +263,6 @@ export class OnboardingSeedService {
         await tx.order.create({
           data: {
             restaurantId: restaurant.id,
-            companyId,
             items,
             total,
             currency,
@@ -336,11 +300,9 @@ export class OnboardingSeedService {
         });
       }
 
-      // Mark onboarding complete so the user lands directly in the dashboard,
-      // not in the legacy 4-step onboarding wizard.
-      await tx.company.update({
-        where: { id: companyId },
-        data: { onboardingStep: 3 },
+      // Link the new restaurant to the user via the flat-access model.
+      await tx.restaurantUser.create({
+        data: { restaurantId: restaurant.id, userId, addedBy: null },
       });
 
       return { restaurantId: restaurant.id };

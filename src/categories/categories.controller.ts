@@ -17,8 +17,8 @@ import { CategoriesService } from "./categories.service";
 import { CreateCategoryDto, ReorderDto, UpdateCategoryDto } from "./dto";
 
 function ctx(req: Request) {
-  const { companyId, restaurantId } = (req as AuthedRequest).authUser;
-  return { companyId, restaurantId };
+  const { restaurantId } = (req as AuthedRequest).authUser;
+  return { restaurantId };
 }
 
 @Controller("categories")

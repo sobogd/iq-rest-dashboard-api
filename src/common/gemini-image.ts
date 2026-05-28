@@ -69,7 +69,7 @@ export async function callGeminiImage(opts: GeminiOpts): Promise<string> {
 
 interface UploadOpts {
   pathPrefix: string;
-  companyId: string;
+  restaurantId: string;
   filenamePrefix: string;
   resize: { w: number; h: number; fit: "inside" | "cover" };
   quality?: number;
@@ -93,7 +93,7 @@ export async function uploadGeneratedImage(b64: string, opts: UploadOpts): Promi
 
   const timestamp = Date.now();
   const randomStr = Math.random().toString(36).substring(2, 8);
-  const key = s3Key(opts.pathPrefix, opts.companyId, `${opts.filenamePrefix}-${timestamp}-${randomStr}.webp`);
+  const key = s3Key(opts.pathPrefix, opts.restaurantId, `${opts.filenamePrefix}-${timestamp}-${randomStr}.webp`);
 
   await s3Client.send(
     new PutObjectCommand({

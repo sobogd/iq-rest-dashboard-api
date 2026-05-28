@@ -37,11 +37,9 @@ model User {
   upsellShownAt     DateTime?
   reminderSentAt    DateTime?
 
-  companies       UserCompany[]
   supportMessages SupportMessage[]
   sessions        Session[]
-  restaurantAccess RestaurantAccess[]
-  restaurantUsers  RestaurantUser[]
+  restaurantUsers RestaurantUser[]
 
   @@map("users")
 }
@@ -59,56 +57,6 @@ model Session {
 
   @@index([userId])
   @@map("sessions")
-}
-
-model Company {
-  id        String   @id @default(cuid())
-  name      String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Stripe
-  stripeCustomerId     String? @unique
-  stripeSubscriptionId String? @unique
-
-  // Subscription
-  plan               Plan               @default(FREE)
-  billingCycle       BillingCycle?
-  subscriptionStatus SubscriptionStatus @default(INACTIVE)
-  currentPeriodEnd   DateTime?
-  paymentProcessing  Boolean            @default(false)
-
-  // Trial
-  trialEndsAt DateTime? // null = old user (pre-trial), set = new user with 14-day trial
-
-  // Onboarding
-  onboardingStep Int @default(3) // 3 = onboarding complete (legacy field)
-
-  // Email campaigns
-  emailsSent       Json?    // e.g. { "welcome": "2026-02-16T...", "inactive_7d": "2026-02-20T..." }
-  emailUnsubscribed Boolean @default(false)
-
-  // Limits
-  scanLimit  Int @default(320)
-  orderLimit Int @default(10)
-
-  // Upsell
-  upsellShownAt DateTime?
-
-  // Admin
-  reminderSentAt DateTime?
-
-  // Google Ads — gclid linked to this company for conversion uploads
-  googleClickId String?
-
-  users           UserCompany[]
-  categories      Category[]
-  items           Item[]
-  restaurants     Restaurant[]
-  pageViews       PageView[]
-  supportMessages SupportMessage[]
-
-  @@map("companies")
 }
 
 enum Plan {
@@ -162,7 +110,6 @@ model Restaurant {
   // Payment methods this restaurant offers — enum codes only (cash, card, ...).
   // Display strings live in dashboard locales; integrations add new codes here.
   paymentMethods  String[] @default(["cash", "card"])
-  companyId       String
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -210,10 +157,10 @@ model Restaurant {
   orderAddressEnabled    Boolean @default(false)
   orderMode              String  @default("internal") // "internal" | "whatsapp" | "both"
 
-  // Per-restaurant billing (moved from Company). Each restaurant carries its
-  // own subscription — creating a second restaurant means a second sub.
-  // `trialEndsAt` is populated only for a user's FIRST restaurant; subsequent
-  // restaurants start as FREE without trial.
+  // Per-restaurant billing. Each restaurant carries its own subscription —
+  // creating a second restaurant means a second sub. `trialEndsAt` is
+  // populated only for a user's FIRST restaurant; subsequent restaurants
+  // start as FREE without trial.
   plan                  Plan?
   billingCycle          BillingCycle?
   subscriptionStatus    SubscriptionStatus  @default(INACTIVE)
@@ -222,23 +169,20 @@ model Restaurant {
   stripeSubscriptionId  String?             @unique
   trialEndsAt           DateTime?
 
-  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  tables       Table[]
-  reservations Reservation[]
-  orders       Order[]
-  categories   Category[]
-  items        Item[]
-  pageViews    PageView[]
-  access       RestaurantAccess[]
+  tables          Table[]
+  reservations    Reservation[]
+  orders          Order[]
+  categories      Category[]
+  items           Item[]
+  pageViews       PageView[]
   restaurantUsers RestaurantUser[]
   supportMessages SupportMessage[]
 
-  @@index([companyId])
   @@index([slug])
   @@map("restaurants")
 }
 
-// User ↔ Restaurant many-to-many. Replaces the Company-derived ownership model.
+// User ↔ Restaurant many-to-many. Sole ownership model.
 // Anyone in this table has full access to the restaurant (no role hierarchy —
 // kept intentionally flat per product decision 2026-05-28).
 model RestaurantUser {
@@ -257,28 +201,6 @@ model RestaurantUser {
   @@index([userId])
   @@index([restaurantId])
   @@map("restaurant_users")
-}
-
-// Cross-company restaurant grant. Lets a contractor user manage a restaurant
-// owned by another company without joining that company. The restaurant's
-// companyId (owner) is unchanged; AuthGuard derives the active companyId from
-// the selected restaurant, so a granted restaurant runs in the OWNER's company
-// context (their data, limits, AI quota, billing). Billing management and
-// restaurant deletion are blocked for granted access (viaGrant) — see guard.
-model RestaurantAccess {
-  id           String   @id @default(cuid())
-  userId       String
-  restaurantId String
-  role         String   @default("manager")
-  createdAt    DateTime @default(now())
-
-  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, restaurantId])
-  @@index([userId])
-  @@index([restaurantId])
-  @@map("restaurant_access")
 }
 
 model Table {
@@ -357,21 +279,17 @@ model Category {
   // their categoryId and stop rendering (orders are self-contained snapshots,
   // so nothing downstream breaks).
   deletedAt    DateTime?
-  companyId    String
   restaurantId String
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
   restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   items      Item[]
 
-  @@index([companyId])
-  @@index([companyId, sortOrder])
-  @@index([companyId, isActive, sortOrder])
-  @@index([companyId, parentId, sortOrder])
   @@index([restaurantId])
   @@index([restaurantId, sortOrder])
+  @@index([restaurantId, isActive, sortOrder])
+  @@index([restaurantId, parentId, sortOrder])
   @@index([restaurantId, deletedAt])
   @@map("categories")
 }
@@ -397,42 +315,23 @@ model Item {
   // Orders' dishId + historical analytics still resolve the row; the item is
   // soft-deleted and orphaned (categoryId -> null) instead of cascade-removed.
   categoryId   String?
-  companyId    String
   restaurantId String
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   category   Category?  @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
   restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
 
-  @@index([companyId])
   @@index([categoryId])
-  @@index([companyId, categoryId])
   @@index([categoryId, sortOrder])
-  @@index([companyId, isExample])
   @@index([restaurantId])
   @@index([restaurantId, categoryId])
+  @@index([restaurantId, isExample])
   @@map("items")
-}
-
-model UserCompany {
-  id        String   @id @default(cuid())
-  userId    String
-  companyId String
-  role      String   @default("owner")
-  createdAt DateTime @default(now())
-
-  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, companyId])
-  @@map("users_companies")
 }
 
 model PageView {
   id           String   @id @default(cuid())
-  companyId    String
   restaurantId String
   sessionId    String
   page         String   // 'home' | 'contacts' | 'language' | 'menu'
@@ -442,33 +341,26 @@ model PageView {
   ip           String?
   createdAt    DateTime @default(now())
 
-  company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
   restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
 
-  @@index([companyId, createdAt])
-  @@index([companyId, sessionId])
   @@index([createdAt])
   @@index([restaurantId, createdAt])
+  @@index([restaurantId, sessionId])
   @@map("page_views")
 }
 
 model SupportMessage {
   id           String   @id @default(cuid())
-  companyId    String
   userId       String
   // Per-restaurant chat (all users attached to the restaurant see it).
-  // Nullable during the Company-deprecation transition; backfilled from
-  // companyId via "first restaurant of company" mapping.
-  restaurantId String?
+  restaurantId String
   message      String   @db.Text
   isAdmin      Boolean  @default(false)
   createdAt    DateTime @default(now())
 
-  company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
   user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  restaurant Restaurant? @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
 
-  @@index([companyId, createdAt])
   @@index([restaurantId, createdAt])
   @@map("support_messages")
 }
@@ -476,8 +368,9 @@ model SupportMessage {
 /// Unified analytics. Replaces the old PulseEvent + Session + AnalyticsEvent.
 /// Anonymous by default (event + at + country + region + device + platform).
 /// gclid is set only by SSR (server-pulse from /app/<locale>/page.tsx on landing
-/// arrival with ?gclid=...). companyId is attached server-side from the auth
-/// cookie when the request comes from a logged-in user.
+/// arrival with ?gclid=...). userId is attached server-side from the auth
+/// cookie when the request comes from a logged-in user; restaurantId from the
+/// active-restaurant cookie when present.
 model UsageEvent {
   id        String   @id @default(cuid())
   at        DateTime @default(now())
@@ -488,7 +381,6 @@ model UsageEvent {
   platform  String?  // 'ios' / 'android' / 'windows' / 'macos' / 'linux' / 'other'
   gclid     String?  // SSR-only — landing page on gclid arrival
   ad_params String?  // JSON: { kw, term, campaign } from ValueTrack params
-  companyId String?  // legacy — kept during Company-deprecation transition
   userId    String?  // server-side from iqr_session cookie when logged in
   restaurantId String? // server-side from iqr_active_restaurant_id cookie when present
   ip        String?  // anonymized client IP (IPv4 last octet zeroed, IPv6 truncated to /64)
@@ -499,7 +391,6 @@ model UsageEvent {
 
   @@index([at])
   @@index([event, at])
-  @@index([companyId, at])
   @@index([userId, at])
   @@index([restaurantId, at])
   @@index([gclid])
@@ -512,7 +403,6 @@ model UsageEvent {
 model Order {
   id              String   @id @default(cuid())
   restaurantId    String
-  companyId       String
   items           Json     // [{ id, name, qty, price }]
   total           Decimal  @db.Decimal(10, 2)
   currency        String   @default("EUR")
@@ -545,20 +435,9 @@ model Order {
   restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
 
   @@unique([restaurantId, orderDate, dailyNumber])
-  @@index([companyId, status])
-  @@index([companyId, createdAt])
   @@index([restaurantId, createdAt])
+  @@index([restaurantId, status])
   @@map("orders")
-}
-
-model GoogleAdsExclusion {
-  id        String   @id @default(cuid())
-  keyword   String
-  matchType String
-  createdAt DateTime @default(now())
-
-  @@unique([keyword, matchType])
-  @@map("google_ads_exclusions")
 }
 
 enum DeviceType {
@@ -577,7 +456,6 @@ enum DeviceStatus {
 /// device JWT (not user session) so a tablet survives staff turnover.
 model Device {
   id            String       @id @default(cuid())
-  companyId     String
   restaurantId  String
   name          String
   type          DeviceType
@@ -592,7 +470,6 @@ model Device {
 
   pairingCode   PairingCode?
 
-  @@index([companyId])
   @@index([restaurantId])
   @@map("devices")
 }

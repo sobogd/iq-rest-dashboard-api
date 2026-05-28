@@ -24,7 +24,7 @@ interface CategoryUpdateBody {
 }
 
 interface Ctx {
-  companyId: string;
+
   restaurantId: string;
 }
 
@@ -66,12 +66,12 @@ export class CategoriesService {
         isGroup,
         parentId,
         sortOrder: (max._max.sortOrder ?? -1) + 1,
-        companyId: ctx.companyId,
+
         restaurantId: ctx.restaurantId,
       },
     });
     await this.autoTranslate.translateCategory({
-      companyId: ctx.companyId,
+
       restaurantId: ctx.restaurantId,
       categoryId: created.id,
       sourceNameChanged: true,
@@ -148,7 +148,7 @@ export class CategoriesService {
     }
     const updated = await this.prisma.category.update({ where: { id }, data });
     await this.autoTranslate.translateCategory({
-      companyId: ctx.companyId,
+
       restaurantId: ctx.restaurantId,
       categoryId: updated.id,
       sourceNameChanged,

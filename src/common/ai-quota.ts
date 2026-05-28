@@ -3,36 +3,24 @@ import { PrismaService } from "../prisma/prisma.service";
 
 export const FREE_AI_IMAGE_QUOTA = 5;
 
-export function isPaidActive(company: { plan: string | null; subscriptionStatus: string | null }): boolean {
-  return company.subscriptionStatus === "ACTIVE" && !!company.plan && company.plan !== "FREE";
+export function isPaidActive(r: { plan: string | null; subscriptionStatus: string | null }): boolean {
+  return r.subscriptionStatus === "ACTIVE" && !!r.plan && r.plan !== "FREE";
 }
 
 // Atomically reserve a free-quota slot before doing the expensive Gemini call.
 // Paid plans skip the reservation (no quota); free plans bump the counter
 // inside a conditional updateMany so two concurrent requests can't both pass
 // the limit check before either has incremented.
-//
-// Per-restaurant billing (2026-05-28): "paid" is now decided by the
-// restaurant's OWN plan/subscriptionStatus. Falls back to the parent Company
-// for restaurants whose own fields are still null (pre-deploy state).
 export async function consumeAiImageQuota(
   prisma: PrismaService,
   restaurantId: string,
 ): Promise<{ isPaid: boolean }> {
   const restaurant = await prisma.restaurant.findUnique({
     where: { id: restaurantId },
-    select: {
-      plan: true,
-      subscriptionStatus: true,
-      company: { select: { plan: true, subscriptionStatus: true } },
-    },
+    select: { plan: true, subscriptionStatus: true },
   });
   if (!restaurant) throw new ForbiddenException("Not found");
-
-  const paid =
-    isPaidActive({ plan: restaurant.plan, subscriptionStatus: restaurant.subscriptionStatus }) ||
-    isPaidActive(restaurant.company);
-  if (paid) return { isPaid: true };
+  if (isPaidActive(restaurant)) return { isPaid: true };
 
   const reserved = await prisma.restaurant.updateMany({
     where: { id: restaurantId, imageGenerationsUsed: { lt: FREE_AI_IMAGE_QUOTA } },
@@ -58,17 +46,9 @@ export async function refundAiImageUsage(prisma: PrismaService, restaurantId: st
 export async function getAiImageUsage(prisma: PrismaService, restaurantId: string) {
   const restaurant = await prisma.restaurant.findUnique({
     where: { id: restaurantId },
-    select: {
-      imageGenerationsUsed: true,
-      plan: true,
-      subscriptionStatus: true,
-      company: { select: { plan: true, subscriptionStatus: true } },
-    },
+    select: { imageGenerationsUsed: true, plan: true, subscriptionStatus: true },
   });
-  const paid = restaurant
-    ? isPaidActive({ plan: restaurant.plan, subscriptionStatus: restaurant.subscriptionStatus }) ||
-      isPaidActive(restaurant.company)
-    : false;
+  const paid = restaurant ? isPaidActive(restaurant) : false;
   return {
     aiImagesUsed: restaurant?.imageGenerationsUsed ?? 0,
     aiImagesLimit: paid ? null : FREE_AI_IMAGE_QUOTA,

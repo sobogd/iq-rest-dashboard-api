@@ -83,7 +83,7 @@ function calcDiscountTotal(items: unknown, orderDiscount?: Discount | null): num
 }
 
 interface Ctx {
-  companyId: string;
+
   restaurantId: string;
 }
 
@@ -155,7 +155,7 @@ export class OrdersService {
       });
       const dailyNumber = (last?.dailyNumber ?? 0) + 1;
       const data: Prisma.OrderUncheckedCreateInput = {
-        companyId: ctx.companyId,
+
         restaurantId: ctx.restaurantId,
         items: items as Prisma.InputJsonValue,
         total: new Prisma.Decimal(total),
@@ -301,7 +301,6 @@ export class OrdersService {
         try {
           created = await tx.order.create({
             data: {
-              companyId: order.companyId,
               restaurantId: order.restaurantId,
               items: taken as unknown as Prisma.InputJsonValue,
               total: new Prisma.Decimal(createdTotal),

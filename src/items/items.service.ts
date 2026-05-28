@@ -41,7 +41,7 @@ interface ItemUpsert {
 }
 
 interface Ctx {
-  companyId: string;
+
   restaurantId: string;
 }
 
@@ -85,12 +85,12 @@ export class ItemsService {
         diets: body.diets ?? [],
         options: (validatedOptions as Prisma.InputJsonValue) ?? Prisma.JsonNull,
         sortOrder: (max._max.sortOrder ?? -1) + 1,
-        companyId: ctx.companyId,
+
         restaurantId: ctx.restaurantId,
       },
     });
     await this.autoTranslate.translateItem({
-      companyId: ctx.companyId,
+
       restaurantId: ctx.restaurantId,
       itemId: created.id,
       sourceNameChanged: true,
@@ -156,7 +156,7 @@ export class ItemsService {
       body.description !== undefined && (body.description ?? null) !== (item.description ?? null);
     const updated = await this.prisma.item.update({ where: { id }, data });
     await this.autoTranslate.translateItem({
-      companyId: ctx.companyId,
+
       restaurantId: ctx.restaurantId,
       itemId: updated.id,
       sourceNameChanged,

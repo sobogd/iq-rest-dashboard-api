@@ -34,15 +34,15 @@ export class DevicesController {
   @UseGuards(AuthGuard)
   @Get()
   list(@Req() req: AuthedRequest) {
-    return this.devices.list(req.authUser.companyId);
+    return this.devices.list(req.authUser.restaurantId);
   }
 
   @UseGuards(AuthGuard)
   @Post()
   create(@Req() req: AuthedRequest, @Body() dto: CreateDeviceDto) {
     return this.devices.create({
-      companyId: req.authUser.companyId,
       restaurantId: req.authUser.restaurantId,
+      userId: req.authUser.userId,
       name: dto.name,
       type: dto.type,
       overrideRestaurantId: dto.restaurantId,
@@ -52,19 +52,19 @@ export class DevicesController {
   @UseGuards(AuthGuard)
   @Post(":id/regenerate-code")
   regenerate(@Req() req: AuthedRequest, @Param("id") id: string) {
-    return this.devices.regenerateCode(req.authUser.companyId, id);
+    return this.devices.regenerateCode(req.authUser.restaurantId, id);
   }
 
   @UseGuards(AuthGuard)
   @Post(":id/revoke")
   revoke(@Req() req: AuthedRequest, @Param("id") id: string) {
-    return this.devices.revoke(req.authUser.companyId, id);
+    return this.devices.revoke(req.authUser.restaurantId, id);
   }
 
   @UseGuards(AuthGuard)
   @Delete(":id")
   remove(@Req() req: AuthedRequest, @Param("id") id: string) {
-    return this.devices.remove(req.authUser.companyId, id);
+    return this.devices.remove(req.authUser.restaurantId, id);
   }
 
   // ── Public: pair (no auth — the 6-digit code is the credential) ─────────
@@ -86,14 +86,10 @@ export class DevicesController {
   @UseGuards(DeviceGuard)
   @Get("bootstrap")
   async bootstrap(@Req() req: DevicedRequest) {
-    const { restaurantId, companyId } = req.device;
+    const { restaurantId } = req.device;
     const isReservation = req.device.type === "RESERVATION";
     const [restaurant, categories, items, tables, orders, reservations] = await Promise.all([
       this.prisma.restaurant.findUnique({ where: { id: restaurantId } }),
-      // Include disabled (isActive:false) categories/items: staff devices must
-      // be able to add hidden dishes to in-house orders, matching the full
-      // admin orders picker. The `isActive` flag rides along so the UI can grey
-      // them out. Public menu (soqrmenuweb) is separate and still hides these.
       this.prisma.category.findMany({
         where: { restaurantId, deletedAt: null },
         orderBy: { sortOrder: "asc" },
@@ -106,14 +102,9 @@ export class DevicesController {
         where: { restaurantId, isActive: true, deletedAt: null },
         orderBy: { sortOrder: "asc" },
       }),
-      // Reservation kiosk doesn't render the orders board — skip the heavier
-      // orders query for it. Kitchen/waiter still need it.
       isReservation
         ? Promise.resolve([])
-        : // Kitchen/waiter boards only render open orders — skip the
-          // completed/cancelled tail so the bootstrap payload stays small.
-          this.orders.list({ companyId, restaurantId }, undefined, undefined, undefined, true),
-      // Only the reservation kiosk needs the bookings list.
+        : this.orders.list({ restaurantId }, undefined, undefined, undefined, true),
       isReservation
         ? this.prisma.reservation.findMany({
             where: { restaurantId },
@@ -147,7 +138,6 @@ export class DevicesController {
     return {
       deviceId: req.device.deviceId,
       restaurantId: req.device.restaurantId,
-      companyId: req.device.companyId,
       type: req.device.type,
     };
   }
@@ -182,7 +172,7 @@ export class DevicesController {
       throw new BadRequestException("items must be an array");
     }
     return this.orders.patch(
-      { companyId: req.device.companyId, restaurantId: req.device.restaurantId },
+      { restaurantId: req.device.restaurantId },
       id,
       { items: body.items, total: body.total, discount: body.discount },
     );

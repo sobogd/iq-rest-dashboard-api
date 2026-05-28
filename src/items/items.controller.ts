@@ -28,8 +28,8 @@ import { consumeAiImageQuota, refundAiImageUsage } from "../common/ai-quota";
 import { PrismaService } from "../prisma/prisma.service";
 
 function ctx(req: Request) {
-  const { companyId, restaurantId } = (req as AuthedRequest).authUser;
-  return { companyId, restaurantId };
+  const { restaurantId } = (req as AuthedRequest).authUser;
+  return { restaurantId };
 }
 
 @Controller("items")
@@ -85,7 +85,7 @@ export class ItemsController {
       prompt?: string;
     },
   ) {
-    const { companyId, restaurantId } = (req as AuthedRequest).authUser;
+    const { restaurantId } = (req as AuthedRequest).authUser;
     const { name, description, categoryName, accentColor, sourceImageUrl, prompt: userPrompt } = body;
     if (!userPrompt?.trim() && !name?.trim()) {
       throw new BadRequestException("Name or prompt is required");
@@ -155,7 +155,7 @@ export class ItemsController {
       const b64 = await callGeminiImage({ prompt, aspectRatio: "1:1", sourceImageWebpB64: sourceB64 });
       const url = await uploadGeneratedImage(b64, {
         pathPrefix: "temp",
-        companyId,
+        restaurantId,
         filenamePrefix: "ai",
         resize: { w: 1500, h: 1500, fit: "inside" },
         quality: 90,

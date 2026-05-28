@@ -1,10 +1,9 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { PrismaService } from "../prisma/prisma.service";
 import { AutoTranslateService } from "../auto-translate/auto-translate.service";
 import { isReservedSlug, slugify } from "../common/reserved-slugs";
-import { isPaidActive } from "../common/ai-quota";
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 const reservationDaySchema = z
@@ -157,87 +156,32 @@ export class RestaurantService {
     return this.prisma.restaurant.findUnique({ where: { id: restaurantId } });
   }
 
-  /** All restaurants for company. Soft-hide non-primary on FREE plan. */
-  async listForCompany(companyId: string) {
-    const [company, restaurants] = await Promise.all([
-      this.prisma.company.findUnique({
-        where: { id: companyId },
-        select: { plan: true, subscriptionStatus: true },
-      }),
-      this.prisma.restaurant.findMany({
-        where: { companyId },
-        orderBy: { createdAt: "asc" },
-      }),
-    ]);
-    const paid = company ? isPaidActive(company) : false;
-    if (!paid && restaurants.length > 1) {
-      return restaurants.slice(0, 1);
-    }
-    return restaurants;
-  }
-
   /**
    * Switcher list: every restaurant the user is attached to via RestaurantUser
    * (the flat-access model). Each row is tagged `owned`:
    *   - addedBy === null → row created during signup/seed/admin-side ownership
    *     → owned: true → billing/delete UI visible
    *   - addedBy !== null → row created by someone else attaching this user
-   *     (legacy grant or new /admin/restaurants/:id/users flow)
    *     → owned: false → billing/delete UI hidden
-   *
-   * Falls back to the legacy Company + RestaurantAccess path when the user has
-   * no RestaurantUser rows yet (mid-rollout edge case).
    */
-  async listForUser(userId: string, ownCompanyId: string) {
-    const [company, rus] = await Promise.all([
-      this.prisma.company.findUnique({
-        where: { id: ownCompanyId },
-        select: { plan: true, subscriptionStatus: true },
-      }),
-      this.prisma.restaurantUser.findMany({
-        where: { userId },
-        select: { addedBy: true, restaurant: true },
-        orderBy: { addedAt: "asc" },
-      }),
-    ]);
-    const paid = company ? isPaidActive(company) : false;
-
-    if (rus.length > 0) {
-      const ownedRows = rus.filter((ru) => ru.addedBy === null).map((ru) => ru.restaurant);
-      const grantedRows = rus.filter((ru) => ru.addedBy !== null).map((ru) => ru.restaurant);
-      const ownedList = !paid && ownedRows.length > 1 ? ownedRows.slice(0, 1) : ownedRows;
-      return [
-        ...ownedList.map((r) => ({ ...r, owned: true })),
-        ...grantedRows.map((r) => ({ ...r, owned: false })),
-      ];
-    }
-
-    // Legacy fallback — read Company + RestaurantAccess.
-    const [owned, granted] = await Promise.all([
-      this.prisma.restaurant.findMany({
-        where: { companyId: ownCompanyId },
-        orderBy: { createdAt: "asc" },
-      }),
-      this.prisma.restaurantAccess.findMany({
-        where: { userId },
-        select: { restaurant: true },
-        orderBy: { restaurant: { createdAt: "asc" } },
-      }),
-    ]);
-    const ownedList = !paid && owned.length > 1 ? owned.slice(0, 1) : owned;
-    return [
-      ...ownedList.map((r) => ({ ...r, owned: true })),
-      ...granted.map((g) => ({ ...g.restaurant, owned: false })),
-    ];
+  async listForUser(userId: string) {
+    const rus = await this.prisma.restaurantUser.findMany({
+      where: { userId },
+      select: { addedBy: true, restaurant: true },
+      orderBy: { addedAt: "asc" },
+    });
+    const owned = rus.filter((ru) => ru.addedBy === null).map((ru) => ({ ...ru.restaurant, owned: true }));
+    const granted = rus.filter((ru) => ru.addedBy !== null).map((ru) => ({ ...ru.restaurant, owned: false }));
+    return [...owned, ...granted];
   }
 
   /**
-   * Update active restaurant. If no restaurant exists for the company, create
-   * one (legacy onboarding path — pre-seed users hit POST /restaurant before
-   * any restaurant exists). When creating, also creates the RestaurantUser
-   * row so the new flat-access model resolves the new restaurant correctly.
+   * Update active restaurant. If no restaurant is attached yet, create one
+   * (legacy onboarding path — pre-seed users hit POST /restaurant before any
+   * restaurant exists). When creating, also creates the RestaurantUser row
+   * so the flat-access model resolves the new restaurant correctly.
    */
-  async upsert(companyId: string, userId: string, restaurantId: string | null, raw: Record<string, unknown>) {
+  async upsert(userId: string, restaurantId: string | null, raw: Record<string, unknown>) {
     const input = pickFields(raw);
 
     const { reservationSchedule, ...rest } = input;
@@ -249,9 +193,13 @@ export class RestaurantService {
           : { reservationSchedule: reservationSchedule as Prisma.InputJsonValue };
 
     if (restaurantId) {
-      const existing = await this.prisma.restaurant.findFirst({
-        where: { id: restaurantId, companyId },
+      // Ownership check: the user must be attached to this restaurant.
+      const membership = await this.prisma.restaurantUser.findUnique({
+        where: { restaurantId_userId: { restaurantId, userId } },
+        select: { id: true },
       });
+      if (!membership) throw new NotFoundException("Restaurant not found");
+      const existing = await this.prisma.restaurant.findUnique({ where: { id: restaurantId } });
       if (!existing) throw new NotFoundException("Restaurant not found");
       const updated = await this.prisma.restaurant.update({
         where: { id: existing.id },
@@ -282,7 +230,6 @@ export class RestaurantService {
 
     const slug = rest.slug || (await this.uniqueSlug(rest.title || "rest"));
     const createData: Prisma.RestaurantUncheckedCreateInput = {
-      companyId,
       title: rest.title || "",
       slug,
       currency: rest.currency || "EUR",
@@ -312,63 +259,53 @@ export class RestaurantService {
    * the 14-day trial (set via OnboardingSeedService). Subsequent restaurants
    * require their own subscription before they can be used.
    *
-   * The legacy "multi_restaurant_requires_paid" gate is preserved during the
-   * Company-deprecation transition: a user cannot start a second-restaurant
-   * flow unless their first/active subscription is paid. Once Company is
-   * dropped this check shifts to "at least one paid restaurant".
+   * Per-restaurant billing (post-Company-drop): anyone can create as many
+   * restaurants as they want; each starts FREE with no trial and needs its
+   * own subscription before paid features (devices, etc.) unlock.
    *
-   * If duplicateFromId is given, copies categories+items+settings from that
-   * restaurant (same company). Tables/orders/reservations/page_views are NOT
-   * copied — physical/historical.
+   * If duplicateFromId is given, copies categories+items+settings from any
+   * restaurant the user is attached to. Tables/orders/reservations/page_views
+   * are NOT copied — physical/historical.
    */
   async createForCompany(
-    companyId: string,
     userId: string,
     body: { name: string; duplicateFromId?: string | null },
   ) {
-    const company = await this.prisma.company.findUnique({
-      where: { id: companyId },
-      select: { plan: true, subscriptionStatus: true },
-    });
-    if (!company) throw new NotFoundException("Company not found");
-    if (!isPaidActive(company)) {
-      throw new ForbiddenException("multi_restaurant_requires_paid");
-    }
-
     const name = (body.name || "").trim();
     if (!name) throw new BadRequestException("Name required");
 
     const slug = await this.uniqueSlug(name);
 
-    let source: Awaited<ReturnType<typeof this.prisma.restaurant.findUnique>> | null = null;
+    // duplicateFromId / fallback are picked from restaurants the user actually
+    // OWNS (RestaurantUser.addedBy === null). Granted-as-manager restaurants
+    // are excluded so a contractor can't seed a brand-new restaurant from a
+    // venue they only manage on behalf of someone else.
+    const ownedRus = await this.prisma.restaurantUser.findMany({
+      where: { userId, addedBy: null },
+      select: { restaurant: true },
+      orderBy: { addedAt: "asc" },
+    });
+    const ownedRestaurants = ownedRus.map((ru) => ru.restaurant);
+
+    let source: typeof ownedRestaurants[number] | null = null;
     if (body.duplicateFromId) {
-      source = await this.prisma.restaurant.findFirst({
-        where: { id: body.duplicateFromId, companyId },
-      });
+      source = ownedRestaurants.find((r) => r.id === body.duplicateFromId) ?? null;
       if (!source) throw new BadRequestException("Source restaurant not found");
     }
 
-    // Carry settings forward from source (if duplicating) or use the
-    // current primary's languages/currency as a sane starting default.
-    const fallback = source
-      ? null
-      : await this.prisma.restaurant.findFirst({
-          where: { companyId },
-          orderBy: { createdAt: "asc" },
-        });
+    const fallback = source ? null : ownedRestaurants[0] ?? null;
     const baseSettings = source ?? fallback;
 
     // Duplicate carries the source restaurant's full language list. Blank
-    // inherits only the company's working language (primary's defaultLanguage)
-    // so the user can add more from /settings/languages — copying every
-    // language would force translations on a menu that doesn't exist yet.
+    // inherits only the primary's defaultLanguage so the user can add more
+    // from /settings/languages — copying every language would force
+    // translations on a menu that doesn't exist yet.
     const blankDefaultLang = baseSettings?.defaultLanguage ?? "en";
     const languages = source ? source.languages : [blankDefaultLang];
     const defaultLanguage = source ? source.defaultLanguage : blankDefaultLang;
 
     const created = await this.prisma.restaurant.create({
       data: {
-        companyId,
         title: name,
         slug,
         currency: baseSettings?.currency ?? "EUR",
@@ -379,9 +316,9 @@ export class RestaurantService {
         paymentMethods: baseSettings?.paymentMethods ?? ["cash", "card"],
         timezone: baseSettings?.timezone ?? "UTC",
         startedFromScratch: !source,
-        // Per-restaurant billing: a NEW (second+) restaurant starts FREE
+        // Per-restaurant billing: a new (second+) restaurant starts FREE
         // without a trial. plan/billingCycle/stripeSubscriptionId/trialEndsAt
-        // all stay null — owner must check out separately for this restaurant.
+        // stay null — owner must check out separately for this restaurant.
         plan: "FREE",
         subscriptionStatus: "INACTIVE",
       },
@@ -394,14 +331,14 @@ export class RestaurantService {
     });
 
     if (source) {
-      await this.duplicateMenu(source.id, created.id, created.companyId);
+      await this.duplicateMenu(source.id, created.id);
     }
 
     return created;
   }
 
   /** Copy categories + items (with translations) from one restaurant to another. */
-  private async duplicateMenu(fromRestaurantId: string, toRestaurantId: string, toCompanyId: string) {
+  private async duplicateMenu(fromRestaurantId: string, toRestaurantId: string) {
     const cats = await this.prisma.category.findMany({
       where: { restaurantId: fromRestaurantId, deletedAt: null },
       orderBy: { sortOrder: "asc" },
@@ -416,7 +353,6 @@ export class RestaurantService {
           sortOrder: c.sortOrder,
           isActive: c.isActive,
           isGroup: c.isGroup,
-          companyId: toCompanyId,
           restaurantId: toRestaurantId,
         },
       });
@@ -439,8 +375,6 @@ export class RestaurantService {
       orderBy: { sortOrder: "asc" },
     });
     for (const it of items) {
-      // Orphaned items (categoryId null after a category delete) aren't part of
-      // any category tree — skip them when cloning the menu.
       if (!it.categoryId) continue;
       const newCatId = idMap.get(it.categoryId);
       if (!newCatId) continue;
@@ -458,19 +392,24 @@ export class RestaurantService {
           isActive: it.isActive,
           isExample: it.isExample,
           categoryId: newCatId,
-          companyId: toCompanyId,
           restaurantId: toRestaurantId,
         },
       });
     }
   }
 
-  async deleteForCompany(companyId: string, restaurantId: string) {
-    const restaurant = await this.prisma.restaurant.findFirst({
-      where: { id: restaurantId, companyId },
+  /** Delete a restaurant the user is attached to. Blocks if it's their last
+   *  one — every user must keep at least one restaurant attached. */
+  async deleteForUser(userId: string, restaurantId: string) {
+    const membership = await this.prisma.restaurantUser.findUnique({
+      where: { restaurantId_userId: { restaurantId, userId } },
+      select: { id: true, addedBy: true },
     });
-    if (!restaurant) throw new NotFoundException();
-    const remaining = await this.prisma.restaurant.count({ where: { companyId } });
+    if (!membership) throw new NotFoundException();
+    if (membership.addedBy !== null) {
+      throw new BadRequestException("Cannot delete a restaurant you don't own");
+    }
+    const remaining = await this.prisma.restaurantUser.count({ where: { userId } });
     if (remaining <= 1) {
       throw new BadRequestException("Cannot delete the last restaurant");
     }

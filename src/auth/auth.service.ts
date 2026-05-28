@@ -131,32 +131,19 @@ export class AuthService implements OnModuleDestroy {
     } else {
       isNewUser = true;
       try {
-        await this.prisma.$transaction(async (tx) => {
-          const user = await tx.user.create({
-            data: {
-              email,
-              otp: otpHash,
-              otpExpiresAt,
-              otpAttempts: 0,
-              preferredLocale: normalizedLocale,
-              ...pending,
-            },
-          });
-          const company = await tx.company.create({
-            data: {
-              name: this.i18n.bundle(locale).companyDefaultName,
-              onboardingStep: 0,
-              trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
-            },
-          });
-          await tx.userCompany.create({
-            data: { userId: user.id, companyId: company.id, role: "owner" },
-          });
+        await this.prisma.user.create({
+          data: {
+            email,
+            otp: otpHash,
+            otpExpiresAt,
+            otpAttempts: 0,
+            preferredLocale: normalizedLocale,
+            ...pending,
+          },
         });
       } catch (e) {
         if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
           // Race: another request created the user. Update OTP on existing.
-          // No company is leaked because the transaction rolled the create back.
           await this.prisma.user.update({
             where: { email },
             data: {
@@ -227,23 +214,16 @@ export class AuthService implements OnModuleDestroy {
         pendingRestaurantName: true,
         pendingCurrency: true,
         preferredLocale: true,
-        companies: {
-          take: 1,
-          select: {
-            company: {
-              select: { id: true, restaurants: { take: 1, select: { id: true } } },
-            },
-          },
-        },
+        restaurantUsers: { take: 1, select: { id: true } },
       },
     });
     if (!user?.pendingCuisine) return false;
 
-    const company = user.companies[0]?.company;
-    const hasRestaurant = (company?.restaurants?.length ?? 0) > 0;
+    const hasRestaurant = user.restaurantUsers.length > 0;
 
-    // No company or restaurant already exists → context is moot; clear pending and exit.
-    if (!company || hasRestaurant || !isCuisineKey(user.pendingCuisine)) {
+    // Restaurant already attached or cuisine no longer valid → context is moot;
+    // clear pending and exit so the seed doesn't run again on next login.
+    if (hasRestaurant || !isCuisineKey(user.pendingCuisine)) {
       await this.prisma.user.update({
         where: { id: userId },
         data: { pendingCuisine: null, pendingRestaurantName: null, pendingCurrency: null },
@@ -254,7 +234,6 @@ export class AuthService implements OnModuleDestroy {
     let seeded = false;
     try {
       await this.seed.seedTemplate({
-        companyId: company.id,
         userId,
         cuisine: user.pendingCuisine,
         restaurantName: user.pendingRestaurantName || "My Restaurant",
@@ -286,7 +265,7 @@ export class AuthService implements OnModuleDestroy {
 
     const user = await this.prisma.user.findUnique({
       where: { email },
-      include: { companies: { take: 1, include: { company: true } } },
+      include: { restaurantUsers: { take: 1, select: { id: true } } },
     });
 
     // Demo account: skip all OTP validation when the fixed code is given. The
@@ -354,15 +333,16 @@ export class AuthService implements OnModuleDestroy {
     // If signup-flow context was attached on send-otp, seed the template restaurant now.
     const seeded = await this.applyPendingAndMaybeSeed(user.id, null);
 
-    const companyEdge = user.companies[0];
-    // Seeder flips company.onboardingStep to 3 on success — derive locally to avoid a re-query.
-    const finalStep = seeded ? 3 : companyEdge?.company?.onboardingStep ?? 0;
+    // Onboarding is "complete" the moment the user has at least one attached
+    // restaurant — either freshly seeded above or from a prior session.
+    const hasRestaurant = seeded || user.restaurantUsers.length > 0;
+    const finalStep = hasRestaurant ? 3 : 0;
     const legacyDashboard = isLegacyEmail(email);
     return {
       token,
       userId: user.id,
       onboardingStep: finalStep,
-      isNewUser: !companyEdge?.company || finalStep < 3,
+      isNewUser: !hasRestaurant,
       legacyDashboard,
     };
   }
@@ -377,7 +357,7 @@ export class AuthService implements OnModuleDestroy {
     cookieValue: string | undefined,
     email: string | undefined,
     impersonation?: { adminOrigSession?: string; adminOrigEmail?: string },
-  ): Promise<{ userId: string; companyId: string; email: string; onboardingStep: number; legacyDashboard: boolean }> {
+  ): Promise<{ userId: string; email: string; onboardingStep: number; legacyDashboard: boolean }> {
     if (!cookieValue || !email) throw new UnauthorizedException();
     const adminEmail = impersonation?.adminOrigEmail;
     const adminSession = impersonation?.adminOrigSession;
@@ -400,13 +380,8 @@ export class AuthService implements OnModuleDestroy {
       if (!adminSessionValid) throw new UnauthorizedException();
     }
 
-    const user = await this.prisma.user.findUnique({
-      where: { email },
-      include: { companies: { take: 1, include: { company: { select: { id: true, onboardingStep: true, createdAt: true } } } } },
-    });
+    const user = await this.prisma.user.findUnique({ where: { email } });
     if (!user) throw new UnauthorizedException();
-    const company = user.companies[0]?.company;
-    if (!company) throw new UnauthorizedException();
 
     if (!isImpersonating) {
       const tokenHash = hashSessionToken(cookieValue);
@@ -422,9 +397,11 @@ export class AuthService implements OnModuleDestroy {
 
     return {
       userId: user.id,
-      companyId: company.id,
       email: user.email,
-      onboardingStep: company.onboardingStep,
+      // Onboarding flag lived on Company; the new model treats every account
+      // as "complete" — the SPA derives onboarding state from whether the
+      // active restaurant has a menu yet.
+      onboardingStep: 3,
       legacyDashboard: isLegacyEmail(user.email),
     };
   }
@@ -507,34 +484,19 @@ export class AuthService implements OnModuleDestroy {
     const email = payload.email.trim().toLowerCase();
     const displayName = payload.name || email.split("@")[0];
 
+    void displayName;
     let user = await this.prisma.user.findUnique({
       where: { email },
-      include: { companies: { take: 1, include: { company: { select: { id: true, onboardingStep: true, createdAt: true } } } } },
+      include: { restaurantUsers: { take: 1, select: { id: true } } },
     });
     let isNewUser = false;
 
     if (!user) {
       isNewUser = true;
       const normalizedLocale = locale ? this.i18n.urlLocale(locale) : null;
-      const created = await this.prisma.$transaction(async (tx) => {
-        const newUser = await tx.user.create({
-          data: { email, ...(normalizedLocale ? { preferredLocale: normalizedLocale } : {}) },
-        });
-        const company = await tx.company.create({
-          data: {
-            name: displayName,
-            onboardingStep: 0,
-            trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
-          },
-        });
-        await tx.userCompany.create({
-          data: { userId: newUser.id, companyId: company.id, role: "owner" },
-        });
-        return newUser;
-      });
-      user = await this.prisma.user.findUnique({
-        where: { id: created.id },
-        include: { companies: { take: 1, include: { company: { select: { id: true, onboardingStep: true, createdAt: true } } } } },
+      user = await this.prisma.user.create({
+        data: { email, ...(normalizedLocale ? { preferredLocale: normalizedLocale } : {}) },
+        include: { restaurantUsers: { take: 1, select: { id: true } } },
       });
     }
 
@@ -562,7 +524,8 @@ export class AuthService implements OnModuleDestroy {
     });
 
     const seeded = await this.applyPendingAndMaybeSeed(user.id, locale ?? null);
-    const finalStep = seeded ? 3 : user.companies[0]?.company?.onboardingStep ?? 0;
+    const hasRestaurant = seeded || user.restaurantUsers.length > 0;
+    const finalStep = hasRestaurant ? 3 : 0;
     const legacyDashboard = isLegacyEmail(email);
     return { token, userId: user.id, email, onboardingStep: finalStep, isNewUser, legacyDashboard };
   }
@@ -620,36 +583,20 @@ export class AuthService implements OnModuleDestroy {
     if (!identity.email) throw new BadRequestException("Invalid Apple token");
 
     const email = identity.email.trim().toLowerCase();
-    const companyName = (displayName && displayName.trim()) || email.split("@")[0];
+    void displayName;
 
     let user = await this.prisma.user.findUnique({
       where: { email },
-      include: { companies: { take: 1, include: { company: { select: { id: true, onboardingStep: true, createdAt: true } } } } },
+      include: { restaurantUsers: { take: 1, select: { id: true } } },
     });
     let isNewUser = false;
 
     if (!user) {
       isNewUser = true;
       const normalizedLocale = locale ? this.i18n.urlLocale(locale) : null;
-      const created = await this.prisma.$transaction(async (tx) => {
-        const newUser = await tx.user.create({
-          data: { email, ...(normalizedLocale ? { preferredLocale: normalizedLocale } : {}) },
-        });
-        const company = await tx.company.create({
-          data: {
-            name: companyName,
-            onboardingStep: 0,
-            trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
-          },
-        });
-        await tx.userCompany.create({
-          data: { userId: newUser.id, companyId: company.id, role: "owner" },
-        });
-        return newUser;
-      });
-      user = await this.prisma.user.findUnique({
-        where: { id: created.id },
-        include: { companies: { take: 1, include: { company: { select: { id: true, onboardingStep: true, createdAt: true } } } } },
+      user = await this.prisma.user.create({
+        data: { email, ...(normalizedLocale ? { preferredLocale: normalizedLocale } : {}) },
+        include: { restaurantUsers: { take: 1, select: { id: true } } },
       });
     }
 
@@ -674,7 +621,8 @@ export class AuthService implements OnModuleDestroy {
     });
 
     const seeded = await this.applyPendingAndMaybeSeed(user.id, locale ?? null);
-    const finalStep = seeded ? 3 : user.companies[0]?.company?.onboardingStep ?? 0;
+    const hasRestaurant = seeded || user.restaurantUsers.length > 0;
+    const finalStep = hasRestaurant ? 3 : 0;
     const legacyDashboard = isLegacyEmail(email);
     return { token, userId: user.id, email, onboardingStep: finalStep, isNewUser, legacyDashboard };
   }

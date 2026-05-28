@@ -20,8 +20,8 @@ import { OrdersService } from "./orders.service";
 import { CreateOrderDto, PatchOrderDto, SplitOrderDto } from "./dto";
 
 function ctx(req: Request) {
-  const { companyId, restaurantId } = (req as AuthedRequest).authUser;
-  return { companyId, restaurantId };
+  const { restaurantId } = (req as AuthedRequest).authUser;
+  return { restaurantId };
 }
 
 // Cookie-session admin OR a paired WAITER device. KITCHEN/RESERVATION tokens

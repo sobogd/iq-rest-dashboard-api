@@ -23,9 +23,9 @@ const REFERRER_HOST_REGEX =
 const SESSION_COOKIE = "iqr_session";
 const EMAIL_COOKIE = "iqr_email";
 
-// support@iq-rest.com — internal admin company. Skip recording events from
+// support@iq-rest.com — internal admin user. Skip recording events from
 // this account so support browsing dashboards/menus does not pollute metrics.
-const ADMIN_COMPANY_IDS = new Set(["cmi5yzq5v0000vx0hbjmbks82"]);
+const ADMIN_USER_IDS = new Set(["cmi5yzq780001vx0hiz2ti7fo"]);
 
 function readCookie(req: Request, name: string): string | undefined {
   const fromParser = (req.cookies as Record<string, string | undefined> | undefined)?.[name];
@@ -156,25 +156,23 @@ export class UsageController {
       return;
     }
 
-    let companyId: string | null = null;
     let userId: string | null = null;
     const sessionCookie = readCookie(req, SESSION_COOKIE);
     const emailCookie = readCookie(req, EMAIL_COOKIE);
     if (sessionCookie && emailCookie) {
       try {
         const user = await this.auth.resolveSession(sessionCookie, emailCookie, {});
-        companyId = user.companyId;
         userId = user.userId;
       } catch {
         // Invalid session — record as anonymous.
       }
     }
 
-    if (companyId && ADMIN_COMPANY_IDS.has(companyId)) return;
+    if (userId && ADMIN_USER_IDS.has(userId)) return;
 
     // Per-restaurant analytics: capture the active restaurant from the
-    // dashboard cookie so admin "by restaurant" filters work without joining
-    // through Company. Anonymous events leave both fields null.
+    // dashboard cookie so admin "by restaurant" filters work directly.
+    // Anonymous events leave both userId and restaurantId null.
     const ACTIVE_RESTAURANT_COOKIE = "iqr_active_restaurant_id";
     const activeRestaurantId = readCookie(req, ACTIVE_RESTAURANT_COOKIE) ?? null;
 
@@ -190,7 +188,6 @@ export class UsageController {
         is_google_ads: isGoogleAds,
         is_facebook_ads: isFacebookAds,
         is_search: isSearch,
-        companyId,
         userId,
         restaurantId: activeRestaurantId,
         ip,

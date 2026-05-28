@@ -17,13 +17,10 @@ export class SupportController {
   @Get()
   async list(@Req() req: Request) {
     // Per-restaurant chat: every user attached to the active restaurant
-    // sees the same thread. Falls back to legacy companyId for messages
-    // written before restaurantId was populated.
-    const { companyId, restaurantId } = (req as AuthedRequest).authUser;
+    // sees the same thread.
+    const { restaurantId } = (req as AuthedRequest).authUser;
     return this.prisma.supportMessage.findMany({
-      where: {
-        OR: [{ restaurantId }, { restaurantId: null, companyId }],
-      },
+      where: { restaurantId },
       orderBy: { createdAt: "asc" },
       select: { id: true, message: true, isAdmin: true, createdAt: true },
     });
@@ -31,19 +28,19 @@ export class SupportController {
 
   @Post()
   async create(@Req() req: Request, @Body() body: { message?: string }) {
-    const { companyId, restaurantId, userId } = (req as AuthedRequest).authUser;
+    const { restaurantId, userId } = (req as AuthedRequest).authUser;
     const text = (body.message ?? "").trim();
     if (!text) throw new BadRequestException("Message is required");
     if (text.length > 2000) throw new BadRequestException("Message too long");
 
     const created = await this.prisma.supportMessage.create({
-      data: { message: text, companyId, restaurantId, userId, isAdmin: false },
+      data: { message: text, restaurantId, userId, isAdmin: false },
       select: { id: true, message: true, isAdmin: true, createdAt: true },
     });
 
     // Fire-and-forget admin notification — SMTP errors must not bubble
     // back to the writer, the message itself was already persisted.
-    void this.notifyAdmin({ companyId, userId, text }).catch((err) => {
+    void this.notifyAdmin({ restaurantId, userId, text }).catch((err) => {
       this.logger.warn(`admin support notification failed: ${err?.message ?? err}`);
     });
 
@@ -51,20 +48,20 @@ export class SupportController {
   }
 
   private async notifyAdmin({
-    companyId,
+    restaurantId,
     userId,
     text,
   }: {
-    companyId: string;
+    restaurantId: string;
     userId: string;
     text: string;
   }): Promise<void> {
-    const [company, user] = await Promise.all([
-      this.prisma.company.findUnique({ where: { id: companyId }, select: { name: true } }),
+    const [restaurant, user] = await Promise.all([
+      this.prisma.restaurant.findUnique({ where: { id: restaurantId }, select: { title: true } }),
       this.prisma.user.findUnique({ where: { id: userId }, select: { email: true } }),
     ]);
     await this.mail.sendAdminSupportNewMessageNotification({
-      companyName: company?.name ?? "Unnamed company",
+      companyName: restaurant?.title ?? "Unnamed restaurant",
       userEmail: user?.email ?? "unknown",
       message: text,
     });

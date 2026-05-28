@@ -1,7 +1,8 @@
 // One-shot backfill script: fills missing translations on every item and
-// category for the companies whose primary user emails are passed as args.
-// Locked translations are preserved (runMenuBackfill calls runItem with
-// sourceNameChanged=false → only empty target fields get filled).
+// category for the users whose emails are passed as args (across every
+// restaurant they own or manage). Locked translations are preserved
+// (runMenuBackfill calls runItem with sourceNameChanged=false → only empty
+// target fields get filled).
 //
 // Usage:  node dist/scripts/backfill-translations.js email1 email2 ...
 
@@ -23,36 +24,37 @@ async function main() {
 
   const users = await prisma.user.findMany({
     where: { email: { in: emails } },
-    select: { email: true, companies: { select: { companyId: true } } },
+    select: {
+      email: true,
+      restaurantUsers: {
+        select: { restaurant: { select: { id: true } } },
+        orderBy: { addedAt: "asc" },
+      },
+    },
   });
 
-  const resolved: { email: string; companyId: string }[] = [];
+  const resolved: { email: string; restaurantIds: string[] }[] = [];
   for (const email of emails) {
     const u = users.find((x) => x.email === email);
     if (!u) {
       console.error(`[skip] no user for ${email}`);
       continue;
     }
-    const companyId = u.companies[0]?.companyId;
-    if (!companyId) {
-      console.error(`[skip] ${email} has no company`);
+    const restaurantIds = u.restaurantUsers.map((ru) => ru.restaurant.id);
+    if (restaurantIds.length === 0) {
+      console.error(`[skip] ${email} has no restaurants`);
       continue;
     }
-    resolved.push({ email, companyId });
+    resolved.push({ email, restaurantIds });
   }
 
-  console.log(`Resolved ${resolved.length}/${emails.length} companies. Starting backfill...`);
-  for (const { email, companyId } of resolved) {
+  console.log(`Resolved ${resolved.length}/${emails.length} users. Starting backfill...`);
+  for (const { email, restaurantIds } of resolved) {
     const t0 = Date.now();
-    console.log(`→ ${email} (${companyId})`);
+    console.log(`→ ${email} (${restaurantIds.length} restaurants)`);
     try {
-      const restaurants = await prisma.restaurant.findMany({
-        where: { companyId },
-        select: { id: true },
-        orderBy: { createdAt: "asc" },
-      });
-      for (const r of restaurants) {
-        await autoTranslate.runMenuBackfill(r.id);
+      for (const id of restaurantIds) {
+        await autoTranslate.runMenuBackfill(id);
       }
       console.log(`✓ ${email} done in ${Math.round((Date.now() - t0) / 1000)}s`);
     } catch (err) {

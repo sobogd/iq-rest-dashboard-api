@@ -28,7 +28,7 @@ export class UploadController {
     if (![...IMAGE_TYPES, ...VIDEO_TYPES].includes(file.mimetype)) {
       throw new BadRequestException("Invalid file type");
     }
-    const { companyId } = (req as AuthedRequest).authUser;
+    const { restaurantId } = (req as AuthedRequest).authUser;
 
     const isImage = IMAGE_TYPES.includes(file.mimetype);
     const isGif = file.mimetype === "image/gif";
@@ -56,7 +56,7 @@ export class UploadController {
 
     const timestamp = Date.now();
     const randomStr = Math.random().toString(36).substring(2, 8);
-    const key = s3Key("temp", companyId, `${timestamp}-${randomStr}.${extension}`);
+    const key = s3Key("temp", restaurantId, `${timestamp}-${randomStr}.${extension}`);
 
     await s3Client.send(
       new PutObjectCommand({

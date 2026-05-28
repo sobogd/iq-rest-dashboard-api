@@ -63,7 +63,6 @@ export class AutoTranslateService {
    * Errors are swallowed (logged) — a Gemini hiccup must not break a save.
    */
   async translateItem(opts: {
-    companyId: string;
     restaurantId: string;
     itemId: string;
     sourceNameChanged: boolean;
@@ -77,7 +76,6 @@ export class AutoTranslateService {
   }
 
   async translateCategory(opts: {
-    companyId: string;
     restaurantId: string;
     categoryId: string;
     sourceNameChanged: boolean;
@@ -98,7 +96,6 @@ export class AutoTranslateService {
   async runMenuBackfill(restaurantId: string) {
     const restaurant = await this.prisma.restaurant.findUnique({
       where: { id: restaurantId },
-      select: { companyId: true },
     });
     if (!restaurant) return;
     const [items, cats] = await Promise.all([
@@ -108,7 +105,6 @@ export class AutoTranslateService {
     await parallelLimit(items, 5, async (it) => {
       try {
         await this.runItem({
-          companyId: restaurant.companyId,
           restaurantId,
           itemId: it.id,
           sourceNameChanged: false,
@@ -121,7 +117,6 @@ export class AutoTranslateService {
     await parallelLimit(cats, 5, async (c) => {
       try {
         await this.runCategory({
-          companyId: restaurant.companyId,
           restaurantId,
           categoryId: c.id,
           sourceNameChanged: false,
@@ -224,7 +219,6 @@ export class AutoTranslateService {
     sourceNameChanged,
     sourceDescriptionChanged,
   }: {
-    companyId: string;
     restaurantId: string;
     itemId: string;
     sourceNameChanged: boolean;
@@ -364,7 +358,6 @@ export class AutoTranslateService {
     categoryId,
     sourceNameChanged,
   }: {
-    companyId: string;
     restaurantId: string;
     categoryId: string;
     sourceNameChanged: boolean;

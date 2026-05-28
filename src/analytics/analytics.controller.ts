@@ -104,8 +104,9 @@ export class AnalyticsController {
   constructor(private readonly prisma: PrismaService) {}
 
   /** Public-menu analytics + order analytics for the authenticated user's
-   *  active restaurant (default) or company-wide when scope=all. Period is
-   *  a calendar month (YYYY-MM); defaults to the current UTC month. */
+   *  active restaurant (default) or every restaurant they own/manage when
+   *  scope=all. Period is a calendar month (YYYY-MM); defaults to the current
+   *  UTC month. */
   @Get("stats")
   @UseGuards(AuthGuard)
   async stats(
@@ -113,29 +114,40 @@ export class AnalyticsController {
     @Query("period") periodRaw = "",
     @Query("scope") scope = "",
   ) {
-    const { companyId, restaurantId, viaGrant } = (req as AuthedRequest).authUser;
+    const { userId, restaurantId, viaGrant } = (req as AuthedRequest).authUser;
     const { period, startDate, endDate, prevStartDate, prevEndDate } = monthWindow(periodRaw);
 
-    // scope=all aggregates across every restaurant of the company. A user
-    // viewing a restaurant granted to them via cross-company access must never
-    // see the owner's other restaurants — force single-restaurant scope.
+    // scope=all aggregates across every restaurant the user can access. A
+    // user viewing a restaurant granted to them must never see the owner's
+    // other restaurants — force single-restaurant scope in that case.
     const isAll = scope === "all" && !viaGrant;
-    // Resolve restaurant filter once for all queries.
-    const pvScopeWhere = isAll
-      ? Prisma.sql`"companyId" = ${companyId}`
-      : Prisma.sql`"restaurantId" = ${restaurantId}`;
-    const orderScopeWhere = isAll
-      ? Prisma.sql`"companyId" = ${companyId}`
-      : Prisma.sql`"restaurantId" = ${restaurantId}`;
 
-    const company = await this.prisma.company.findUnique({
-      where: { id: companyId },
-      select: { createdAt: true },
+    // Resolve the user's full restaurant set once. Each row is owned (addedBy
+    // == null) or attached as manager (addedBy != null). For scope=all we
+    // only aggregate the owned set so a manager's stats don't leak into the
+    // owner's totals (and vice versa).
+    const ownedRus = await this.prisma.restaurantUser.findMany({
+      where: { userId, addedBy: null },
+      select: { restaurant: { select: { id: true, createdAt: true } } },
+      orderBy: { addedAt: "asc" },
     });
+    const ownedRestaurantIds = ownedRus.map((ru) => ru.restaurant.id);
+    const scopeRestaurantIds = isAll && ownedRestaurantIds.length
+      ? ownedRestaurantIds
+      : [restaurantId];
 
-    const pvFilterWhere = isAll
-      ? { companyId, createdAt: { gte: startDate, lt: endDate } }
-      : { restaurantId, createdAt: { gte: startDate, lt: endDate } };
+    // Resolve restaurant filter once for all queries.
+    const pvScopeWhere = Prisma.sql`"restaurantId" = ANY(${scopeRestaurantIds}::text[])`;
+    const orderScopeWhere = Prisma.sql`"restaurantId" = ANY(${scopeRestaurantIds}::text[])`;
+
+    // Synthetic "account created at" — earliest restaurant the user owns,
+    // falls back to now when they own none (manager-only access).
+    const accountCreatedAt = ownedRus[0]?.restaurant.createdAt ?? new Date();
+
+    const pvFilterWhere = {
+      restaurantId: { in: scopeRestaurantIds },
+      createdAt: { gte: startDate, lt: endDate },
+    };
 
     const [
       totalViews,
@@ -184,9 +196,11 @@ export class AnalyticsController {
       `,
     ]);
 
-    const orderFilterWhere = isAll
-      ? { companyId, isExample: false, status: "completed" }
-      : { restaurantId, isExample: false, status: "completed" };
+    const orderFilterWhere = {
+      restaurantId: { in: scopeRestaurantIds },
+      isExample: false,
+      status: "completed",
+    };
 
     const orderQueries = await Promise.all([
           this.prisma.$queryRaw<{ revenue: string | null; orders: bigint }[]>`
@@ -244,7 +258,7 @@ export class AnalyticsController {
             select: { items: true, restaurantId: true },
           }),
           this.prisma.restaurant.findMany({
-            where: isAll ? { companyId } : { id: restaurantId },
+            where: { id: { in: scopeRestaurantIds } },
             select: { id: true, defaultLanguage: true, paymentMethods: true },
           }),
           // Revenue + order count grouped by the payment method chosen at close.
@@ -378,7 +392,7 @@ export class AnalyticsController {
     return {
       period,
       scope: isAll ? "all" : "restaurant",
-      companyCreatedAt: company?.createdAt?.toISOString() ?? new Date().toISOString(),
+      accountCreatedAt: accountCreatedAt.toISOString(),
       totalViews,
       totalScans,
       byDay: densifyByDay(byDayRaw, startDate, endDate),

@@ -20,16 +20,13 @@ const PAIR_RATE_MAX = 20;
 
 export interface DeviceAuth {
   deviceId: string;
-  companyId: string;
   restaurantId: string;
   type: "KITCHEN" | "WAITER" | "RESERVATION";
 }
 
 @Injectable()
 export class DevicesService {
-  // Per-IP throttle for the public pair endpoint. The endpoint itself is also
-  // covered by the global ThrottlerGuard, but this tighter limit specifically
-  // prevents 999_999-code enumeration attacks.
+  // Per-IP throttle for the public pair endpoint.
   private pairAttempts = new Map<string, { count: number; resetAt: number }>();
 
   constructor(
@@ -41,50 +38,30 @@ export class DevicesService {
   //
   // Kitchen / waiter devices are a paid feature. Trial counts as paid (the
   // 14-day trial gives the customer full access to evaluate the product).
-  //
-  // Per-restaurant billing (2026-05-28): the gate checks the RESTAURANT's
-  // own plan/trial first; falls back to the legacy Company fields when the
-  // restaurant fields haven't been populated yet.
+  // Per-restaurant billing — the gate checks the restaurant's own plan/trial.
 
-  private async assertRestaurantMayUseDevices(
-    companyId: string,
-    restaurantId: string,
-  ): Promise<void> {
-    const [restaurant, company] = await Promise.all([
-      this.prisma.restaurant.findUnique({
-        where: { id: restaurantId },
-        select: { plan: true, subscriptionStatus: true, trialEndsAt: true },
-      }),
-      this.prisma.company.findUnique({
-        where: { id: companyId },
-        select: { plan: true, subscriptionStatus: true, trialEndsAt: true },
-      }),
-    ]);
-    if (!restaurant && !company) throw new NotFoundException("Restaurant not found");
-    const isRestaurantPaid =
-      !!restaurant &&
+  private async assertRestaurantMayUseDevices(restaurantId: string): Promise<void> {
+    const restaurant = await this.prisma.restaurant.findUnique({
+      where: { id: restaurantId },
+      select: { plan: true, subscriptionStatus: true, trialEndsAt: true },
+    });
+    if (!restaurant) throw new NotFoundException("Restaurant not found");
+    const isPaid =
       restaurant.subscriptionStatus === "ACTIVE" &&
       !!restaurant.plan &&
       restaurant.plan !== "FREE";
-    const isCompanyPaid =
-      !!company &&
-      company.subscriptionStatus === "ACTIVE" &&
-      !!company.plan &&
-      company.plan !== "FREE";
-    const restaurantInTrial =
-      !!restaurant && restaurant.trialEndsAt !== null && restaurant.trialEndsAt > new Date();
-    const companyInTrial =
-      !!company && company.trialEndsAt !== null && company.trialEndsAt > new Date();
-    if (!isRestaurantPaid && !isCompanyPaid && !restaurantInTrial && !companyInTrial) {
+    const inTrial =
+      restaurant.trialEndsAt !== null && restaurant.trialEndsAt > new Date();
+    if (!isPaid && !inTrial) {
       throw new ForbiddenException("devices_require_paid_plan");
     }
   }
 
   // ─── Admin: list ──────────────────────────────────────────────────────────
 
-  async list(companyId: string) {
+  async list(restaurantId: string) {
     const devices = await this.prisma.device.findMany({
-      where: { companyId },
+      where: { restaurantId },
       orderBy: { createdAt: "asc" },
       include: { pairingCode: true },
     });
@@ -110,39 +87,39 @@ export class DevicesService {
   // ─── Admin: create ─────────────────────────────────────────────────────────
 
   async create(input: {
-    companyId: string;
     restaurantId: string; // active restaurant from AuthGuard
+    userId: string;
     name: string;
     type: "KITCHEN" | "WAITER" | "RESERVATION";
     overrideRestaurantId?: string;
   }) {
     let restaurantId = input.restaurantId;
     if (input.overrideRestaurantId && input.overrideRestaurantId !== restaurantId) {
-      const ok = await this.prisma.restaurant.findFirst({
-        where: { id: input.overrideRestaurantId, companyId: input.companyId },
+      // Override only allowed for restaurants the user is attached to.
+      const membership = await this.prisma.restaurantUser.findUnique({
+        where: { restaurantId_userId: { restaurantId: input.overrideRestaurantId, userId: input.userId } },
         select: { id: true },
       });
-      if (!ok) throw new BadRequestException("Invalid restaurant");
+      if (!membership) throw new BadRequestException("Invalid restaurant");
       restaurantId = input.overrideRestaurantId;
     }
-    await this.assertRestaurantMayUseDevices(input.companyId, restaurantId);
+    await this.assertRestaurantMayUseDevices(restaurantId);
 
     const device = await this.prisma.device.create({
       data: {
-        companyId: input.companyId,
         restaurantId,
         name: input.name.trim(),
         type: input.type,
       },
     });
     const code = await this.issuePairingCode(device.id);
-    return { ...(await this.detail(input.companyId, device.id)), pendingCode: code };
+    return { ...(await this.detail(restaurantId, device.id)), pendingCode: code };
   }
 
   // ─── Admin: regenerate pairing code ───────────────────────────────────────
 
-  async regenerateCode(companyId: string, deviceId: string) {
-    const device = await this.requireOwned(companyId, deviceId);
+  async regenerateCode(restaurantId: string, deviceId: string) {
+    const device = await this.requireOwned(restaurantId, deviceId);
     if (device.status === "REVOKED") {
       throw new BadRequestException("Device is revoked");
     }
@@ -151,8 +128,6 @@ export class DevicesService {
   }
 
   private async issuePairingCode(deviceId: string) {
-    // Collisions are extremely unlikely (10^6 space, very short TTL) but the
-    // PK on `code` would error out; retry up to 5 times before giving up.
     const expiresAt = new Date(Date.now() + PAIRING_CODE_TTL_MS);
     for (let i = 0; i < 5; i++) {
       const code = generatePairingCode();
@@ -175,16 +150,13 @@ export class DevicesService {
 
   // ─── Admin: revoke ─────────────────────────────────────────────────────────
 
-  async revoke(companyId: string, deviceId: string) {
-    const device = await this.requireOwned(companyId, deviceId);
+  async revoke(restaurantId: string, deviceId: string) {
+    const device = await this.requireOwned(restaurantId, deviceId);
     await this.prisma.device.update({
       where: { id: deviceId },
       data: { status: "REVOKED", tokenVersion: { increment: 1 } },
     });
-    // Tear down pending pairing code so the slot can't be used.
     await this.prisma.pairingCode.deleteMany({ where: { deviceId } });
-    // Push to the tablet via the existing orders SSE so it reacts within
-    // ~100ms instead of waiting for the next REST request to return 401.
     await this.events.publish({
       action: "device-revoked",
       restaurantId: device.restaurantId,
@@ -195,10 +167,8 @@ export class DevicesService {
 
   // ─── Admin: delete ─────────────────────────────────────────────────────────
 
-  async remove(companyId: string, deviceId: string) {
-    const device = await this.requireOwned(companyId, deviceId);
-    // Same effect as revoke for any currently-connected client (since the
-    // token check below sees no row → 401).
+  async remove(restaurantId: string, deviceId: string) {
+    const device = await this.requireOwned(restaurantId, deviceId);
     await this.prisma.device.delete({ where: { id: deviceId } });
     await this.events.publish({
       action: "device-revoked",
@@ -208,15 +178,15 @@ export class DevicesService {
     return { ok: true };
   }
 
-  private async requireOwned(companyId: string, deviceId: string) {
-    const device = await this.prisma.device.findFirst({ where: { id: deviceId, companyId } });
+  private async requireOwned(restaurantId: string, deviceId: string) {
+    const device = await this.prisma.device.findFirst({ where: { id: deviceId, restaurantId } });
     if (!device) throw new NotFoundException("Device not found");
     return device;
   }
 
-  async detail(companyId: string, deviceId: string) {
+  async detail(restaurantId: string, deviceId: string) {
     const device = await this.prisma.device.findFirst({
-      where: { id: deviceId, companyId },
+      where: { id: deviceId, restaurantId },
       include: { pairingCode: true },
     });
     if (!device) throw new NotFoundException("Device not found");
@@ -256,7 +226,7 @@ export class DevicesService {
 
     // Re-check the gate at consume time too — a customer who downgraded after
     // generating a code shouldn't be able to spin up new tablets.
-    await this.assertRestaurantMayUseDevices(row.device.companyId, row.device.restaurantId);
+    await this.assertRestaurantMayUseDevices(row.device.restaurantId);
 
     const now = new Date();
     const [device] = await this.prisma.$transaction([
@@ -289,8 +259,6 @@ export class DevicesService {
 
   private rateLimitPair(ip: string): boolean {
     const now = Date.now();
-    // Drop expired entries so the Map can't grow unbounded with every distinct
-    // IP that ever hit /pair. Cheap full sweep, gated on size.
     if (this.pairAttempts.size > 1000) {
       for (const [k, v] of this.pairAttempts) {
         if (now > v.resetAt) this.pairAttempts.delete(k);
@@ -314,7 +282,6 @@ export class DevicesService {
       where: { id: payload.d },
       select: {
         id: true,
-        companyId: true,
         restaurantId: true,
         type: true,
         status: true,
@@ -326,7 +293,6 @@ export class DevicesService {
     if (device.tokenVersion !== payload.v) throw new UnauthorizedException();
     return {
       deviceId: device.id,
-      companyId: device.companyId,
       restaurantId: device.restaurantId,
       type: device.type,
     };
@@ -342,17 +308,8 @@ export class DevicesService {
   }
 
   // ─── Super-admin: global page reload ──────────────────────────────────────
-  //
-  // Fans a force-reload event out to every paired device across every
-  // company. Used by Claude (superadmin) after deploying an urgent
-  // bundle fix — staff doesn't have to walk around their floors and
-  // refresh tabs by hand. Each restaurantId in the system gets its own
-  // publish; the SSE channel is restaurant-scoped so a single broadcast
-  // can't fan out to everyone at once.
 
   async reloadAllGlobal(): Promise<{ devices: number; restaurants: number }> {
-    // Only restaurants that actually host a paired ACTIVE device — no
-    // point waking PG NOTIFY for empty rooms.
     const rows = await this.prisma.device.findMany({
       where: { status: "ACTIVE" },
       select: { restaurantId: true },

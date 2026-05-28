@@ -266,7 +266,6 @@ export class AuthController {
         authenticated: true,
         email: user.email,
         userId: user.userId,
-        companyId: user.companyId,
         onboardingStep: user.onboardingStep,
         legacyDashboard: user.legacyDashboard,
         impersonatedBy: adminOrigEmail || null,

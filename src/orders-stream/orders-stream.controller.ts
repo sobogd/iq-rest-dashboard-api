@@ -19,9 +19,8 @@ import { OrdersEventsService } from "./orders-events.service";
 // bidirectional channel, so WebSocket overhead is unjustified. EventSource
 // gives us native auto-reconnect for free.
 //
-// Why scoped to restaurantId (not companyId): one company will own many
-// restaurants soon (see multi-restaurant plan). Scoping now keeps the wire
-// format stable and avoids cross-restaurant leaks.
+// Scoped to restaurantId so cross-restaurant order events never leak — each
+// paired tablet or dashboard tab subscribes to exactly one restaurant stream.
 //
 // Liveness: a typed `ping` event is sent every 15s. The client uses it as a
 // watchdog — if no ping/order is observed for ~45s the client force-
@@ -46,11 +45,13 @@ export class OrdersStreamController {
   ): Promise<void> {
     if (!restaurantId) throw new BadRequestException("restaurantId required");
 
-    const restaurant = await this.prisma.restaurant.findUnique({
-      where: { id: restaurantId },
-      select: { companyId: true },
+    // Per-restaurant model: a user can only subscribe to a restaurant they're
+    // attached to via RestaurantUser.
+    const membership = await this.prisma.restaurantUser.findUnique({
+      where: { restaurantId_userId: { restaurantId, userId: req.authUser.userId } },
+      select: { id: true },
     });
-    if (!restaurant || restaurant.companyId !== req.authUser.companyId) {
+    if (!membership) {
       throw new BadRequestException("invalid restaurant");
     }
 

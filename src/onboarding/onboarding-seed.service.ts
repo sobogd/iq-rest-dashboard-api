@@ -300,11 +300,6 @@ export class OnboardingSeedService {
         });
       }
 
-      // Link the new restaurant to the user via the flat-access model.
-      await tx.restaurantUser.create({
-        data: { restaurantId: restaurant.id, userId, addedBy: null },
-      });
-
       return { restaurantId: restaurant.id };
     });
   }

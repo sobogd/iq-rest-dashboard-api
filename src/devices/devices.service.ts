@@ -41,19 +41,41 @@ export class DevicesService {
   //
   // Kitchen / waiter devices are a paid feature. Trial counts as paid (the
   // 14-day trial gives the customer full access to evaluate the product).
+  //
+  // Per-restaurant billing (2026-05-28): the gate checks the RESTAURANT's
+  // own plan/trial first; falls back to the legacy Company fields when the
+  // restaurant fields haven't been populated yet.
 
-  private async assertCompanyMayUseDevices(companyId: string): Promise<void> {
-    const company = await this.prisma.company.findUnique({
-      where: { id: companyId },
-      select: { plan: true, subscriptionStatus: true, trialEndsAt: true },
-    });
-    if (!company) throw new NotFoundException("Company not found");
-    const isPaid =
+  private async assertRestaurantMayUseDevices(
+    companyId: string,
+    restaurantId: string,
+  ): Promise<void> {
+    const [restaurant, company] = await Promise.all([
+      this.prisma.restaurant.findUnique({
+        where: { id: restaurantId },
+        select: { plan: true, subscriptionStatus: true, trialEndsAt: true },
+      }),
+      this.prisma.company.findUnique({
+        where: { id: companyId },
+        select: { plan: true, subscriptionStatus: true, trialEndsAt: true },
+      }),
+    ]);
+    if (!restaurant && !company) throw new NotFoundException("Restaurant not found");
+    const isRestaurantPaid =
+      !!restaurant &&
+      restaurant.subscriptionStatus === "ACTIVE" &&
+      !!restaurant.plan &&
+      restaurant.plan !== "FREE";
+    const isCompanyPaid =
+      !!company &&
       company.subscriptionStatus === "ACTIVE" &&
       !!company.plan &&
       company.plan !== "FREE";
-    const inTrial = company.trialEndsAt !== null && company.trialEndsAt > new Date();
-    if (!isPaid && !inTrial) {
+    const restaurantInTrial =
+      !!restaurant && restaurant.trialEndsAt !== null && restaurant.trialEndsAt > new Date();
+    const companyInTrial =
+      !!company && company.trialEndsAt !== null && company.trialEndsAt > new Date();
+    if (!isRestaurantPaid && !isCompanyPaid && !restaurantInTrial && !companyInTrial) {
       throw new ForbiddenException("devices_require_paid_plan");
     }
   }
@@ -94,8 +116,6 @@ export class DevicesService {
     type: "KITCHEN" | "WAITER" | "RESERVATION";
     overrideRestaurantId?: string;
   }) {
-    await this.assertCompanyMayUseDevices(input.companyId);
-
     let restaurantId = input.restaurantId;
     if (input.overrideRestaurantId && input.overrideRestaurantId !== restaurantId) {
       const ok = await this.prisma.restaurant.findFirst({
@@ -105,6 +125,7 @@ export class DevicesService {
       if (!ok) throw new BadRequestException("Invalid restaurant");
       restaurantId = input.overrideRestaurantId;
     }
+    await this.assertRestaurantMayUseDevices(input.companyId, restaurantId);
 
     const device = await this.prisma.device.create({
       data: {
@@ -235,7 +256,7 @@ export class DevicesService {
 
     // Re-check the gate at consume time too — a customer who downgraded after
     // generating a code shouldn't be able to spin up new tablets.
-    await this.assertCompanyMayUseDevices(row.device.companyId);
+    await this.assertRestaurantMayUseDevices(row.device.companyId, row.device.restaurantId);
 
     const now = new Date();
     const [device] = await this.prisma.$transaction([

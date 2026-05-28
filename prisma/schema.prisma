@@ -27,10 +27,21 @@ model User {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
+  // Billing — Stripe customer is per-human, not per-account. Multiple
+  // per-restaurant subscriptions sit under this single customer.
+  stripeCustomerId String? @unique
+
+  // Email-campaign tracking — emails go to the human, not the venue.
+  emailsSent        Json?
+  emailUnsubscribed Boolean   @default(false)
+  upsellShownAt     DateTime?
+  reminderSentAt    DateTime?
+
   companies       UserCompany[]
   supportMessages SupportMessage[]
   sessions        Session[]
   restaurantAccess RestaurantAccess[]
+  restaurantUsers  RestaurantUser[]
 
   @@map("users")
 }
@@ -199,6 +210,18 @@ model Restaurant {
   orderAddressEnabled    Boolean @default(false)
   orderMode              String  @default("internal") // "internal" | "whatsapp" | "both"
 
+  // Per-restaurant billing (moved from Company). Each restaurant carries its
+  // own subscription — creating a second restaurant means a second sub.
+  // `trialEndsAt` is populated only for a user's FIRST restaurant; subsequent
+  // restaurants start as FREE without trial.
+  plan                  Plan?
+  billingCycle          BillingCycle?
+  subscriptionStatus    SubscriptionStatus  @default(INACTIVE)
+  currentPeriodEnd      DateTime?
+  paymentProcessing     Boolean             @default(false)
+  stripeSubscriptionId  String?             @unique
+  trialEndsAt           DateTime?
+
   company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
   tables       Table[]
   reservations Reservation[]
@@ -207,10 +230,33 @@ model Restaurant {
   items        Item[]
   pageViews    PageView[]
   access       RestaurantAccess[]
+  restaurantUsers RestaurantUser[]
+  supportMessages SupportMessage[]
 
   @@index([companyId])
   @@index([slug])
   @@map("restaurants")
+}
+
+// User ↔ Restaurant many-to-many. Replaces the Company-derived ownership model.
+// Anyone in this table has full access to the restaurant (no role hierarchy —
+// kept intentionally flat per product decision 2026-05-28).
+model RestaurantUser {
+  id           String   @id @default(cuid())
+  restaurantId String
+  userId       String
+  addedAt      DateTime @default(now())
+  // userId of whoever invited this user (null for the first user, who is the
+  // restaurant's creator).
+  addedBy      String?
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([restaurantId, userId])
+  @@index([userId])
+  @@index([restaurantId])
+  @@map("restaurant_users")
 }
 
 // Cross-company restaurant grant. Lets a contractor user manage a restaurant
@@ -407,17 +453,23 @@ model PageView {
 }
 
 model SupportMessage {
-  id        String   @id @default(cuid())
-  companyId String
-  userId    String
-  message   String   @db.Text
-  isAdmin   Boolean  @default(false)
-  createdAt DateTime @default(now())
+  id           String   @id @default(cuid())
+  companyId    String
+  userId       String
+  // Per-restaurant chat (all users attached to the restaurant see it).
+  // Nullable during the Company-deprecation transition; backfilled from
+  // companyId via "first restaurant of company" mapping.
+  restaurantId String?
+  message      String   @db.Text
+  isAdmin      Boolean  @default(false)
+  createdAt    DateTime @default(now())
 
-  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  restaurant Restaurant? @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
 
   @@index([companyId, createdAt])
+  @@index([restaurantId, createdAt])
   @@map("support_messages")
 }
 
@@ -436,7 +488,9 @@ model UsageEvent {
   platform  String?  // 'ios' / 'android' / 'windows' / 'macos' / 'linux' / 'other'
   gclid     String?  // SSR-only — landing page on gclid arrival
   ad_params String?  // JSON: { kw, term, campaign } from ValueTrack params
-  companyId String?  // server-side from iqr_session cookie when logged in
+  companyId String?  // legacy — kept during Company-deprecation transition
+  userId    String?  // server-side from iqr_session cookie when logged in
+  restaurantId String? // server-side from iqr_active_restaurant_id cookie when present
   ip        String?  // anonymized client IP (IPv4 last octet zeroed, IPv6 truncated to /64)
   is_google_ads Boolean @default(false) // arrival via gclid/gbraid/wbraid on the URL
   is_facebook_ads Boolean @default(false) // arrival via fbclid on the URL (Facebook/Instagram ads)
@@ -446,6 +500,8 @@ model UsageEvent {
   @@index([at])
   @@index([event, at])
   @@index([companyId, at])
+  @@index([userId, at])
+  @@index([restaurantId, at])
   @@index([gclid])
   @@index([is_google_ads, at])
   @@index([is_facebook_ads, at])

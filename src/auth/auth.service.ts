@@ -270,6 +270,7 @@ export class AuthService implements OnModuleDestroy {
     try {
       await this.seed.seedTemplate({
         companyId: company.id,
+        userId,
         cuisine: user.pendingCuisine,
         restaurantName: user.pendingRestaurantName || "My Restaurant",
         currency: user.pendingCurrency || "EUR",

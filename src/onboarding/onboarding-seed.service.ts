@@ -73,15 +73,20 @@ export class OnboardingSeedService {
 
   /** Seed a brand-new company with a template restaurant + categories + items + tables + sample
    *  orders and reservations. All seeded records are flagged isExample=true so the user can wipe
-   *  them with one click. Idempotent: aborts if the company already has a restaurant. */
+   *  them with one click. Idempotent: aborts if the company already has a restaurant.
+   *
+   *  Also creates a RestaurantUser row linking the owner so the new per-restaurant
+   *  membership model has the right initial state, and copies the parent Company's
+   *  plan/trial fields onto the new Restaurant (per-restaurant billing migration). */
   async seedTemplate(params: {
     companyId: string;
+    userId: string;
     cuisine: CuisineKey;
     restaurantName: string;
     currency: string;
     locale: string | null | undefined;
   }): Promise<{ restaurantId: string } | null> {
-    const { companyId, cuisine, restaurantName, currency } = params;
+    const { companyId, userId, cuisine, restaurantName, currency } = params;
     const seedLocale = pickSeedLocale(params.locale);
     const template = cuisineTemplates[cuisine];
 
@@ -91,8 +96,32 @@ export class OnboardingSeedService {
     });
     if (existing) {
       this.logger.log(`Skipping seed for company ${companyId} — restaurant already exists`);
+      // Still ensure the RestaurantUser row exists so an already-seeded
+      // restaurant is reachable via the new flat-access model.
+      await this.prisma.restaurantUser.upsert({
+        where: { restaurantId_userId: { restaurantId: existing.id, userId } },
+        create: { restaurantId: existing.id, userId },
+        update: {},
+      }).catch(() => undefined);
       return null;
     }
+
+    // Mirror the Company's billing/trial fields onto the new restaurant — for
+    // a brand-new account this seeds the same 14-day trial that signup wrote
+    // onto the Company. Subsequent restaurants (via restaurant.controller) do
+    // NOT inherit a trial — only the FIRST restaurant gets one.
+    const parentCompany = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      select: {
+        plan: true,
+        billingCycle: true,
+        subscriptionStatus: true,
+        currentPeriodEnd: true,
+        paymentProcessing: true,
+        stripeSubscriptionId: true,
+        trialEndsAt: true,
+      },
+    });
 
     const subtitle = pick(template.subtitle, seedLocale);
     // Always offer English as a secondary language; deduplicate in case seedLocale is en.
@@ -118,6 +147,28 @@ export class OnboardingSeedService {
           ordersEnabled: true,
           reservationsEnabled: true,
           ...(template.backgroundUrl ? { source: template.backgroundUrl, backgroundType: "image" } : {}),
+          // Inherit billing/trial from the Company (this is the FIRST restaurant
+          // of the account → it gets the 14-day trial that was written on
+          // Company at signup).
+          ...(parentCompany ? {
+            plan: parentCompany.plan,
+            billingCycle: parentCompany.billingCycle,
+            subscriptionStatus: parentCompany.subscriptionStatus,
+            currentPeriodEnd: parentCompany.currentPeriodEnd,
+            paymentProcessing: parentCompany.paymentProcessing,
+            stripeSubscriptionId: parentCompany.stripeSubscriptionId,
+            trialEndsAt: parentCompany.trialEndsAt,
+          } : {}),
+        },
+      });
+
+      // Link the seeding user to the new restaurant via the flat access model.
+      // addedBy is null for the FIRST user of a restaurant (the creator).
+      await tx.restaurantUser.create({
+        data: {
+          restaurantId: restaurant.id,
+          userId,
+          addedBy: null,
         },
       });
 

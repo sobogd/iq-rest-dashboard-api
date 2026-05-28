@@ -16,9 +16,14 @@ export class SupportController {
 
   @Get()
   async list(@Req() req: Request) {
-    const { companyId } = (req as AuthedRequest).authUser;
+    // Per-restaurant chat: every user attached to the active restaurant
+    // sees the same thread. Falls back to legacy companyId for messages
+    // written before restaurantId was populated.
+    const { companyId, restaurantId } = (req as AuthedRequest).authUser;
     return this.prisma.supportMessage.findMany({
-      where: { companyId },
+      where: {
+        OR: [{ restaurantId }, { restaurantId: null, companyId }],
+      },
       orderBy: { createdAt: "asc" },
       select: { id: true, message: true, isAdmin: true, createdAt: true },
     });
@@ -26,13 +31,13 @@ export class SupportController {
 
   @Post()
   async create(@Req() req: Request, @Body() body: { message?: string }) {
-    const { companyId, userId } = (req as AuthedRequest).authUser;
+    const { companyId, restaurantId, userId } = (req as AuthedRequest).authUser;
     const text = (body.message ?? "").trim();
     if (!text) throw new BadRequestException("Message is required");
     if (text.length > 2000) throw new BadRequestException("Message too long");
 
     const created = await this.prisma.supportMessage.create({
-      data: { message: text, companyId, userId, isAdmin: false },
+      data: { message: text, companyId, restaurantId, userId, isAdmin: false },
       select: { id: true, message: true, isAdmin: true, createdAt: true },
     });
 

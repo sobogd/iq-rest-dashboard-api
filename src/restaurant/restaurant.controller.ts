@@ -51,7 +51,7 @@ export class RestaurantController {
 
   @Post("restaurant")
   async upsert(@Req() req: Request, @Body() body: Record<string, unknown>) {
-    const { companyId, restaurantId } = (req as AuthedRequest).authUser;
+    const { userId, companyId, restaurantId } = (req as AuthedRequest).authUser;
     const existing = restaurantId
       ? await this.prisma.restaurant.findUnique({ where: { id: restaurantId } })
       : await this.prisma.restaurant.findFirst({ where: { companyId } });
@@ -69,7 +69,7 @@ export class RestaurantController {
         }
       }
     }
-    return this.svc.upsert(companyId, existing?.id ?? null, body);
+    return this.svc.upsert(companyId, userId, existing?.id ?? null, body);
   }
 
   @Put("restaurant/languages")
@@ -77,8 +77,8 @@ export class RestaurantController {
     @Req() req: Request,
     @Body() body: { languages: string[]; defaultLanguage: string },
   ) {
-    const { companyId, restaurantId } = (req as AuthedRequest).authUser;
-    return this.svc.upsert(companyId, restaurantId, {
+    const { userId, companyId, restaurantId } = (req as AuthedRequest).authUser;
+    return this.svc.upsert(companyId, userId, restaurantId, {
       languages: body.languages,
       defaultLanguage: body.defaultLanguage,
     });
@@ -152,21 +152,45 @@ export class RestaurantController {
 
   @Get("restaurant/subscription")
   async subscription(@Req() req: Request) {
+    // Per-restaurant billing: read the subscription state from the ACTIVE
+    // restaurant. Falls back to the parent Company's fields when the
+    // restaurant row has nothing yet (newly-created restaurants pre-deploy
+    // backfill, or schema-mismatch corner cases).
     const { companyId, restaurantId, viaGrant } = (req as AuthedRequest).authUser;
-    const company = await this.prisma.company.findUnique({ where: { id: companyId } });
-    if (!company) return null;
+    const [restaurant, company] = await Promise.all([
+      this.prisma.restaurant.findUnique({
+        where: { id: restaurantId },
+        select: {
+          plan: true,
+          billingCycle: true,
+          subscriptionStatus: true,
+          currentPeriodEnd: true,
+          paymentProcessing: true,
+          trialEndsAt: true,
+          stripeSubscriptionId: true,
+        },
+      }),
+      this.prisma.company.findUnique({ where: { id: companyId } }),
+    ]);
+    if (!restaurant && !company) return null;
     const usage = await getAiImageUsage(this.prisma, restaurantId);
+    const plan = restaurant?.plan ?? company?.plan ?? null;
+    const billingCycle = restaurant?.billingCycle ?? company?.billingCycle ?? null;
+    const subscriptionStatus = restaurant?.subscriptionStatus ?? company?.subscriptionStatus ?? "INACTIVE";
+    const currentPeriodEnd = restaurant?.currentPeriodEnd ?? company?.currentPeriodEnd ?? null;
+    const paymentProcessing = restaurant?.paymentProcessing ?? company?.paymentProcessing ?? false;
+    const trialEndsAt = restaurant?.trialEndsAt ?? company?.trialEndsAt ?? null;
     return {
-      plan: company.plan,
-      billingCycle: company.billingCycle,
-      subscriptionStatus: company.subscriptionStatus,
-      currentPeriodEnd: company.currentPeriodEnd?.toISOString() ?? null,
-      paymentProcessing: company.paymentProcessing,
-      trialEndsAt: company.trialEndsAt?.toISOString() ?? null,
+      plan,
+      billingCycle,
+      subscriptionStatus,
+      currentPeriodEnd: currentPeriodEnd ? currentPeriodEnd.toISOString() : null,
+      paymentProcessing,
+      trialEndsAt: trialEndsAt ? trialEndsAt.toISOString() : null,
       aiImagesUsed: usage.aiImagesUsed,
       aiImagesLimit: usage.aiImagesLimit,
-      // Plan/usage still drive feature gating for the active restaurant, but a
-      // contractor managing it via grant must not see/manage the owner's billing.
+      // Plan/usage drive feature gating for the active restaurant; a
+      // contractor managing it via grant must not see/manage billing.
       canManageBilling: !viaGrant,
     };
   }
@@ -207,9 +231,10 @@ export class RestaurantController {
     @Body() body: { name: string; duplicateFromId?: string | null },
   ) {
     // New restaurants always land under the user's OWN company, never the
-    // company of a restaurant they merely manage via grant.
-    const { ownCompanyId } = (req as AuthedRequest).authUser;
-    const created = await this.svc.createForCompany(ownCompanyId, body);
+    // company of a restaurant they merely manage via grant. The creating
+    // userId is recorded on the new RestaurantUser row.
+    const { userId, ownCompanyId } = (req as AuthedRequest).authUser;
+    const created = await this.svc.createForCompany(ownCompanyId, userId, body);
     // Auto-switch the cookie so the next request lands on the new restaurant.
     res.cookie(ACTIVE_RESTAURANT_COOKIE, created.id, {
       httpOnly: false,
@@ -228,20 +253,28 @@ export class RestaurantController {
   ) {
     const { userId, ownCompanyId } = (req as AuthedRequest).authUser;
     if (!body?.id) throw new BadRequestException("id required");
-    // Allowed targets: a restaurant of the user's own company, OR one granted
-    // to them across companies.
-    const owned = await this.prisma.restaurant.findFirst({
-      where: { id: body.id, companyId: ownCompanyId },
-      select: { id: true },
+    // Allowed targets: any restaurant the user is attached to (the new
+    // flat-access model) OR — for legacy rollback safety — a restaurant in
+    // the user's own company or in their RestaurantAccess grants.
+    const attached = await this.prisma.restaurantUser.findUnique({
+      where: { restaurantId_userId: { restaurantId: body.id, userId } },
+      select: { restaurantId: true },
     });
-    const restaurant =
-      owned ??
-      (await this.prisma.restaurantAccess
-        .findUnique({
-          where: { userId_restaurantId: { userId, restaurantId: body.id } },
-          select: { restaurantId: true },
-        })
-        .then((g) => (g ? { id: g.restaurantId } : null)));
+    let restaurant: { id: string } | null = attached ? { id: attached.restaurantId } : null;
+    if (!restaurant) {
+      const owned = await this.prisma.restaurant.findFirst({
+        where: { id: body.id, companyId: ownCompanyId },
+        select: { id: true },
+      });
+      restaurant =
+        owned ??
+        (await this.prisma.restaurantAccess
+          .findUnique({
+            where: { userId_restaurantId: { userId, restaurantId: body.id } },
+            select: { restaurantId: true },
+          })
+          .then((g) => (g ? { id: g.restaurantId } : null)));
+    }
     if (!restaurant) throw new ForbiddenException("Not your restaurant");
     res.cookie(ACTIVE_RESTAURANT_COOKIE, restaurant.id, {
       httpOnly: false,

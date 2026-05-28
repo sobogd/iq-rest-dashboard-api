@@ -177,17 +177,43 @@ export class RestaurantService {
   }
 
   /**
-   * Switcher list: the user's OWN restaurants (FREE-gated to 1, as before) plus
-   * every restaurant GRANTED to them across companies (never FREE-gated — the
-   * owner's plan governs those). Each row is tagged `owned` so the UI can hide
-   * delete/billing affordances on granted restaurants.
+   * Switcher list: every restaurant the user is attached to via RestaurantUser
+   * (the flat-access model). Each row is tagged `owned`:
+   *   - addedBy === null → row created during signup/seed/admin-side ownership
+   *     → owned: true → billing/delete UI visible
+   *   - addedBy !== null → row created by someone else attaching this user
+   *     (legacy grant or new /admin/restaurants/:id/users flow)
+   *     → owned: false → billing/delete UI hidden
+   *
+   * Falls back to the legacy Company + RestaurantAccess path when the user has
+   * no RestaurantUser rows yet (mid-rollout edge case).
    */
   async listForUser(userId: string, ownCompanyId: string) {
-    const [company, owned, granted] = await Promise.all([
+    const [company, rus] = await Promise.all([
       this.prisma.company.findUnique({
         where: { id: ownCompanyId },
         select: { plan: true, subscriptionStatus: true },
       }),
+      this.prisma.restaurantUser.findMany({
+        where: { userId },
+        select: { addedBy: true, restaurant: true },
+        orderBy: { addedAt: "asc" },
+      }),
+    ]);
+    const paid = company ? isPaidActive(company) : false;
+
+    if (rus.length > 0) {
+      const ownedRows = rus.filter((ru) => ru.addedBy === null).map((ru) => ru.restaurant);
+      const grantedRows = rus.filter((ru) => ru.addedBy !== null).map((ru) => ru.restaurant);
+      const ownedList = !paid && ownedRows.length > 1 ? ownedRows.slice(0, 1) : ownedRows;
+      return [
+        ...ownedList.map((r) => ({ ...r, owned: true })),
+        ...grantedRows.map((r) => ({ ...r, owned: false })),
+      ];
+    }
+
+    // Legacy fallback — read Company + RestaurantAccess.
+    const [owned, granted] = await Promise.all([
       this.prisma.restaurant.findMany({
         where: { companyId: ownCompanyId },
         orderBy: { createdAt: "asc" },
@@ -198,7 +224,6 @@ export class RestaurantService {
         orderBy: { restaurant: { createdAt: "asc" } },
       }),
     ]);
-    const paid = company ? isPaidActive(company) : false;
     const ownedList = !paid && owned.length > 1 ? owned.slice(0, 1) : owned;
     return [
       ...ownedList.map((r) => ({ ...r, owned: true })),
@@ -209,9 +234,10 @@ export class RestaurantService {
   /**
    * Update active restaurant. If no restaurant exists for the company, create
    * one (legacy onboarding path — pre-seed users hit POST /restaurant before
-   * any restaurant exists).
+   * any restaurant exists). When creating, also creates the RestaurantUser
+   * row so the new flat-access model resolves the new restaurant correctly.
    */
-  async upsert(companyId: string, restaurantId: string | null, raw: Record<string, unknown>) {
+  async upsert(companyId: string, userId: string, restaurantId: string | null, raw: Record<string, unknown>) {
     const input = pickFields(raw);
 
     const { reservationSchedule, ...rest } = input;
@@ -267,17 +293,37 @@ export class RestaurantService {
       ...rest,
       ...scheduleField,
     };
-    return this.prisma.restaurant.create({ data: createData });
+    const created = await this.prisma.restaurant.create({ data: createData });
+    // Link the calling user to the new restaurant via the flat-access model.
+    // Idempotent upsert so concurrent first-restaurant-create races don't fail.
+    await this.prisma.restaurantUser.upsert({
+      where: { restaurantId_userId: { restaurantId: created.id, userId } },
+      create: { restaurantId: created.id, userId, addedBy: null },
+      update: {},
+    }).catch(() => undefined);
+    return created;
   }
 
   /**
-   * Create additional restaurant for a company. PRO-gated.
+   * Create additional restaurant for a company.
+   *
+   * Per-restaurant billing model (2026-05-28+): the NEW restaurant starts as
+   * FREE / INACTIVE with no trial — only the FIRST restaurant of a user gets
+   * the 14-day trial (set via OnboardingSeedService). Subsequent restaurants
+   * require their own subscription before they can be used.
+   *
+   * The legacy "multi_restaurant_requires_paid" gate is preserved during the
+   * Company-deprecation transition: a user cannot start a second-restaurant
+   * flow unless their first/active subscription is paid. Once Company is
+   * dropped this check shifts to "at least one paid restaurant".
+   *
    * If duplicateFromId is given, copies categories+items+settings from that
    * restaurant (same company). Tables/orders/reservations/page_views are NOT
    * copied — physical/historical.
    */
   async createForCompany(
     companyId: string,
+    userId: string,
     body: { name: string; duplicateFromId?: string | null },
   ) {
     const company = await this.prisma.company.findUnique({
@@ -333,7 +379,18 @@ export class RestaurantService {
         paymentMethods: baseSettings?.paymentMethods ?? ["cash", "card"],
         timezone: baseSettings?.timezone ?? "UTC",
         startedFromScratch: !source,
+        // Per-restaurant billing: a NEW (second+) restaurant starts FREE
+        // without a trial. plan/billingCycle/stripeSubscriptionId/trialEndsAt
+        // all stay null — owner must check out separately for this restaurant.
+        plan: "FREE",
+        subscriptionStatus: "INACTIVE",
       },
+    });
+
+    // Link the creating user to the new restaurant via the flat-access model.
+    // addedBy is null for the FIRST user of a restaurant (the creator).
+    await this.prisma.restaurantUser.create({
+      data: { restaurantId: created.id, userId, addedBy: null },
     });
 
     if (source) {

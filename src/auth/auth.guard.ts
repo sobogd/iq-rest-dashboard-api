@@ -18,19 +18,22 @@ const ACTIVE_RESTAURANT_HEADER = "x-restaurant-id";
 export interface AuthedRequest extends Request {
   authUser: {
     userId: string;
-    // Active company context. For an owned restaurant this equals the user's
-    // own company; for a granted restaurant it is the OWNER's company (derived
-    // from the selected restaurant). All data scoping keys off this.
+    // Active company context. Per-restaurant billing model — companyId is
+    // derived from the chosen restaurant for backward compatibility with the
+    // services that still scope by company (Categories/Items/Orders/etc.).
     companyId: string;
     email: string;
     onboardingStep: number;
     restaurantId: string;
     primaryRestaurantId: string;
-    // The user's own company (companies[0]). Stays fixed regardless of which
-    // restaurant is active. Used to tell owned vs granted restaurants apart.
+    // Mirror of companyId in the per-restaurant model. Retained for code
+    // paths that still distinguish "user's own company" from "active context"
+    // (no-op now — they always match).
     ownCompanyId: string;
-    // True when the active restaurant was reached via a cross-company grant
-    // (not owned by ownCompanyId). Gates billing management + delete.
+    // True when the active restaurant attachment was created by someone else
+    // (RestaurantUser.addedBy is non-null). The original creator of a
+    // restaurant has addedBy = null. Gates billing/delete on attached-as-
+    // manager restaurants.
     viaGrant: boolean;
   };
 }
@@ -68,25 +71,49 @@ export class AuthGuard implements CanActivate {
       onboardingStep: user.onboardingStep,
       restaurantId: activeId,
       primaryRestaurantId: primaryId,
-      ownCompanyId: user.companyId,
+      ownCompanyId: companyId,
       viaGrant,
     };
     return true;
   }
 
-  // Resolve the active restaurant from the union of the user's OWN restaurants
-  // (their company) and restaurants GRANTED to them across companies. The
-  // active companyId is derived from the chosen restaurant: owned → own company
-  // (unchanged from legacy behaviour); granted → owner's company. For any user
-  // without grants this is identical to the old single-company resolution.
+  /** Resolve the active restaurant from the user's flat RestaurantUser
+   *  attachments. Falls back to the legacy Company-derived path when the
+   *  user has no RestaurantUser rows yet (mid-rollout edge case where
+   *  backfill missed them or a brand-new signup hasn't been seeded). */
   private async resolveActiveRestaurant(
     userId: string,
-    ownCompanyId: string,
+    legacyCompanyId: string,
     requested: string | undefined,
   ): Promise<{ activeId: string; primaryId: string; companyId: string; viaGrant: boolean }> {
+    const rus = await this.prisma.restaurantUser.findMany({
+      where: { userId },
+      select: {
+        addedBy: true,
+        addedAt: true,
+        restaurant: { select: { id: true, companyId: true, createdAt: true } },
+      },
+      orderBy: { addedAt: "asc" },
+    });
+
+    if (rus.length > 0) {
+      const primaryId = rus[0].restaurant.id;
+      const chosen =
+        (requested && rus.find((ru) => ru.restaurant.id === requested)) || rus[0];
+      return {
+        activeId: chosen.restaurant.id,
+        primaryId,
+        companyId: chosen.restaurant.companyId,
+        viaGrant: !!chosen.addedBy,
+      };
+    }
+
+    // Legacy fallback: user has no RestaurantUser row (backfill miss / brand
+    // new signup pre-seed). Look up restaurants via the still-existing
+    // Company + RestaurantAccess tables so onboarding stays unbroken.
     const [owned, granted] = await Promise.all([
       this.prisma.restaurant.findMany({
-        where: { companyId: ownCompanyId },
+        where: { companyId: legacyCompanyId },
         select: { id: true, companyId: true },
         orderBy: { createdAt: "asc" },
       }),
@@ -98,12 +125,7 @@ export class AuthGuard implements CanActivate {
     ]);
     const grantedRestaurants = granted.map((g) => g.restaurant);
     const all = [...owned, ...grantedRestaurants];
-    if (all.length === 0) {
-      throw new UnauthorizedException("No restaurant for company");
-    }
-    // Primary stays an OWNED restaurant when one exists (keeps onboarding /
-    // fallbacks pointed at the user's own company); pure contractors fall back
-    // to their first grant.
+    if (all.length === 0) throw new UnauthorizedException("No restaurant for user");
     const primaryId = owned[0]?.id ?? grantedRestaurants[0].id;
     const chosen =
       (requested && all.find((r) => r.id === requested)) ||
@@ -113,7 +135,7 @@ export class AuthGuard implements CanActivate {
       activeId: chosen.id,
       primaryId,
       companyId: chosen.companyId,
-      viaGrant: chosen.companyId !== ownCompanyId,
+      viaGrant: chosen.companyId !== legacyCompanyId,
     };
   }
 }

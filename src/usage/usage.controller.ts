@@ -157,18 +157,26 @@ export class UsageController {
     }
 
     let companyId: string | null = null;
+    let userId: string | null = null;
     const sessionCookie = readCookie(req, SESSION_COOKIE);
     const emailCookie = readCookie(req, EMAIL_COOKIE);
     if (sessionCookie && emailCookie) {
       try {
         const user = await this.auth.resolveSession(sessionCookie, emailCookie, {});
         companyId = user.companyId;
+        userId = user.userId;
       } catch {
         // Invalid session — record as anonymous.
       }
     }
 
     if (companyId && ADMIN_COMPANY_IDS.has(companyId)) return;
+
+    // Per-restaurant analytics: capture the active restaurant from the
+    // dashboard cookie so admin "by restaurant" filters work without joining
+    // through Company. Anonymous events leave both fields null.
+    const ACTIVE_RESTAURANT_COOKIE = "iqr_active_restaurant_id";
+    const activeRestaurantId = readCookie(req, ACTIVE_RESTAURANT_COOKIE) ?? null;
 
     await this.prisma.usageEvent.create({
       data: {
@@ -183,6 +191,8 @@ export class UsageController {
         is_facebook_ads: isFacebookAds,
         is_search: isSearch,
         companyId,
+        userId,
+        restaurantId: activeRestaurantId,
         ip,
       },
     });

@@ -40,11 +40,19 @@ export class StripeController {
     @Req() req: Request,
     @Body() body: { priceLookupKey?: string; locale?: string; currency?: string },
   ) {
-    const { companyId, viaGrant } = (req as AuthedRequest).authUser;
+    // Per-restaurant billing — checkout creates a subscription for the
+    // CURRENTLY ACTIVE restaurant. Each restaurant has its own subscription.
+    const { userId, companyId, restaurantId, viaGrant } = (req as AuthedRequest).authUser;
     if (viaGrant) throw new ForbiddenException("Billing is managed by the restaurant owner");
     const stripe = getStripe();
-    const company = await this.prisma.company.findUnique({ where: { id: companyId } });
+    const [company, restaurant, user] = await Promise.all([
+      this.prisma.company.findUnique({ where: { id: companyId } }),
+      this.prisma.restaurant.findUnique({ where: { id: restaurantId } }),
+      this.prisma.user.findUnique({ where: { id: userId } }),
+    ]);
     if (!company) throw new BadRequestException("Company not found");
+    if (!restaurant) throw new BadRequestException("Restaurant not found");
+    if (!user) throw new BadRequestException("User not found");
 
     const validKeys: string[] = [
       PRICE_LOOKUP_KEYS.BASIC_MONTHLY,
@@ -60,24 +68,29 @@ export class StripeController {
     const baseLookupKey = body.priceLookupKey as PriceLookupKey;
     const fullLookupKey = getLookupKeyWithCurrency(baseLookupKey, "EUR");
 
-    // When there's already an active subscription, don't silently charge a
-    // prorated amount — route the user to Stripe's Billing Portal where the
-    // switch shows the upcoming charge / credit before they confirm.
-    if (company.subscriptionStatus === "ACTIVE" && company.stripeSubscriptionId) {
-      if (!company.stripeCustomerId) {
+    // When there's already an active subscription on THIS restaurant, route to
+    // the Stripe Billing Portal so the switch shows the prorated charge before
+    // it commits. (Subscriptions are per-restaurant now — switching plan on
+    // restaurant A doesn't affect restaurant B.)
+    if (restaurant.subscriptionStatus === "ACTIVE" && restaurant.stripeSubscriptionId) {
+      const customer = user.stripeCustomerId || company.stripeCustomerId;
+      if (!customer) {
         throw new BadRequestException("Subscription is active but no Stripe customer found");
       }
       const appUrl = process.env.APP_URL;
       if (!appUrl) throw new BadRequestException("APP_URL not configured");
       const locale = body.locale || "en";
       const portal = await stripe.billingPortal.sessions.create({
-        customer: company.stripeCustomerId,
+        customer,
         return_url: `${appUrl}/${locale}/dashboard/settings/billing`,
       });
       return { url: portal.url };
     }
 
-    let customerId = company.stripeCustomerId;
+    // Stripe customer is per-human now. Prefer User.stripeCustomerId, fall
+    // back to legacy Company.stripeCustomerId, create a fresh one if neither
+    // exists. Dual-write to both User and Company during transition.
+    let customerId = user.stripeCustomerId || company.stripeCustomerId;
     if (customerId) {
       try {
         const existing = await stripe.customers.retrieve(customerId);
@@ -87,10 +100,17 @@ export class StripeController {
       }
     }
     if (!customerId) {
-      const customer = await stripe.customers.create({ metadata: { companyId: company.id } });
+      const customer = await stripe.customers.create({
+        email: user.email,
+        metadata: { userId: user.id, companyId: company.id },
+      });
       customerId = customer.id;
-      await this.prisma.company.update({ where: { id: company.id }, data: { stripeCustomerId: customerId } });
     }
+    // Always dual-write so legacy reads continue to work during transition.
+    await Promise.all([
+      this.prisma.user.update({ where: { id: user.id }, data: { stripeCustomerId: customerId } }),
+      this.prisma.company.update({ where: { id: company.id }, data: { stripeCustomerId: customerId } }),
+    ]);
 
     let prices = await stripe.prices.list({ lookup_keys: [fullLookupKey], active: true, limit: 1 });
     if (prices.data.length === 0) {
@@ -111,18 +131,23 @@ export class StripeController {
       line_items: [{ price: prices.data[0].id, quantity: 1 }],
       success_url: `${appUrl}/${locale}/dashboard/settings/billing?success=true`,
       cancel_url: `${appUrl}/${locale}/dashboard/settings/billing?canceled=true`,
-      subscription_data: { metadata: { companyId: company.id } },
-      metadata: { companyId: company.id },
+      // restaurantId carries the per-restaurant target; companyId stays for
+      // legacy webhook compat during transition.
+      subscription_data: { metadata: { companyId: company.id, restaurantId: restaurant.id, userId: user.id } },
+      metadata: { companyId: company.id, restaurantId: restaurant.id, userId: user.id },
     });
 
     if (!session.url) {
       throw new BadRequestException("Stripe did not return a checkout URL");
     }
 
-    await this.prisma.company.update({
-      where: { id: company.id },
-      data: { paymentProcessing: true },
-    });
+    // Dual-write paymentProcessing on both Company and Restaurant so any UI
+    // path (legacy company-scoped or new restaurant-scoped) reflects the
+    // pending checkout.
+    await Promise.all([
+      this.prisma.company.update({ where: { id: company.id }, data: { paymentProcessing: true } }),
+      this.prisma.restaurant.update({ where: { id: restaurant.id }, data: { paymentProcessing: true } }),
+    ]);
 
     return { url: session.url };
   }
@@ -183,63 +208,85 @@ export class StripeController {
         const session = event.data.object as { subscription?: string; metadata?: Record<string, string> };
         const subId = session.subscription;
         const fallbackCompanyId = session.metadata?.companyId ?? null;
+        const fallbackRestaurantId = session.metadata?.restaurantId ?? null;
         if (subId) {
-          const companyId =
-            (await this.companyFromSubscription(subId)) ?? fallbackCompanyId;
-          if (companyId) {
+          const target = await this.resolveTarget(subId, fallbackCompanyId, fallbackRestaurantId);
+          if (target) {
             const sub = (await stripe.subscriptions.retrieve(subId)) as unknown as SubscriptionData;
-            await this.applySubscription(companyId, sub);
+            await this.applySubscription(target.companyId, target.restaurantId, sub);
           }
         } else if (fallbackCompanyId) {
           await this.prisma.company.update({
             where: { id: fallbackCompanyId },
             data: { paymentProcessing: false },
           });
+          if (fallbackRestaurantId) {
+            await this.prisma.restaurant.update({
+              where: { id: fallbackRestaurantId },
+              data: { paymentProcessing: false },
+            }).catch(() => undefined);
+          }
         }
         break;
       }
       case "customer.subscription.created":
       case "customer.subscription.updated": {
         const sub = event.data.object as unknown as SubscriptionData;
-        const companyId = await this.companyFromSubscription(sub.id);
-        if (companyId) {
+        const target = await this.resolveTarget(sub.id, null, null);
+        if (target) {
           if (event.type === "customer.subscription.created") {
-            const company = await this.prisma.company.findUnique({
-              where: { id: companyId },
+            // Cancel the previous subscription on THIS restaurant (not company-
+            // wide — other restaurants of the same owner keep their own subs).
+            const restaurant = await this.prisma.restaurant.findUnique({
+              where: { id: target.restaurantId },
               select: { stripeSubscriptionId: true },
             });
-            if (company?.stripeSubscriptionId && company.stripeSubscriptionId !== sub.id) {
+            if (restaurant?.stripeSubscriptionId && restaurant.stripeSubscriptionId !== sub.id) {
               try {
-                await stripe.subscriptions.cancel(company.stripeSubscriptionId);
+                await stripe.subscriptions.cancel(restaurant.stripeSubscriptionId);
               } catch (err) {
                 console.error("Cancel old sub error:", err);
               }
             }
           }
-          await this.applySubscription(companyId, sub);
+          await this.applySubscription(target.companyId, target.restaurantId, sub);
         }
         break;
       }
       case "customer.subscription.deleted": {
         const sub = event.data.object as unknown as SubscriptionData;
-        const companyId = await this.companyFromSubscription(sub.id);
-        if (companyId) {
-          const company = await this.prisma.company.findUnique({
-            where: { id: companyId },
+        const target = await this.resolveTarget(sub.id, null, null);
+        if (target) {
+          const restaurant = await this.prisma.restaurant.findUnique({
+            where: { id: target.restaurantId },
             select: { stripeSubscriptionId: true },
           });
-          if (company?.stripeSubscriptionId === sub.id) {
-            await this.prisma.company.update({
-              where: { id: companyId },
-              data: {
-                plan: "FREE",
-                billingCycle: null,
-                subscriptionStatus: "CANCELED",
-                currentPeriodEnd: null,
-                stripeSubscriptionId: null,
-                paymentProcessing: false,
-              },
-            });
+          if (restaurant?.stripeSubscriptionId === sub.id) {
+            await Promise.all([
+              this.prisma.restaurant.update({
+                where: { id: target.restaurantId },
+                data: {
+                  plan: "FREE",
+                  billingCycle: null,
+                  subscriptionStatus: "CANCELED",
+                  currentPeriodEnd: null,
+                  stripeSubscriptionId: null,
+                  paymentProcessing: false,
+                },
+              }),
+              // Legacy dual-write so the old admin UI does not lag.
+              this.prisma.company.update({
+                where: { id: target.companyId },
+                data: {
+                  plan: "FREE",
+                  billingCycle: null,
+                  subscriptionStatus: "CANCELED",
+                  currentPeriodEnd: null,
+                  stripeSubscriptionId: null,
+                  paymentProcessing: false,
+                },
+              }).catch(() => undefined),
+            ]);
           }
         }
         break;
@@ -247,12 +294,18 @@ export class StripeController {
       case "invoice.payment_succeeded": {
         const invoice = event.data.object as { subscription?: string | null };
         if (invoice.subscription) {
-          const companyId = await this.companyFromSubscription(invoice.subscription);
-          if (companyId) {
-            await this.prisma.company.update({
-              where: { id: companyId },
-              data: { subscriptionStatus: "ACTIVE", paymentProcessing: false },
-            });
+          const target = await this.resolveTarget(invoice.subscription, null, null);
+          if (target) {
+            await Promise.all([
+              this.prisma.restaurant.update({
+                where: { id: target.restaurantId },
+                data: { subscriptionStatus: "ACTIVE", paymentProcessing: false },
+              }),
+              this.prisma.company.update({
+                where: { id: target.companyId },
+                data: { subscriptionStatus: "ACTIVE", paymentProcessing: false },
+              }).catch(() => undefined),
+            ]);
           }
         }
         break;
@@ -260,12 +313,18 @@ export class StripeController {
       case "invoice.payment_failed": {
         const invoice = event.data.object as { subscription?: string | null };
         if (invoice.subscription) {
-          const companyId = await this.companyFromSubscription(invoice.subscription);
-          if (companyId) {
-            await this.prisma.company.update({
-              where: { id: companyId },
-              data: { subscriptionStatus: "PAST_DUE" },
-            });
+          const target = await this.resolveTarget(invoice.subscription, null, null);
+          if (target) {
+            await Promise.all([
+              this.prisma.restaurant.update({
+                where: { id: target.restaurantId },
+                data: { subscriptionStatus: "PAST_DUE" },
+              }),
+              this.prisma.company.update({
+                where: { id: target.companyId },
+                data: { subscriptionStatus: "PAST_DUE" },
+              }).catch(() => undefined),
+            ]);
           }
         }
         break;
@@ -275,30 +334,84 @@ export class StripeController {
     return { received: true };
   }
 
-  private async companyFromSubscription(subscriptionId: string): Promise<string | null> {
+  /** Find the (companyId, restaurantId) target for a Stripe subscription event.
+   *  Prefers the new Restaurant.stripeSubscriptionId lookup; falls back to the
+   *  legacy Company.stripeSubscriptionId path; finally falls back to metadata
+   *  on the Stripe subscription itself for fresh ones whose DB rows have not
+   *  been written yet (checkout.session.completed race). */
+  private async resolveTarget(
+    subscriptionId: string,
+    fallbackCompanyId: string | null,
+    fallbackRestaurantId: string | null,
+  ): Promise<{ companyId: string; restaurantId: string } | null> {
+    // Primary: Restaurant.stripeSubscriptionId.
+    const restaurant = await this.prisma.restaurant.findFirst({
+      where: { stripeSubscriptionId: subscriptionId },
+      select: { id: true, companyId: true },
+    });
+    if (restaurant) return { companyId: restaurant.companyId, restaurantId: restaurant.id };
+
+    // Secondary: legacy Company.stripeSubscriptionId — derive restaurant by
+    // picking the company's first (or active-cookie-tracked) restaurant.
     const company = await this.prisma.company.findFirst({
       where: { stripeSubscriptionId: subscriptionId },
+      select: { id: true },
     });
-    if (company) return company.id;
+    if (company) {
+      const r = await this.prisma.restaurant.findFirst({
+        where: { companyId: company.id },
+        orderBy: { createdAt: "asc" },
+        select: { id: true },
+      });
+      if (r) return { companyId: company.id, restaurantId: r.id };
+    }
 
+    // Tertiary: metadata on the Stripe subscription itself.
     try {
       const stripe = getStripe();
       const sub = (await stripe.subscriptions.retrieve(subscriptionId)) as unknown as SubscriptionData;
-      const metaCompanyId = sub.metadata?.companyId;
-      if (metaCompanyId) return metaCompanyId;
-      if (sub.customer) {
-        const byCustomer = await this.prisma.company.findFirst({
-          where: { stripeCustomerId: sub.customer },
+      const metaRestaurantId = sub.metadata?.restaurantId || fallbackRestaurantId;
+      const metaCompanyId = sub.metadata?.companyId || fallbackCompanyId;
+      if (metaRestaurantId) {
+        const r = await this.prisma.restaurant.findUnique({
+          where: { id: metaRestaurantId },
+          select: { id: true, companyId: true },
         });
-        return byCustomer?.id ?? null;
+        if (r) return { companyId: r.companyId, restaurantId: r.id };
+      }
+      if (metaCompanyId) {
+        const r = await this.prisma.restaurant.findFirst({
+          where: { companyId: metaCompanyId },
+          orderBy: { createdAt: "asc" },
+          select: { id: true, companyId: true },
+        });
+        if (r) return { companyId: r.companyId, restaurantId: r.id };
+      }
+      if (sub.customer) {
+        const byCustomer = await this.prisma.user.findFirst({
+          where: { stripeCustomerId: sub.customer },
+          select: { id: true },
+        });
+        if (byCustomer) {
+          const ru = await this.prisma.restaurantUser.findFirst({
+            where: { userId: byCustomer.id },
+            orderBy: { addedAt: "asc" },
+            select: { restaurant: { select: { id: true, companyId: true } } },
+          });
+          if (ru) return { companyId: ru.restaurant.companyId, restaurantId: ru.restaurant.id };
+        }
       }
     } catch (err) {
-      console.error("companyFromSubscription:", err);
+      console.error("resolveTarget:", err);
     }
     return null;
   }
 
-  private async applySubscription(companyId: string, sub: SubscriptionData): Promise<void> {
+  private async applySubscription(
+    companyId: string,
+    restaurantId: string,
+    sub: SubscriptionData,
+  ): Promise<void> {
     const item = sub.items.data[0];
     const lookupKey = item?.price.lookup_key;
 
@@ -338,16 +451,31 @@ export class StripeController {
       if (!isNaN(d.getTime())) currentPeriodEnd = d;
     }
 
-    await this.prisma.company.update({
-      where: { id: companyId },
-      data: {
-        stripeSubscriptionId: sub.id,
-        plan,
-        billingCycle,
-        subscriptionStatus,
-        currentPeriodEnd,
-        paymentProcessing: false,
-      },
-    });
+    // Dual-write: new per-restaurant fields + legacy company fields so any
+    // unrefactored UI / endpoint still reflects the latest state.
+    await Promise.all([
+      this.prisma.restaurant.update({
+        where: { id: restaurantId },
+        data: {
+          stripeSubscriptionId: sub.id,
+          plan,
+          billingCycle,
+          subscriptionStatus,
+          currentPeriodEnd,
+          paymentProcessing: false,
+        },
+      }),
+      this.prisma.company.update({
+        where: { id: companyId },
+        data: {
+          stripeSubscriptionId: sub.id,
+          plan,
+          billingCycle,
+          subscriptionStatus,
+          currentPeriodEnd,
+          paymentProcessing: false,
+        },
+      }).catch(() => undefined),
+    ]);
   }
 }

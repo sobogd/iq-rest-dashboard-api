@@ -2,8 +2,8 @@
 // `en` regardless of the restaurant's defaultLanguage. As a result, on
 // restaurants whose default isn't English, the new dashboard could not find a
 // match for the default-language key and fell back to whichever locale the
-// diner browsed in. Walk every order for the targeted company, rewrite each
-// item so that:
+// diner browsed in. Walk every order on every restaurant the user is attached
+// to, rewriting each item so that:
 //   1. dishNameSnapshot has a key equal to the restaurant's defaultLanguage
 //      (copying the `en` value when no default-language key exists yet)
 //   2. the flat `name` field reflects the same default-language string
@@ -12,8 +12,8 @@
 //   npx tsx scripts/fix-order-snapshots-by-email.ts <user-email>          # dry-run
 //   npx tsx scripts/fix-order-snapshots-by-email.ts <user-email> --apply  # mutate
 //
-// Targets every company the user is a member of. Skips orders whose items are
-// already correctly keyed so the script is safe to re-run.
+// Targets every restaurant the user is attached to via RestaurantUser. Skips
+// orders whose items are already correctly keyed so the script is re-runnable.
 
 import { PrismaClient, Prisma } from "@prisma/client";
 
@@ -70,33 +70,32 @@ function fixItems(items: OrderItem[], defaultLang: string): { items: OrderItem[]
 async function main() {
   const user = await prisma.user.findUnique({
     where: { email },
-    select: { id: true, email: true, companies: { select: { companyId: true } } },
+    select: {
+      id: true,
+      email: true,
+      restaurantUsers: {
+        select: { restaurant: { select: { id: true, title: true, defaultLanguage: true } } },
+        orderBy: { addedAt: "asc" },
+      },
+    },
   });
   if (!user) {
     console.error(`User not found: ${email}`);
     process.exit(1);
   }
-  const companyIds = user.companies.map((c) => c.companyId);
-  if (companyIds.length === 0) {
-    console.error(`User ${email} has no companies`);
+  const restaurants = user.restaurantUsers.map((ru) => ru.restaurant);
+  if (restaurants.length === 0) {
+    console.error(`User ${email} has no restaurants`);
     process.exit(1);
   }
-  console.log(`User: ${user.email} (id=${user.id}) — ${companyIds.length} company(ies)`);
+  console.log(`User: ${user.email} (id=${user.id}) — ${restaurants.length} restaurant(s)`);
 
-  for (const companyId of companyIds) {
-    const restaurant = await prisma.restaurant.findFirst({
-      where: { companyId },
-      select: { id: true, title: true, defaultLanguage: true },
-    });
-    if (!restaurant) {
-      console.log(`  company=${companyId}: no restaurant, skipping`);
-      continue;
-    }
+  for (const restaurant of restaurants) {
     const defaultLang = restaurant.defaultLanguage || "en";
-    console.log(`  company=${companyId} restaurant="${restaurant.title}" defaultLang=${defaultLang}`);
+    console.log(`  restaurant=${restaurant.id} "${restaurant.title}" defaultLang=${defaultLang}`);
 
     const orders = await prisma.order.findMany({
-      where: { companyId },
+      where: { restaurantId: restaurant.id },
       select: { id: true, items: true, dailyNumber: true, orderDate: true },
     });
     console.log(`    ${orders.length} order(s) to inspect`);

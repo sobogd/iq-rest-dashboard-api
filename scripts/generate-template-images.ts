@@ -185,7 +185,7 @@ async function runJob(job: Job): Promise<{ url: string }> {
   // ~25-40% smaller than the previous q=85 default settings.
   const url = await uploadGeneratedImage(b64, {
     pathPrefix: job.kind === "background" ? "templates/backgrounds" : "templates/dishes",
-    companyId: "",
+    restaurantId: "",
     filenamePrefix: job.filenamePrefix,
     resize,
     quality: 80,

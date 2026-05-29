@@ -1,9 +1,10 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { PrismaService } from "../prisma/prisma.service";
 import { AutoTranslateService } from "../auto-translate/auto-translate.service";
 import { isReservedSlug, slugify } from "../common/reserved-slugs";
+import { getStripe } from "../common/stripe";
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 const reservationDaySchema = z
@@ -146,10 +147,35 @@ function pickFields(raw: Record<string, unknown>): RestaurantInput {
 
 @Injectable()
 export class RestaurantService {
+  private readonly logger = new Logger(RestaurantService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly autoTranslate: AutoTranslateService,
   ) {}
+
+  /** Cancel any active Stripe subscription on a restaurant before we delete
+   *  the row. Best-effort — if Stripe is unreachable we still proceed with
+   *  the delete (the customer can be refunded manually) rather than block
+   *  the user from cleaning up. Idempotent: a sub already in canceled state
+   *  just logs and moves on. */
+  private async cancelStripeSubscriptionIfAny(restaurantId: string): Promise<void> {
+    const r = await this.prisma.restaurant.findUnique({
+      where: { id: restaurantId },
+      select: { stripeSubscriptionId: true },
+    });
+    if (!r?.stripeSubscriptionId) return;
+    try {
+      await getStripe().subscriptions.cancel(r.stripeSubscriptionId);
+    } catch (err) {
+      // No throw — proceed with delete. Customer can be reconciled later.
+      this.logger.error(
+        `Stripe cancel failed for restaurant=${restaurantId} sub=${r.stripeSubscriptionId}: ${
+          (err as Error)?.message ?? err
+        }`,
+      );
+    }
+  }
 
   /** Active restaurant (by id from AuthGuard). */
   async getActive(restaurantId: string) {
@@ -413,6 +439,14 @@ export class RestaurantService {
     if (remaining <= 1) {
       throw new BadRequestException("Cannot delete the last restaurant");
     }
+    await this.cancelStripeSubscriptionIfAny(restaurantId);
+    await this.prisma.restaurant.delete({ where: { id: restaurantId } });
+  }
+
+  /** Used by admin delete — same Stripe cancellation, no ownership check
+   *  (admin can delete anyone's restaurant). */
+  async deleteByAdmin(restaurantId: string): Promise<void> {
+    await this.cancelStripeSubscriptionIfAny(restaurantId);
     await this.prisma.restaurant.delete({ where: { id: restaurantId } });
   }
 

@@ -8,5 +8,6 @@ import { RestaurantService } from "./restaurant.service";
   imports: [AuthModule, AutoTranslateModule],
   controllers: [RestaurantController],
   providers: [RestaurantService],
+  exports: [RestaurantService],
 })
 export class RestaurantModule {}

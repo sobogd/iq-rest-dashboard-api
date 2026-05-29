@@ -23,6 +23,7 @@ import { AdminGuard } from "./admin.guard";
 import { AuthService } from "../auth/auth.service";
 import { MailService } from "../mail/mail.service";
 import { DevicesService } from "../devices/devices.service";
+import { RestaurantService } from "../restaurant/restaurant.service";
 import { authCookieOptions } from "../common/session-utils";
 import { validateEmail } from "../common/validate-email";
 import type { AuthedRequest } from "../auth/auth.guard";
@@ -46,6 +47,7 @@ export class AdminController {
     private readonly config: ConfigService,
     private readonly mail: MailService,
     private readonly devices: DevicesService,
+    private readonly restaurants: RestaurantService,
   ) {}
 
   // ────────────────── DEVICES ──────────────────
@@ -256,13 +258,18 @@ export class AdminController {
 
   // Cascade-delete a restaurant. Removes RestaurantUsers, devices, orders,
   // menu, support history — everything keyed by restaurantId via Prisma's
-  // onDelete: Cascade. The Stripe subscription, if any, must be canceled
-  // separately (handled by the dashboard before calling delete).
+  // onDelete: Cascade. RestaurantService.deleteByAdmin also cancels any
+  // active Stripe subscription on the restaurant first (best-effort) so the
+  // customer isn't billed for a deleted restaurant.
   @Delete("restaurants/:id")
   @HttpCode(HttpStatus.NO_CONTENT)
   async deleteRestaurant(@Param("id") restaurantId: string) {
-    await this.prisma.restaurant.delete({ where: { id: restaurantId } }).catch(() => {
-      throw new NotFoundException("Restaurant not found");
+    await this.restaurants.deleteByAdmin(restaurantId).catch((err) => {
+      if (err instanceof NotFoundException) throw err;
+      // Prisma "record to delete does not exist" surfaces as P2025.
+      const code = (err as { code?: string })?.code;
+      if (code === "P2025") throw new NotFoundException("Restaurant not found");
+      throw err;
     });
   }
 
@@ -271,6 +278,7 @@ export class AdminController {
   // through the normal OTP flow first.
   @Post("restaurants/:id/users")
   async attachUserToRestaurant(
+    @Req() req: Request,
     @Param("id") restaurantId: string,
     @Body() body: { email?: string },
   ) {
@@ -287,9 +295,16 @@ export class AdminController {
     if (!restaurant) throw new NotFoundException("Restaurant not found");
     if (!user) throw new BadRequestException("user_not_registered");
 
+    // addedBy = the admin attaching this user. Non-null marks the attached
+    // user as a manager (viaGrant=true), which blocks billing and delete
+    // actions in AuthGuard / RestaurantService. Without this, the row defaults
+    // to addedBy=NULL, which the model interprets as "owner" — accidentally
+    // granting cancel-subscription + delete-restaurant rights to anyone the
+    // admin attaches.
+    const adminUserId = (req as AuthedRequest).authUser.userId;
     const ru = await this.prisma.restaurantUser.upsert({
       where: { restaurantId_userId: { restaurantId, userId: user.id } },
-      create: { restaurantId, userId: user.id },
+      create: { restaurantId, userId: user.id, addedBy: adminUserId },
       update: {},
       select: { id: true, addedAt: true },
     });

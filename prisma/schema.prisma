@@ -177,6 +177,7 @@ model Restaurant {
   pageViews       PageView[]
   restaurantUsers RestaurantUser[]
   supportMessages SupportMessage[]
+  devices         Device[]
 
   @@index([slug])
   @@map("restaurants")
@@ -468,6 +469,7 @@ model Device {
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
+  restaurant    Restaurant   @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   pairingCode   PairingCode?
 
   @@index([restaurantId])

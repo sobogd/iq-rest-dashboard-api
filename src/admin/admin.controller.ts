@@ -194,6 +194,7 @@ export class AdminController {
         currentPeriodEnd: true,
         stripeSubscriptionId: true,
         paymentProcessing: true,
+        adminComment: true,
         createdAt: true,
         _count: { select: { categories: true, items: true, supportMessages: true } },
         restaurantUsers: {
@@ -237,6 +238,7 @@ export class AdminController {
       currentPeriodEnd: restaurant.currentPeriodEnd?.toISOString() ?? null,
       hasStripeSub: !!restaurant.stripeSubscriptionId,
       paymentProcessing: restaurant.paymentProcessing,
+      adminComment: restaurant.adminComment,
       createdAt: restaurant.createdAt.toISOString(),
       categoriesCount: restaurant._count.categories,
       itemsCount: restaurant._count.items,
@@ -254,6 +256,33 @@ export class AdminController {
         userCreatedAt: ru.user.createdAt.toISOString(),
       })),
     };
+  }
+
+  // Update the admin-only note attached to a restaurant. Empty string clears
+  // it back to null so the modal doesn't keep blank rows around.
+  @Post("restaurants/:id/admin-comment")
+  @HttpCode(HttpStatus.OK)
+  async updateRestaurantAdminComment(
+    @Param("id") restaurantId: string,
+    @Body() body: { adminComment?: string | null },
+  ) {
+    const raw = body?.adminComment;
+    if (raw !== null && raw !== undefined && typeof raw !== "string") {
+      throw new BadRequestException("adminComment must be a string or null");
+    }
+    const next = typeof raw === "string" && raw.trim().length > 0 ? raw : null;
+    const updated = await this.prisma.restaurant
+      .update({
+        where: { id: restaurantId },
+        data: { adminComment: next },
+        select: { adminComment: true },
+      })
+      .catch((err) => {
+        const code = (err as { code?: string })?.code;
+        if (code === "P2025") throw new NotFoundException("Restaurant not found");
+        throw err;
+      });
+    return { ok: true, adminComment: updated.adminComment };
   }
 
   // Cascade-delete a restaurant. Removes RestaurantUsers, devices, orders,

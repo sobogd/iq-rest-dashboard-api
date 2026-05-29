@@ -110,6 +110,9 @@ model Restaurant {
   // Payment methods this restaurant offers — enum codes only (cash, card, ...).
   // Display strings live in dashboard locales; integrations add new codes here.
   paymentMethods  String[] @default(["cash", "card"])
+  // Free-form internal note written by admins; never shown to customers
+  // or restaurant owners. Edited via the admin restaurant modal.
+  adminComment    String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 

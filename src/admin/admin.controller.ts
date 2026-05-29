@@ -109,7 +109,7 @@ export class AdminController {
         GROUP BY "restaurantId"`,
       this.prisma.$queryRaw<{ restaurantId: string; count: bigint }[]>`
         SELECT "restaurantId", COUNT(*) AS count FROM support_messages
-        WHERE "restaurantId" = ANY(${ids}::text[]) AND "isAdmin" = false
+        WHERE "restaurantId" = ANY(${ids}::text[])
         GROUP BY "restaurantId"`,
       this.prisma.$queryRaw<{ restaurantId: string; count: bigint }[]>`
         SELECT "restaurantId", COUNT(*) AS count FROM support_messages

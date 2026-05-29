@@ -85,6 +85,7 @@ export class AdminController {
         trialEndsAt: true,
         currentPeriodEnd: true,
         stripeSubscriptionId: true,
+        adminComment: true,
         createdAt: true,
         _count: { select: { categories: true, items: true } },
         restaurantUsers: {
@@ -157,6 +158,7 @@ export class AdminController {
           currentPeriodEnd: r.currentPeriodEnd ? r.currentPeriodEnd.toISOString() : null,
           hasStripeSub: !!r.stripeSubscriptionId,
           isManualSub,
+          hasAdminComment: !!(r.adminComment && r.adminComment.trim().length > 0),
           createdAt: r.createdAt.toISOString(),
           users: r.restaurantUsers.map((ru) => ({
             id: ru.user.id,

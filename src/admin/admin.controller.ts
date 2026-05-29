@@ -115,14 +115,18 @@ export class AdminController {
         SELECT "restaurantId", COUNT(*) AS count FROM support_messages
         WHERE "restaurantId" = ANY(${ids}::text[]) AND "isAdmin" = false AND "createdAt" >= ${startOfMessagesLastDay}
         GROUP BY "restaurantId"`,
-      // "Last visit" = last time a logged-in user was active in the dashboard
-      // with this restaurant selected. Sourced from usage_events (where the
-      // dashboard cookie pins restaurantId), NOT page_views (those are
-      // anonymous customer QR-menu scans, not owner activity).
+      // "Last visit" = last time anyone attached to this restaurant was
+      // active in the dashboard. Joined through restaurant_users → usage_events
+      // by userId (not usage_events.restaurantId), because the
+      // iqr_active_restaurant_id cookie that pins restaurantId is only set
+      // when the owner switches between restaurants — single-restaurant
+      // owners never trip it, so their events have restaurantId NULL.
       this.prisma.$queryRaw<{ restaurantId: string; last_visit: Date | null }[]>`
-        SELECT "restaurantId", MAX("at") AS last_visit FROM usage_events
-        WHERE "restaurantId" = ANY(${ids}::text[]) AND "userId" IS NOT NULL
-        GROUP BY "restaurantId"`,
+        SELECT ru."restaurantId", MAX(ue."at") AS last_visit
+        FROM restaurant_users ru
+        JOIN usage_events ue ON ue."userId" = ru."userId"
+        WHERE ru."restaurantId" = ANY(${ids}::text[])
+        GROUP BY ru."restaurantId"`,
     ]);
 
     const byId = <T extends { restaurantId: string }>(rows: T[]) => {

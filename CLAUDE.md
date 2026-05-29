@@ -2,6 +2,8 @@
 
 NestJS + Prisma backend for the IQ Rest dashboard (`dashboard.iq-rest.com`). Owns the shared Postgres schema and migrations; serves the dashboard SPA (`iq-rest-dashboard-web`) and paired tablet devices (KDS, waiter, reservation kiosks); receives anonymous tracking events from the landing; handles Stripe billing, OAuth (Google/Apple/OTP), Google Ads ops, scan-menu (Gemini), translations, and S3 uploads.
 
+> **Schema cleanup 2026-05-28 (Stage C).** The `Company` entity, `UserCompany`, `RestaurantAccess` and `GoogleAdsExclusion` tables were dropped from Postgres. Per-restaurant billing is now the model — each `Restaurant` carries its own `plan`, `billingCycle`, `subscriptionStatus`, `currentPeriodEnd`, `paymentProcessing`, `stripeSubscriptionId`, `trialEndsAt`. The `User.stripeCustomerId` is the one Stripe customer per human; restaurants attach via the flat `RestaurantUser` table (`addedBy === null` ⇒ owner, otherwise manager/`viaGrant`). All `companyId` columns are gone (see migration `20260528200000_drop_legacy_company`). The text below has been refreshed to match — anything that still mentions Company, UserCompany, RestaurantAccess or companyId is a stale comment that should be cleaned up. See `/home/deploy/dev/AUDIT_2026-05-29.md` for the full audit + open follow-ups.
+
 ## Build rule on this server (read first)
 
 This server has ~3.7 GB RAM. **DO NOT run production builds here**:
@@ -169,10 +171,10 @@ Cookies set on the response: `iqr_session` (httpOnly, signed JWT-ish opaque toke
 - `GET /auth/google/callback?code=&state=&error=` — full-page redirect OAuth flow. Decodes base64url `state` → `{ locale, signupContext }`, exchanges the code with `redirect_uri=${API_PUBLIC_URL}/api/auth/google/callback`, sets cookies, then 302 → `${landingBase}/${locale}/dashboard` (legacy) or `${dashboardBase}/${locale}/dashboard` (new SPA).
 - `POST /auth/apple/callback` — Apple uses `response_mode=form_post`, so the body arrives urlencoded with `code`, `state`, optional `user` JSON (name, first-auth only) and optional `error`. Same flow as Google callback.
 - `POST /auth/logout` — clears all session cookies (including impersonation cookies `iqr_admin_original_*`). Resolves the right user to log out when inside admin-impersonation.
-- `GET /auth/check` — used by the SPA to bootstrap session state. Returns `{ authenticated, email, userId, companyId, onboardingStep, legacyDashboard, impersonatedBy }`.
+- `GET /auth/check` — used by the SPA to bootstrap session state. Returns `{ authenticated, email, userId, onboardingStep, impersonatedBy }`. (`legacyDashboard` is retired — landing still reads it for backward compat but the API always returns `false` if it surfaces.)
 
 Auth machinery:
-- `auth.guard.ts` — `AuthGuard` resolves cookies → `req.authUser = { userId, email, companyId, ownCompanyId, restaurantId, viaGrant, onboardingStep, ... }`. Cross-company access uses `RestaurantAccess`: when the active restaurant belongs to another company, `companyId` runs as the **owner's**, `ownCompanyId` stays as the contractor's, and `viaGrant=true` blocks billing/delete.
+- `auth.guard.ts` — `AuthGuard` resolves cookies → `req.authUser = { userId, email, restaurantId, primaryRestaurantId, viaGrant, onboardingStep }`. The active restaurant is picked from the user's `RestaurantUser` rows (sorted by `addedAt`) — `restaurantId` is the chosen attachment, `primaryRestaurantId` is the first (signup default). `viaGrant=true` when `RestaurantUser.addedBy !== null` (attached as a manager); blocks billing/delete.
 - `auth.service.ts` — full OAuth code-exchange + id_token verify + OTP send/verify + session resolve + impersonation helpers. `resolveSession` is the canonical session check used by `AuthGuard`, `UserOrDeviceGuard`, and analytics tracking.
 - `apple-auth.ts` — client-secret JWT signing for Apple's `/auth/token`.
 
@@ -182,15 +184,15 @@ All endpoints `@UseGuards(AuthGuard)`.
 - `GET /restaurant` — active restaurant of the user (or first of the company if no active id).
 - `POST /restaurant` — upsert active restaurant. New restaurants get `currency` from Cloudflare + `timezone` from `cf-timezone` (validated via `Intl.DateTimeFormat`).
 - `PUT /restaurant/languages` — `{ languages, defaultLanguage }`.
-- `POST /restaurant/generate-background` — `{ prompt? }`. Builds a Gemini image prompt (vertical 9:16 dark moody background). If no prompt, picks 6 of the menu items and asks for a flat-lay. Consumes AI image quota, refunds on failure for free-tier users. Stored as `bg.<ts>.webp` at 1080×1920 in `restaurants/<companyId>/`.
+- `POST /restaurant/generate-background` — `{ prompt? }`. Builds a Gemini image prompt (vertical 9:16 dark moody background). If no prompt, picks 6 of the menu items and asks for a flat-lay. Consumes AI image quota, refunds on failure for free-tier users. Stored as `bg.<ts>.webp` at 1080×1920 in `restaurants/<restaurantId>/`.
 - `POST /restaurant/dismiss-scan-banner` — sets `scanBannerDismissed=true`.
-- `GET /restaurant/subscription` — plan, billingCycle, status, trialEndsAt, AI image quota; `canManageBilling=false` when `viaGrant`.
+- `GET /restaurant/subscription` — plan, billingCycle, status, trialEndsAt, paymentProcessing, AI image quota; `canManageBilling=false` when `viaGrant`. Read straight off `Restaurant.*` (no Company hop).
 
 Multi-restaurant:
 - `GET /restaurants/slug-preview?name=` — preview generated slug.
 - `GET /restaurants` — list owned + granted restaurants (with `activeId`, `isPaid`, `canManageBilling`).
 - `POST /restaurants` — `{ name, duplicateFromId? }`. Creates under the user's own company, auto-switches `iqr_active_restaurant_id` cookie (1y).
-- `POST /restaurants/active` — `{ id }`. Sets active-restaurant cookie. Only allowed for owned restaurants or restaurants granted via `RestaurantAccess`.
+- `POST /restaurants/active` — `{ id }`. Sets active-restaurant cookie. Allowed for any restaurant the user is attached to via `RestaurantUser` (owned or manager — distinction only matters for billing/delete gates).
 - `DELETE /restaurants/:id` — owner-only (granted access can't delete).
 
 ### Categories (`src/categories/`) — `@UseGuards(AuthGuard)`
@@ -265,7 +267,7 @@ Device SSE:
 - `POST /upload` (multipart `file`) — 25 MB max.
   - Images (jpeg/png/webp, not gif) → `sharp().rotate().resize(1200, fit:inside).sharpen().webp(80)`.
   - GIFs / videos (mp4/webm/quicktime) — uploaded raw.
-  - Stored under `temp/<companyId>/<ts>-<rand>.<ext>` in S3 with `public-read` + `Cache-Control: public, max-age=31536000, immutable`.
+  - Stored under `temp/<restaurantId>/<ts>-<rand>.<ext>` in S3 with `public-read` + `Cache-Control: public, max-age=31536000, immutable`.
 
 ### Translate (`src/translate/`) — `@UseGuards(AuthGuard)`
 - `POST /translate` — `{ text, targetLanguage, sourceLanguage? }`. Calls `gemini-2.5-flash:generateContent` directly via fetch (`x-goog-api-key`). 35-language code → name map. Used by the dashboard's "Translate with AI" button.
@@ -275,11 +277,11 @@ Device SSE:
 
 ### Scan-menu (`src/scan-menu/`) — `@UseGuards(AuthGuard)`
 Gemini-based menu OCR for the "Upload your paper menu" flow.
-- `POST /scan-menu/parse` — `{ images?: string[], image? }` — up to 5 data-URLs (PNG/JPEG/WebP or PDF), each ≤20 MB. Fans out to `gemini-2.5-flash` in parallel with a system prompt that returns strict JSON `{ categories: [{ name, items: [{ name, price, description? }] }] }` or `{ error: "not_a_menu" }`. Originals saved to S3 under `scan_onboarding/<companyId>/`. Merges results case-insensitively by category name.
+- `POST /scan-menu/parse` — `{ images?: string[], image? }` — up to 5 data-URLs (PNG/JPEG/WebP or PDF), each ≤20 MB. Fans out to `gemini-2.5-flash` in parallel with a system prompt that returns strict JSON `{ categories: [{ name, items: [{ name, price, description? }] }] }` or `{ error: "not_a_menu" }`. Originals saved to S3 under `scan_onboarding/<restaurantId>/`. Merges results case-insensitively by category name.
 - `POST /scan-menu/save` — `{ categories, replaceExisting? }`. Deletes example items, optionally wipes existing menu, removes empty categories, creates new ones, sets `checklistMenuEdited=true` + `fromScanner=true` on the restaurant.
 
 ### Stripe (`src/stripe/`)
-- `POST /stripe/checkout` — `@UseGuards(AuthGuard)`. `{ priceLookupKey, locale?, currency? }`. EU-only EUR billing. Existing ACTIVE subscription → routes to Billing Portal so the proration is shown before commit. Otherwise creates Stripe Customer (or reuses) and a Checkout Session with `metadata.companyId`. Sets `Company.paymentProcessing=true`.
+- `POST /stripe/checkout` — `@UseGuards(AuthGuard)`. `{ priceLookupKey, locale?, currency? }`. EU-only EUR billing. Scoped to the **active restaurant**. Existing ACTIVE subscription on this restaurant → routes to the Billing Portal so proration shows before commit. Otherwise reuses (or creates) the per-human `User.stripeCustomerId` and opens a Checkout Session with `metadata.restaurantId + metadata.userId`. Sets `Restaurant.paymentProcessing=true`. `viaGrant` users are 403'd — only owners manage billing.
 - `POST /stripe/processing` — flips `paymentProcessing=true` (UI signal).
 - `POST /stripe/portal` — opens Stripe Billing Portal session.
 - `POST /stripe/webhook` — verifies via `stripe.webhooks.constructEvent(req.rawBody, signature, STRIPE_WEBHOOK_SECRET)`. Handles `checkout.session.completed`, `customer.subscription.created/updated/deleted`, `invoice.payment_succeeded/failed`. `applySubscription` maps `lookup_key` → `Plan` + `BillingCycle` and `sub.status` → `SubscriptionStatus`, writes `currentPeriodEnd`. Cancels any old subscription if a new one is created for the same company.
@@ -288,7 +290,7 @@ Gemini-based menu OCR for the "Upload your paper menu" flow.
 - `GET /geo/currency` — `{ country, currency }` from Cloudflare headers (`cf-ipcountry`, `cf-region`) via `common/geo.ts`.
 
 ### Analytics (`src/analytics/`) — `@UseGuards(AuthGuard)`
-- `GET /analytics/stats?period=&scope=` — period is `today` | `week` | `YYYY-MM` (default current UTC month); `scope=all` aggregates across the company's restaurants (forced back to single-restaurant when `viaGrant`). Returns:
+- `GET /analytics/stats?period=&scope=` — period is `today` | `week` | `YYYY-MM` (default current UTC month); `scope=all` aggregates across every restaurant the caller **owns** (`RestaurantUser.addedBy === null`) — manager-only attachments are not included so a contractor never sees the owner's other venues; forced to single-restaurant when the active restaurant itself is via grant. Returns `accountCreatedAt` (the earliest owned restaurant's createdAt) for the month-list picker. Returns:
   - `totalViews`, `totalScans` (distinct sessionId)
   - `byDay` + `byDayPrev` (densified to every day in range)
   - `byLanguage`, `byPage`
@@ -304,7 +306,7 @@ Gemini-based menu OCR for the "Upload your paper menu" flow.
     - Authenticated company is the internal `support@iq-rest.com` admin (`cmi5yzq5v0000vx0hbjmbks82`).
   - Looks up referrer hostname against a search-engine regex (google/bing/yandex/duckduckgo/yahoo/baidu/ecosia/qwant/startpage/mojeek/brave) to set `is_search`.
   - Anonymises IP (last IPv4 octet → 0, IPv6 truncated to /64).
-  - Persists `UsageEvent` with country (`cf-ipcountry`), region (`cf-region`), device, platform, is_google_ads, is_facebook_ads, is_search, companyId, ip.
+  - Persists `UsageEvent` with country (`cf-ipcountry`), region (`cf-region`), device, platform, is_google_ads, is_facebook_ads, is_search, userId (from session cookie when logged in), restaurantId (from `iqr_active_restaurant_id` cookie when present), ip.
   - Returns 204.
 
 ### Support (`src/support/`) — `@UseGuards(AuthGuard)`
@@ -316,7 +318,7 @@ Internal-only ops surface (~4 000 lines). Routes include:
 
 - `POST /admin/devices/reload-all` — broadcast force-reload to every paired tablet (post-hotfix bundle push).
 - `GET /admin/companies` / `GET /admin/companies/:id` / `DELETE /admin/companies/:id` — company management; 30-day usage windows aligned to UTC for consistency with the analytics dashboard.
-- `GET / POST / DELETE /admin/restaurant-grants[...]` — cross-company `RestaurantAccess` management (`/admin/restaurant-grants/restaurants` lists candidate restaurants).
+- (`/admin/restaurant-grants/*` was removed in Stage C alongside the `RestaurantAccess` table. Attach/detach uses `POST/DELETE /admin/restaurants/:id/users[...]`; a `RestaurantUser` row with `addedBy = <admin id>` represents the manager-style attachment — **see the audit's CRIT-1: today the admin endpoint writes `addedBy: NULL` which incorrectly grants owner rights**.)
 - `GET / POST /admin/companies/:id/messages` — admin-side support chat.
 - `POST /admin/companies/:id/send-email` — sends a templated/custom email to a company.
 - `POST /admin/impersonate` / `POST /admin/impersonate/exit` — stores the admin's original cookies under `iqr_admin_original_*`.
@@ -333,29 +335,28 @@ Internal-only ops surface (~4 000 lines). Routes include:
 
 ### Onboarding seed (`src/onboarding/`)
 - `cuisine.ts` + `cuisine-templates.ts` + `cuisine-translations.json` + `cuisine-template-images.json` — built-in cuisine-typed menu templates (`Italian`, `Japanese`, etc.) with translated dish names and preset image URLs.
-- `OnboardingSeedService` — invoked from `AuthService.verifyOtp`/Google/Apple on first sign-in of a brand-new account: creates Company + Restaurant + sample categories + sample items + sample tables + sample reservation based on `pendingCuisine` / `pendingRestaurantName` / `pendingCurrency` (or default template if no cuisine was specified).
+- `OnboardingSeedService` — invoked from `AuthService.verifyOtp`/Google/Apple on first sign-in of a brand-new account: creates Restaurant + RestaurantUser (`addedBy: null`) + sample categories + sample items + sample tables + sample reservations based on `pendingCuisine` / `pendingRestaurantName` / `pendingCurrency` (or default template if no cuisine was specified). The seed sets `plan: FREE, subscriptionStatus: INACTIVE, trialEndsAt: now+14d` so the very first restaurant gets a 14-day trial; subsequent restaurants created via `RestaurantService.createForCompany` (legacy name) start FREE with no trial.
 
-## Prisma models (`prisma/schema.prisma`, 17 models, this service owns migrations)
+## Prisma models (`prisma/schema.prisma`, 13 models, this service owns migrations)
 
 | Model | Purpose |
 |---|---|
-| `User` | Owner accounts. Stores OTP + hashed `sessionToken` + `preferredLocale` + pending-onboarding-context (`pendingCuisine`, `pendingRestaurantName`, `pendingCurrency`). |
+| `User` | Human accounts. Stores OTP + hashed `sessionToken` + `preferredLocale` + pending-onboarding-context (`pendingCuisine`, `pendingRestaurantName`, `pendingCurrency`) + **`stripeCustomerId`** (per-human Stripe customer; one customer owns many per-restaurant subscriptions) + email-campaign tracking (`emailsSent`, `emailUnsubscribed`, `upsellShownAt`, `reminderSentAt`). |
 | `Session` | Multi-session table — `tokenHash` unique, `userAgent`, `ip`, `expiresAt`. |
-| `Company` | Subscription + plan + trial + email-campaign tracking + AI scan/order limits + `googleClickId` (gclid attribution). |
-| `Restaurant` | Branding, currency, contacts, timezone, languages, reservation + order configuration, AI quotas, checklist flags. |
-| `RestaurantAccess` | Cross-company grant: a contractor user manages a restaurant owned by another company. `companyId` of the active restaurant stays the OWNER's; the contractor runs inside the owner's context (`viaGrant=true`) with billing + delete blocked. |
+| `Restaurant` | Branding, currency, contacts, timezone, languages, reservation + order configuration, AI quotas, checklist flags **AND per-restaurant billing fields**: `plan` (FREE/BASIC/PRO), `billingCycle` (MONTHLY/YEARLY), `subscriptionStatus`, `currentPeriodEnd`, `paymentProcessing`, `stripeSubscriptionId` (unique), `trialEndsAt`. Trial is populated only for the user's first restaurant; subsequent restaurants start FREE without trial. |
+| `RestaurantUser` | Flat user ↔ restaurant attachment. `addedBy` is null for the original creator (owner), non-null for users attached later (managers). `viaGrant` in `AuthGuard` is derived from `addedBy !== null`. Replaces the old UserCompany + RestaurantAccess split. |
 | `Table` | number, capacity, zone, color, x/y on floor map, photo. Soft-delete via `deletedAt`. |
 | `Reservation` | date + startTime + duration (minutes), status, guest details. |
 | `Category` | 2-level tree via `parentId` (group → categories). Soft-delete. |
 | `Item` | dishes; allergens + diets arrays; options JSON (variant groups with priceDelta); soft-delete. `categoryId` is nullable + SetNull so deleting a category orphans the item instead of cascade-removing — orders + historical analytics keep resolving. |
-| `UserCompany` | many-to-many user ↔ company. |
-| `PageView` | analytics rows from public-menu-api `/analytics/track`. |
-| `SupportMessage` | per-company support chat. |
-| `UsageEvent` | unified analytics events (replaces old PulseEvent + Session + AnalyticsEvent). gclid/ad_params/companyId attached server-side. `is_google_ads` / `is_facebook_ads` / `is_search` flags; `fbSentEvents` records which Meta CAPI events were already pushed for dedup. |
+| `PageView` | analytics rows from public-menu-api `/analytics/track`. Keyed by `restaurantId`. |
+| `SupportMessage` | per-restaurant support chat. `restaurantId` is NOT NULL — old rows were backfilled in migration B from the company's first restaurant. |
+| `UsageEvent` | unified analytics events (replaces old PulseEvent + Session + AnalyticsEvent). gclid/ad_params + `userId` + `restaurantId` attached server-side. `is_google_ads` / `is_facebook_ads` / `is_search` flags; `fbSentEvents` records which Meta CAPI events were already pushed for dedup. |
 | `Order` | items JSON + per-order discount + discountTotal; `statusBeforeClose` so "Return to kitchen" restores the prior status; soft-delete. Unique on `(restaurantId, orderDate, dailyNumber)`. |
-| `GoogleAdsExclusion` | global negative-keyword exclusions managed from the admin surface. |
-| `Device` | tablet pairing record — name, type (`KITCHEN`/`WAITER`/`RESERVATION`), status, `tokenVersion` (bumped on revoke; re-checked in DeviceGuard), heartbeat (`lastSeenAt`). |
+| `Device` | tablet pairing record — name, type (`KITCHEN`/`WAITER`/`RESERVATION`), status, `tokenVersion` (bumped on revoke; re-checked in DeviceGuard), heartbeat (`lastSeenAt`). **⚠ Missing `restaurant Restaurant @relation onDelete: Cascade` — see audit CRIT-2: deleting a restaurant currently leaves orphan devices.** |
 | `PairingCode` | one-time 6-digit code for a Device. TTL ~120s. Replaced on regenerate. |
+
+**Removed in Stage C (2026-05-28):** `Company`, `UserCompany`, `RestaurantAccess`, `GoogleAdsExclusion`, plus every `companyId` column on the surviving tables.
 
 ## Cross-service contract
 
@@ -375,7 +376,7 @@ GitHub Actions builds on push → uploads to `/home/deploy/apps/iq-rest-dashboar
 - Background side effects (emails, NOTIFYs) must `void` / `.catch(...)` and never block the user.
 - SSRF guards: any user-supplied URL that we fetch must be checked against `${S3_HOST}/${S3_NAME}/` (see `items.generateImage`).
 - Cookies: HttpOnly for tokens, non-HttpOnly for the email mirror cookie the UI needs to read.
-- Cross-company grants flow through `viaGrant` flag — never use `companyId` for billing decisions, always use `ownCompanyId`.
+- Per-restaurant billing — every billing decision keys on the **active restaurant** (`req.authUser.restaurantId`). `viaGrant` users (managers) are 403'd on checkout/portal/delete; the owner of each restaurant is the user with `RestaurantUser.addedBy === null`.
 - Throttling: per-route `@Throttle` overrides where the default 600/60s is too generous (e.g. `/track/:event`).
 
 ## Related repositories

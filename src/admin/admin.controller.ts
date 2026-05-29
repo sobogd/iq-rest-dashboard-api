@@ -115,9 +115,13 @@ export class AdminController {
         SELECT "restaurantId", COUNT(*) AS count FROM support_messages
         WHERE "restaurantId" = ANY(${ids}::text[]) AND "isAdmin" = false AND "createdAt" >= ${startOfMessagesLastDay}
         GROUP BY "restaurantId"`,
+      // "Last visit" = last time a logged-in user was active in the dashboard
+      // with this restaurant selected. Sourced from usage_events (where the
+      // dashboard cookie pins restaurantId), NOT page_views (those are
+      // anonymous customer QR-menu scans, not owner activity).
       this.prisma.$queryRaw<{ restaurantId: string; last_visit: Date | null }[]>`
-        SELECT "restaurantId", MAX("createdAt") AS last_visit FROM page_views
-        WHERE "restaurantId" = ANY(${ids}::text[])
+        SELECT "restaurantId", MAX("at") AS last_visit FROM usage_events
+        WHERE "restaurantId" = ANY(${ids}::text[]) AND "userId" IS NOT NULL
         GROUP BY "restaurantId"`,
     ]);
 

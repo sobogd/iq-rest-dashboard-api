@@ -18,14 +18,18 @@ import {
   getStripe,
   PRICE_LOOKUP_KEYS,
   type PriceLookupKey,
+  type SupportedCurrency,
   getLookupKeyWithCurrency,
+  isSupportedCurrency,
 } from "../common/stripe";
+import { getRequestBillingCurrency } from "../common/geo";
 
 interface SubscriptionData {
   id: string;
   status: string;
   current_period_end?: number;
-  items: { data: Array<{ current_period_end?: number; price: { id: string; lookup_key?: string | null } }> };
+  currency?: string;
+  items: { data: Array<{ current_period_end?: number; price: { id: string; lookup_key?: string | null; currency?: string } }> };
   metadata?: Record<string, string>;
   customer?: string;
 }
@@ -63,15 +67,32 @@ export class StripeController {
       throw new BadRequestException("Invalid price lookup key");
     }
 
-    // EU-only billing — Stripe checkout always uses the EUR price object.
+    // Resolve billing currency. The restaurant's stored billingCurrency (set at
+    // onboarding / via the pricing selector) wins; an explicit body.currency or
+    // the geo-derived currency is the fallback. Currency is locked once a Stripe
+    // customer exists for the restaurant (Stripe won't mix currencies), so for
+    // an active sub we always reuse the stored one.
+    const requested = isSupportedCurrency(body.currency?.toUpperCase())
+      ? (body.currency!.toUpperCase() as SupportedCurrency)
+      : null;
+    const stored = isSupportedCurrency(restaurant.billingCurrency)
+      ? (restaurant.billingCurrency as SupportedCurrency)
+      : null;
+    // Active sub → currency is locked to whatever the customer already pays in.
+    // Otherwise the selector/cookie choice wins, then the stored value, then geo.
+    const locked = restaurant.subscriptionStatus === "ACTIVE";
+    const currency: SupportedCurrency = locked
+      ? (stored ?? requested ?? getRequestBillingCurrency(req))
+      : (requested ?? stored ?? getRequestBillingCurrency(req));
     const baseLookupKey = body.priceLookupKey as PriceLookupKey;
-    const fullLookupKey = getLookupKeyWithCurrency(baseLookupKey, "EUR");
+    const fullLookupKey = getLookupKeyWithCurrency(baseLookupKey, currency);
 
     // When there's already an active subscription on THIS restaurant, route to
     // the Stripe Billing Portal so the switch shows the prorated charge before
-    // it commits.
+    // it commits. Prefer the restaurant's own customer; fall back to the legacy
+    // per-user customer for subs created before per-restaurant billing.
     if (restaurant.subscriptionStatus === "ACTIVE" && restaurant.stripeSubscriptionId) {
-      const customer = user.stripeCustomerId;
+      const customer = restaurant.stripeCustomerId ?? user.stripeCustomerId;
       if (!customer) {
         throw new BadRequestException("Subscription is active but no Stripe customer found");
       }
@@ -85,8 +106,11 @@ export class StripeController {
       return { url: portal.url };
     }
 
-    // Reuse / create the per-user Stripe customer.
-    let customerId = user.stripeCustomerId;
+    // Per-restaurant Stripe customer. Reuse the restaurant's own customer if it
+    // already has one; otherwise create a fresh customer scoped to this venue
+    // (NOT the legacy per-user customer — that one may be locked to EUR by an
+    // existing sub on another restaurant).
+    let customerId = restaurant.stripeCustomerId;
     if (customerId) {
       try {
         const existing = await stripe.customers.retrieve(customerId);
@@ -98,13 +122,13 @@ export class StripeController {
     if (!customerId) {
       const customer = await stripe.customers.create({
         email: user.email,
-        metadata: { userId: user.id },
+        metadata: { restaurantId: restaurant.id, userId: user.id },
       });
       customerId = customer.id;
     }
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: { stripeCustomerId: customerId },
+    await this.prisma.restaurant.update({
+      where: { id: restaurant.id },
+      data: { stripeCustomerId: customerId, billingCurrency: currency },
     });
 
     let prices = await stripe.prices.list({ lookup_keys: [fullLookupKey], active: true, limit: 1 });
@@ -157,18 +181,24 @@ export class StripeController {
   @Post("portal")
   @UseGuards(AuthGuard)
   async createPortal(@Req() req: Request, @Body() body: { locale?: string }) {
-    const { userId, viaGrant } = (req as AuthedRequest).authUser;
+    const { userId, restaurantId, viaGrant } = (req as AuthedRequest).authUser;
     if (viaGrant) throw new ForbiddenException("Billing is managed by the restaurant owner");
     const stripe = getStripe();
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user || !user.stripeCustomerId) {
+    const [restaurant, user] = await Promise.all([
+      this.prisma.restaurant.findUnique({ where: { id: restaurantId } }),
+      this.prisma.user.findUnique({ where: { id: userId } }),
+    ]);
+    // Prefer the restaurant's own customer; fall back to the legacy per-user
+    // customer for subscriptions created before per-restaurant billing.
+    const customer = restaurant?.stripeCustomerId ?? user?.stripeCustomerId;
+    if (!customer) {
       throw new BadRequestException("No subscription found");
     }
     const appUrl = process.env.APP_URL;
     if (!appUrl) throw new BadRequestException("APP_URL not configured");
     const locale = body?.locale || "en";
     const session = await stripe.billingPortal.sessions.create({
-      customer: user.stripeCustomerId,
+      customer,
       return_url: `${appUrl}/${locale}/dashboard/settings/billing`,
     });
     return { url: session.url };
@@ -379,6 +409,10 @@ export class StripeController {
       if (!isNaN(d.getTime())) currentPeriodEnd = d;
     }
 
+    // Stripe reports the subscription currency in lowercase ISO (e.g. "nok").
+    const subCurrency = (sub.currency ?? item?.price.currency ?? "").toUpperCase();
+    const billingCurrency = isSupportedCurrency(subCurrency) ? subCurrency : undefined;
+
     await this.prisma.restaurant.update({
       where: { id: restaurantId },
       data: {
@@ -388,6 +422,7 @@ export class StripeController {
         subscriptionStatus,
         currentPeriodEnd,
         paymentProcessing: false,
+        ...(billingCurrency ? { billingCurrency } : {}),
       },
     });
   }

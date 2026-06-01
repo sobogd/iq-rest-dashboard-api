@@ -170,6 +170,14 @@ model Restaurant {
   currentPeriodEnd      DateTime?
   paymentProcessing     Boolean             @default(false)
   stripeSubscriptionId  String?             @unique
+  // Stripe customer is now per-restaurant (each venue bills independently and
+  // may use a different currency). Legacy subscriptions created before this
+  // change still sit under User.stripeCustomerId; new checkouts create/reuse
+  // this one. Currency is locked per Stripe customer, so it must be per-venue.
+  stripeCustomerId      String?             @unique
+  // Billing currency for this restaurant's IQ Rest subscription (EUR/NOK/SEK/
+  // DKK). Distinct from `currency` above, which is the public-menu currency.
+  billingCurrency       String              @default("EUR")
   trialEndsAt           DateTime?
 
   tables          Table[]

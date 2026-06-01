@@ -1,5 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
+import { isSupportedCurrency } from "../common/stripe";
 import type { CuisineKey } from "./cuisine";
 import { cuisineTemplates, commonPlaceholders, sampleGuestNames, type LocaleString } from "./cuisine-templates";
 import { isReservedSlug, slugify } from "../common/reserved-slugs";
@@ -116,6 +117,9 @@ export class OnboardingSeedService {
           instagram: commonPlaceholders.instagram,
           whatsapp: commonPlaceholders.whatsapp,
           currency,
+          // Billing currency: the Scandinavian menu currencies (NOK/SEK/DKK)
+          // double as billing currencies; everything else bills in EUR.
+          billingCurrency: isSupportedCurrency(currency) ? currency : "EUR",
           languages,
           defaultLanguage: seedLocale,
           ordersEnabled: true,

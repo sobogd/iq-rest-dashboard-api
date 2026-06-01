@@ -4,7 +4,7 @@ import { z } from "zod";
 import { PrismaService } from "../prisma/prisma.service";
 import { AutoTranslateService } from "../auto-translate/auto-translate.service";
 import { isReservedSlug, slugify } from "../common/reserved-slugs";
-import { getStripe } from "../common/stripe";
+import { getStripe, isSupportedCurrency } from "../common/stripe";
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 const reservationDaySchema = z
@@ -43,6 +43,7 @@ interface RestaurantInput {
   description?: string | null;
   slug?: string | null;
   currency?: string;
+  billingCurrency?: string;
   source?: string | null;
   backgroundType?: string | null;
   accentColor?: string;
@@ -73,7 +74,7 @@ interface RestaurantInput {
 }
 
 const FIELDS: (keyof RestaurantInput)[] = [
-  "title", "subtitle", "description", "slug", "currency", "source", "backgroundType",
+  "title", "subtitle", "description", "slug", "currency", "billingCurrency", "source", "backgroundType",
   "accentColor", "address", "x", "y", "googlePlaceId", "phone", "instagram", "whatsapp", "languages",
   "defaultLanguage", "hideTitle", "menuLayout", "paymentMethods", "reservationsEnabled", "reservationMode",
   "reservationSlotMinutes", "workingHoursStart", "workingHoursEnd",
@@ -210,6 +211,12 @@ export class RestaurantService {
   async upsert(userId: string, restaurantId: string | null, raw: Record<string, unknown>) {
     const input = pickFields(raw);
 
+    // Billing currency must be one of the supported set — drop anything else
+    // so the owner can't set an unbillable currency from the client.
+    if (input.billingCurrency !== undefined && !isSupportedCurrency(input.billingCurrency)) {
+      delete input.billingCurrency;
+    }
+
     const { reservationSchedule, ...rest } = input;
     const scheduleField =
       reservationSchedule === undefined
@@ -255,16 +262,19 @@ export class RestaurantService {
     }
 
     const slug = rest.slug || (await this.uniqueSlug(rest.title || "rest"));
+    const menuCurrency = rest.currency || "EUR";
     const createData: Prisma.RestaurantUncheckedCreateInput = {
       title: rest.title || "",
       slug,
-      currency: rest.currency || "EUR",
+      currency: menuCurrency,
       accentColor: rest.accentColor || "#000000",
       languages: rest.languages || ["en"],
       defaultLanguage: rest.defaultLanguage || "en",
       startedFromScratch: true,
       ...rest,
       ...scheduleField,
+      // Scandinavian menu currencies double as billing currencies; else EUR.
+      billingCurrency: isSupportedCurrency(menuCurrency) ? menuCurrency : "EUR",
     };
     const created = await this.prisma.restaurant.create({ data: createData });
     // Link the calling user to the new restaurant via the flat-access model.
@@ -335,6 +345,9 @@ export class RestaurantService {
         title: name,
         slug,
         currency: baseSettings?.currency ?? "EUR",
+        billingCurrency: isSupportedCurrency(baseSettings?.currency ?? "EUR")
+          ? (baseSettings?.currency ?? "EUR")
+          : "EUR",
         accentColor: baseSettings?.accentColor ?? "#000000",
         languages,
         defaultLanguage,

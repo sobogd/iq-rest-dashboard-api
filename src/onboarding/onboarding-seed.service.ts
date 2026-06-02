@@ -104,7 +104,9 @@ export class OnboardingSeedService {
     // Always offer English as a secondary language; deduplicate in case seedLocale is en.
     const languages = Array.from(new Set([seedLocale, "en"]));
     const slug = await this.uniqueSlug(restaurantName);
-    const description = pick(commonPlaceholders.description, seedLocale);
+    // No default hero description — only the restaurant name shows over the
+    // background. Avoids the "replace this text" placeholder looking unpolished.
+    const description = null;
 
     return this.prisma.$transaction(async (tx) => {
       const restaurant = await tx.restaurant.create({

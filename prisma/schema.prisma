@@ -109,7 +109,7 @@ model Restaurant {
   menuLayout      String   @default("flat")
   // Public-menu hero title/description font scale: "small" | "medium" | "large".
   // Proportional steps applied over the background image (default large).
-  titleScale      String   @default("large")
+  titleScale      String   @default("medium")
   // Payment methods this restaurant offers — enum codes only (cash, card, ...).
   // Display strings live in dashboard locales; integrations add new codes here.
   paymentMethods  String[] @default(["cash", "card"])

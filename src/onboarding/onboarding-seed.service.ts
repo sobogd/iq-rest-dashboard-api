@@ -2,7 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { isSupportedCurrency } from "../common/stripe";
 import type { CuisineKey } from "./cuisine";
-import { cuisineTemplates, commonPlaceholders, sampleGuestNames, type LocaleString } from "./cuisine-templates";
+import { cuisineTemplates, commonPlaceholders, type LocaleString } from "./cuisine-templates";
 import { isReservedSlug, slugify } from "../common/reserved-slugs";
 
 // Locales for which we ship at least subtitle/category/item translations. Anything outside this
@@ -57,13 +57,6 @@ function buildItemTranslations(
     out[lang] = entry;
   }
   return out;
-}
-
-function isoDateOffset(daysFromToday: number): Date {
-  const d = new Date();
-  d.setUTCHours(0, 0, 0, 0);
-  d.setUTCDate(d.getUTCDate() + daysFromToday);
-  return d;
 }
 
 @Injectable()
@@ -229,34 +222,9 @@ export class OnboardingSeedService {
         tables.push(created);
       }
 
-      // Sample orders are intentionally NOT seeded — they would otherwise count
-      // toward the new restaurant's revenue analytics. Sample reservations and
-      // tables stay (they don't affect revenue).
-      const guests = sampleGuestNames[seedLocale] ?? sampleGuestNames.en;
-
-      // Sample reservations — one today, one tomorrow.
-      const reservationSamples = [
-        { dateOffset: 0, startTime: "19:00", guestsCount: 2, tableIdx: 0 },
-        { dateOffset: 1, startTime: "20:30", guestsCount: 4, tableIdx: 1 },
-      ];
-
-      for (let idx = 0; idx < reservationSamples.length; idx++) {
-        const s = reservationSamples[idx];
-        await tx.reservation.create({
-          data: {
-            restaurantId: restaurant.id,
-            tableId: tables[s.tableIdx].id,
-            date: isoDateOffset(s.dateOffset),
-            startTime: s.startTime,
-            duration: 90,
-            guestName: guests[(idx + 1) % guests.length],
-            guestEmail: `guest${idx + 1}@example.com`,
-            guestsCount: s.guestsCount,
-            status: idx === 0 ? "confirmed" : "pending",
-          },
-        });
-      }
-
+      // No sample orders or reservations are seeded: sample orders would skew
+      // revenue analytics, and sample (future) bookings would block the owner
+      // from deleting the demo tables. Only the empty tables are seeded.
       return { restaurantId: restaurant.id };
     });
   }

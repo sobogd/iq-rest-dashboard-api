@@ -72,6 +72,8 @@ export class TablesService {
   async remove(restaurantId: string, id: string) {
     const tbl = await this.prisma.table.findFirst({ where: { id, restaurantId, deletedAt: null } });
     if (!tbl) throw new NotFoundException();
+    // Soft-delete only — keeps orders/bookings resolvable via tableId/tableNumber.
+    // The dashboard blocks deleting a table that still has a FUTURE booking.
     await this.prisma.table.update({ where: { id }, data: { deletedAt: new Date() } });
   }
 }

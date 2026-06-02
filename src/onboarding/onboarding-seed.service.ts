@@ -2,7 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { isSupportedCurrency } from "../common/stripe";
 import type { CuisineKey } from "./cuisine";
-import { cuisineTemplates, commonPlaceholders, type LocaleString } from "./cuisine-templates";
+import { cuisineTemplates, commonPlaceholders, SAMPLE_PREFIX, type LocaleString } from "./cuisine-templates";
 import { isReservedSlug, slugify } from "../common/reserved-slugs";
 
 // Locales for which we ship at least subtitle/category/item translations. Anything outside this
@@ -170,14 +170,15 @@ export class OnboardingSeedService {
       }> = [];
       for (const item of template.items) {
         const category = createdCategories[item.categoryIndex];
-        // Prefix every sample dish with "Sample: " so the owner can spot (and
-        // replace/delete) the seeded items at a glance — this replaces the old
-        // isExample flag as the way to mark seeded content.
+        // Prefix every sample dish with a localized "Sample: " so the owner can
+        // spot (and replace/delete) the seeded items at a glance — this replaces
+        // the old isExample flag as the way to mark seeded content.
         const sampleName: LocaleString = {} as LocaleString;
         const nameMl: Record<string, string> = {};
         for (const [lang, value] of Object.entries(item.name)) {
           if (typeof value === "string" && value.length > 0) {
-            sampleName[lang] = `Sample: ${value}`;
+            const prefix = SAMPLE_PREFIX[lang] || SAMPLE_PREFIX.en;
+            sampleName[lang] = `${prefix}${value}`;
             nameMl[lang] = sampleName[lang];
           }
         }

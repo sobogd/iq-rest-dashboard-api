@@ -111,6 +111,52 @@ export const DEFAULT_RESTAURANT_NAME: LocaleString = {
   zh: "我的餐厅",
 };
 
+/** Localized "Sample: " prefix put in front of every seeded demo dish so the
+ *  owner can spot (and replace) it. Detection (scan cleanup, "real items"
+ *  count) matches against ALL of these prefixes, so it stays robust regardless
+ *  of the restaurant's language and is backward-compatible with the old
+ *  English-only "Sample: " prefix. */
+export const SAMPLE_PREFIX: Record<string, string> = {
+  en: "Sample: ",
+  es: "Muestra: ",
+  de: "Beispiel: ",
+  fr: "Exemple: ",
+  it: "Esempio: ",
+  pt: "Exemplo: ",
+  nl: "Voorbeeld: ",
+  pl: "Przykład: ",
+  ru: "Образец: ",
+  uk: "Зразок: ",
+  sv: "Exempel: ",
+  da: "Eksempel: ",
+  no: "Eksempel: ",
+  fi: "Esimerkki: ",
+  cs: "Ukázka: ",
+  el: "Δείγμα: ",
+  tr: "Örnek: ",
+  ro: "Exemplu: ",
+  hu: "Minta: ",
+  bg: "Пример: ",
+  hr: "Primjer: ",
+  sk: "Ukážka: ",
+  sl: "Primer: ",
+  et: "Näidis: ",
+  lv: "Paraugs: ",
+  lt: "Pavyzdys: ",
+  sr: "Primer: ",
+  ca: "Mostra: ",
+  ga: "Sampla: ",
+  is: "Sýnishorn: ",
+  fa: "نمونه: ",
+  ar: "عينة: ",
+  ja: "見本: ",
+  ko: "샘플: ",
+  zh: "示例: ",
+};
+
+/** Deduplicated list of all sample prefixes, for matching seeded dishes. */
+export const SAMPLE_PREFIXES: string[] = Array.from(new Set(Object.values(SAMPLE_PREFIX)));
+
 /** Single universal template. Two categories (Food / Drinks), two items each.
  *  Food items carry a reused S3 photo; drinks intentionally have no image. */
 export const cuisineTemplates: Record<CuisineKey, CuisineTemplate> = {

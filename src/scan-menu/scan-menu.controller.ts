@@ -13,6 +13,7 @@ import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { AuthGuard, type AuthedRequest } from "../auth/auth.guard";
 import { PrismaService } from "../prisma/prisma.service";
 import { s3Client, s3Bucket, s3Key } from "../upload/s3";
+import { SAMPLE_PREFIXES } from "../onboarding/cuisine-templates";
 
 const MAX_SIZE = 20 * 1024 * 1024;
 const MAX_FILES = 5;
@@ -219,9 +220,11 @@ export class ScanMenuController {
     );
     if (incoming.length === 0) throw new BadRequestException("No items selected");
 
-    // Seeded sample dishes are named "Sample: …" — wipe them before importing
-    // the scanned menu (replaces the old isExample-flag cleanup).
-    await this.prisma.item.deleteMany({ where: { restaurantId, name: { startsWith: "Sample: " } } });
+    // Seeded sample dishes are named with a localized "Sample: " prefix — wipe
+    // them before importing the scanned menu (replaces the old isExample flag).
+    await this.prisma.item.deleteMany({
+      where: { restaurantId, OR: SAMPLE_PREFIXES.map((p) => ({ name: { startsWith: p } })) },
+    });
 
     if (body.replaceExisting) {
       await this.prisma.item.deleteMany({ where: { restaurantId } });

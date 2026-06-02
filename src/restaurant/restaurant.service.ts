@@ -59,6 +59,7 @@ interface RestaurantInput {
   hideTitle?: boolean;
   menuLayout?: string;
   titleScale?: string;
+  languageSwitcher?: string;
   paymentMethods?: string[];
   reservationsEnabled?: boolean;
   reservationMode?: string;
@@ -77,7 +78,7 @@ interface RestaurantInput {
 const FIELDS: (keyof RestaurantInput)[] = [
   "title", "subtitle", "description", "slug", "currency", "billingCurrency", "source", "backgroundType",
   "accentColor", "address", "x", "y", "googlePlaceId", "phone", "instagram", "whatsapp", "languages",
-  "defaultLanguage", "hideTitle", "menuLayout", "titleScale", "paymentMethods", "reservationsEnabled", "reservationMode",
+  "defaultLanguage", "hideTitle", "menuLayout", "titleScale", "languageSwitcher", "paymentMethods", "reservationsEnabled", "reservationMode",
   "reservationSlotMinutes", "workingHoursStart", "workingHoursEnd",
   "reservationSchedule", "timezone", "ordersEnabled",
   "orderNameEnabled", "orderPhoneEnabled", "orderAddressEnabled", "orderMode",
@@ -124,6 +125,13 @@ function pickFields(raw: Record<string, unknown>): RestaurantInput {
       throw new BadRequestException("Invalid titleScale: must be 'small', 'medium' or 'large'");
     }
     out.titleScale = v;
+  }
+  if (out.languageSwitcher !== undefined) {
+    const v = String(out.languageSwitcher);
+    if (v !== "inline" && v !== "top") {
+      throw new BadRequestException("Invalid languageSwitcher: must be 'inline' or 'top'");
+    }
+    out.languageSwitcher = v;
   }
   if (out.slug !== undefined && out.slug !== null) {
     // Normalise and re-check reserved set so a user-typed slug can't slip

@@ -115,6 +115,9 @@ export class OnboardingSeedService {
           billingCurrency: isSupportedCurrency(currency) ? currency : "EUR",
           // Dark accent by default for newly onboarded restaurants.
           accentColor: "#1A1A1A",
+          // New restaurants show the language switcher as a globe icon over the
+          // hero. Existing restaurants keep the inline nav-list row (schema default).
+          languageSwitcher: "top",
           languages,
           defaultLanguage: seedLocale,
           // Orders are off by default now; the owner enables them in settings.

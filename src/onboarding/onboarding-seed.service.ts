@@ -122,7 +122,9 @@ export class OnboardingSeedService {
           billingCurrency: isSupportedCurrency(currency) ? currency : "EUR",
           languages,
           defaultLanguage: seedLocale,
-          ordersEnabled: true,
+          // Orders are off by default now; the owner enables them in settings.
+          // Reservations stay on. Sample orders/reservations are still seeded.
+          ordersEnabled: false,
           reservationsEnabled: true,
           ...(template.backgroundUrl ? { source: template.backgroundUrl, backgroundType: "image" } : {}),
           // FIRST restaurant of the account → 14-day trial. Subsequent ones

@@ -13,6 +13,7 @@ import { MailService } from "../mail/mail.service";
 import { I18nService } from "../i18n/i18n.service";
 import { OnboardingSeedService } from "../onboarding/onboarding-seed.service";
 import { isCuisineKey, type CuisineKey } from "../onboarding/cuisine";
+import { DEFAULT_RESTAURANT_NAME } from "../onboarding/cuisine-templates";
 import {
   generateOTP,
   generateSessionToken,
@@ -114,7 +115,7 @@ export class AuthService implements OnModuleDestroy {
     // doesn't land on a blank dashboard. Existing users are left alone (their pending fields
     // are not overwritten with defaults).
     if (!existing && Object.keys(pending).length === 0) {
-      pending = this.defaultSignupContext(email, currency);
+      pending = this.defaultSignupContext(currency, normalizedLocale);
     }
 
     if (existing) {
@@ -184,19 +185,23 @@ export class AuthService implements OnModuleDestroy {
     };
   }
 
-  /** Fallback context for a brand-new user who didn't go through the create-flow (i.e. came in
-   *  via plain /login). Picks the generic "restaurant" cuisine and derives a name from the
-   *  email local-part so they still land in a populated dashboard. */
+  /** Localized default restaurant name ("My restaurant" in the user's language).
+   *  Onboarding is currently skipped, so every brand-new account gets this name. */
+  private defaultRestaurantName(locale: string | null | undefined): string {
+    const short = this.i18n.urlLocale(locale || "en");
+    return DEFAULT_RESTAURANT_NAME[short] || DEFAULT_RESTAURANT_NAME.en;
+  }
+
+  /** Fallback context for a brand-new user who didn't go through the create-flow
+   *  (the cuisine/name steps are skipped now). Picks the generic "restaurant"
+   *  cuisine and the localized default name so they land in a populated dashboard. */
   private defaultSignupContext(
-    email: string,
     currency: string | undefined,
+    locale: string | null | undefined,
   ): { pendingCuisine: CuisineKey; pendingRestaurantName: string; pendingCurrency: string } {
-    const local = email.split("@")[0] || "my";
-    const cleaned = local.replace(/[._-]+/g, " ").trim().slice(0, 40);
-    const name = cleaned ? cleaned.charAt(0).toUpperCase() + cleaned.slice(1) : "My";
     return {
       pendingCuisine: "restaurant",
-      pendingRestaurantName: `${name}'s Restaurant`,
+      pendingRestaurantName: this.defaultRestaurantName(locale),
       pendingCurrency: currency || "EUR",
     };
   }
@@ -236,7 +241,7 @@ export class AuthService implements OnModuleDestroy {
       await this.seed.seedTemplate({
         userId,
         cuisine: user.pendingCuisine,
-        restaurantName: user.pendingRestaurantName || "My Restaurant",
+        restaurantName: user.pendingRestaurantName || this.defaultRestaurantName(user.preferredLocale || fallbackLocale),
         currency: user.pendingCurrency || "EUR",
         locale: user.preferredLocale || fallbackLocale,
       });
@@ -509,7 +514,7 @@ export class AuthService implements OnModuleDestroy {
     // Brand-new Google account with no create-flow context → use the default template.
     let pending = this.normalizeSignupContext(signupContext, currency);
     if (isNewUser && Object.keys(pending).length === 0) {
-      pending = this.defaultSignupContext(email, currency);
+      pending = this.defaultSignupContext(currency, locale);
     }
     await this.prisma.user.update({
       where: { id: user.id },
@@ -606,7 +611,7 @@ export class AuthService implements OnModuleDestroy {
     const tokenHash = hashSessionToken(token);
     let pending = this.normalizeSignupContext(signupContext, currency);
     if (isNewUser && Object.keys(pending).length === 0) {
-      pending = this.defaultSignupContext(email, currency);
+      pending = this.defaultSignupContext(currency, locale);
     }
     await this.prisma.user.update({
       where: { id: user.id },

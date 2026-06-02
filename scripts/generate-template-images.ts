@@ -37,7 +37,10 @@ type CuisineStyle = {
   plating: string;
 };
 
-const CUISINE_STYLE: Record<CuisineKey, CuisineStyle> = {
+// Keyed by string (not CuisineKey): the template set was collapsed to a single
+// "restaurant" cuisine, but the historical per-cuisine styles are kept here for
+// reference / one-off re-runs. Only CUISINE_KEYS entries are actually iterated.
+const CUISINE_STYLE: Record<string, CuisineStyle> = {
   pizza: {
     scene: "cozy Italian pizzeria interior with a wood-fired brick oven glowing in the background, exposed brick wall, hanging baskets of garlic",
     surface: "rustic dark wooden table with subtle flour dusting",

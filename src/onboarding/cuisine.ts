@@ -1,13 +1,7 @@
-export const CUISINE_KEYS = [
-  "pizza",
-  "sushi",
-  "asian",
-  "burger",
-  "coffee",
-  "bar",
-  "bakery",
-  "restaurant",
-] as const;
+// Onboarding now seeds a single universal template, so there is just one key.
+// (The landing's cuisine-picker step is currently skipped — see the create-flow
+// register mode. Kept as an array/type so the rest of the pipeline is unchanged.)
+export const CUISINE_KEYS = ["restaurant"] as const;
 
 export type CuisineKey = (typeof CUISINE_KEYS)[number];
 

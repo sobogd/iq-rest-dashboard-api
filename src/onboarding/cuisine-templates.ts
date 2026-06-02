@@ -1,6 +1,4 @@
 import type { CuisineKey } from "./cuisine";
-import generatedImages from "./cuisine-template-images.json";
-import translationOverrides from "./cuisine-translations.json";
 
 /** Multilingual string. `en` is the canonical fallback; other locale keys may or may not exist.
  *  The seeder picks `[seedLocale]` and falls back to `en` when missing. */
@@ -14,7 +12,7 @@ export type SeedItem = {
   price: number;
   name: LocaleString;
   description?: LocaleString;
-  /** Filled at module-load from cuisine-template-images.json (output of scripts/generate-template-images.ts). */
+  /** Direct S3 URL — reused from the previously generated template image set. */
   imageUrl?: string;
 };
 
@@ -22,7 +20,7 @@ export type CuisineTemplate = {
   subtitle: LocaleString;
   categories: SeedCategory[];
   items: SeedItem[];
-  /** Restaurant cover background, also from the generated images JSON. */
+  /** Restaurant cover background. */
   backgroundUrl?: string;
 };
 
@@ -72,211 +70,345 @@ const COMMON_PLACEHOLDERS = {
 
 export const commonPlaceholders = COMMON_PLACEHOLDERS;
 
-export const cuisineTemplates: Record<CuisineKey, CuisineTemplate> = {
-  pizza: {
-    subtitle: { en: "Authentic Italian Pizzeria", es: "Pizzería Italiana Auténtica" },
-    categories: [
-      { sortOrder: 1, name: { en: "Pizzas", es: "Pizzas" } },
-      { sortOrder: 2, name: { en: "Pasta", es: "Pasta" } },
-      { sortOrder: 3, name: { en: "Drinks", es: "Bebidas" } },
-    ],
-    items: [
-      { categoryIndex: 0, sortOrder: 1, price: 9.5, name: { en: "Margherita", es: "Margarita" }, description: { en: "Tomato, mozzarella, basil", es: "Tomate, mozzarella, albahaca" } },
-      { categoryIndex: 0, sortOrder: 2, price: 11.0, name: { en: "Pepperoni", es: "Pepperoni" } },
-      { categoryIndex: 0, sortOrder: 3, price: 12.5, name: { en: "Four Cheese", es: "Cuatro Quesos" } },
-      { categoryIndex: 1, sortOrder: 1, price: 10.5, name: { en: "Spaghetti Carbonara", es: "Espaguetis Carbonara" } },
-      { categoryIndex: 1, sortOrder: 2, price: 10.5, name: { en: "Tagliatelle Bolognese", es: "Tallarines Bolognese" } },
-      { categoryIndex: 2, sortOrder: 1, price: 2.5, name: { en: "Still Water 0.5L", es: "Agua sin gas 0.5L" } },
-      { categoryIndex: 2, sortOrder: 2, price: 4.5, name: { en: "House Wine, glass", es: "Vino de la casa, copa" } },
-    ],
-  },
-
-  sushi: {
-    subtitle: { en: "Fresh Japanese Cuisine", es: "Cocina Japonesa Fresca" },
-    categories: [
-      { sortOrder: 1, name: { en: "Rolls", es: "Rolls" } },
-      { sortOrder: 2, name: { en: "Nigiri", es: "Nigiri" } },
-      { sortOrder: 3, name: { en: "Drinks", es: "Bebidas" } },
-    ],
-    items: [
-      { categoryIndex: 0, sortOrder: 1, price: 8.5, name: { en: "California Roll", es: "California Roll" }, description: { en: "Crab, avocado, cucumber", es: "Cangrejo, aguacate, pepino" } },
-      { categoryIndex: 0, sortOrder: 2, price: 9.0, name: { en: "Philadelphia Roll", es: "Philadelphia Roll" } },
-      { categoryIndex: 0, sortOrder: 3, price: 9.5, name: { en: "Spicy Tuna Roll", es: "Roll Atún Picante" } },
-      { categoryIndex: 1, sortOrder: 1, price: 3.5, name: { en: "Salmon Nigiri (2 pcs)", es: "Nigiri Salmón (2 uds)" } },
-      { categoryIndex: 1, sortOrder: 2, price: 3.8, name: { en: "Tuna Nigiri (2 pcs)", es: "Nigiri Atún (2 uds)" } },
-      { categoryIndex: 2, sortOrder: 1, price: 3.0, name: { en: "Green Tea", es: "Té Verde" } },
-      { categoryIndex: 2, sortOrder: 2, price: 4.5, name: { en: "Asahi Beer", es: "Cerveza Asahi" } },
-    ],
-  },
-
-  asian: {
-    subtitle: { en: "Pan-Asian Kitchen", es: "Cocina Pan-Asiática" },
-    categories: [
-      { sortOrder: 1, name: { en: "Noodles", es: "Fideos" } },
-      { sortOrder: 2, name: { en: "Rice", es: "Arroz" } },
-      { sortOrder: 3, name: { en: "Drinks", es: "Bebidas" } },
-    ],
-    items: [
-      { categoryIndex: 0, sortOrder: 1, price: 11.0, name: { en: "Pad Thai", es: "Pad Thai" }, description: { en: "Rice noodles, shrimp, peanuts, lime", es: "Fideos de arroz, gambas, cacahuetes, lima" } },
-      { categoryIndex: 0, sortOrder: 2, price: 12.0, name: { en: "Chicken Ramen", es: "Ramen de Pollo" } },
-      { categoryIndex: 1, sortOrder: 1, price: 9.0, name: { en: "Chicken Fried Rice", es: "Arroz Frito con Pollo" } },
-      { categoryIndex: 1, sortOrder: 2, price: 12.0, name: { en: "Bibimbap", es: "Bibimbap" } },
-      { categoryIndex: 2, sortOrder: 1, price: 2.8, name: { en: "Jasmine Tea", es: "Té de Jazmín" } },
-      { categoryIndex: 2, sortOrder: 2, price: 4.5, name: { en: "Singha Beer", es: "Cerveza Singha" } },
-    ],
-  },
-
-  burger: {
-    subtitle: { en: "Handcrafted Burgers", es: "Hamburguesas Artesanas" },
-    categories: [
-      { sortOrder: 1, name: { en: "Burgers", es: "Hamburguesas" } },
-      { sortOrder: 2, name: { en: "Sides", es: "Acompañamientos" } },
-      { sortOrder: 3, name: { en: "Drinks", es: "Bebidas" } },
-    ],
-    items: [
-      { categoryIndex: 0, sortOrder: 1, price: 9.5, name: { en: "Classic Cheeseburger", es: "Hamburguesa Clásica con Queso" }, description: { en: "Beef patty, cheddar, lettuce, tomato, pickles", es: "Carne de ternera, cheddar, lechuga, tomate, pepinillos" } },
-      { categoryIndex: 0, sortOrder: 2, price: 11.0, name: { en: "Bacon Burger", es: "Hamburguesa con Bacon" } },
-      { categoryIndex: 0, sortOrder: 3, price: 9.0, name: { en: "Veggie Burger", es: "Hamburguesa Vegetal" } },
-      { categoryIndex: 1, sortOrder: 1, price: 3.5, name: { en: "French Fries", es: "Patatas Fritas" } },
-      { categoryIndex: 1, sortOrder: 2, price: 4.0, name: { en: "Onion Rings", es: "Aros de Cebolla" } },
-      { categoryIndex: 2, sortOrder: 1, price: 2.8, name: { en: "Coca-Cola 0.4L", es: "Coca-Cola 0.4L" } },
-      { categoryIndex: 2, sortOrder: 2, price: 5.5, name: { en: "Vanilla Milkshake", es: "Batido de Vainilla" } },
-    ],
-  },
-
-  coffee: {
-    subtitle: { en: "Specialty Coffee & Pastries", es: "Café de Especialidad y Bollería" },
-    categories: [
-      { sortOrder: 1, name: { en: "Coffee", es: "Café" } },
-      { sortOrder: 2, name: { en: "Pastries", es: "Bollería" } },
-      { sortOrder: 3, name: { en: "Sandwiches", es: "Sándwiches" } },
-    ],
-    items: [
-      { categoryIndex: 0, sortOrder: 1, price: 1.8, name: { en: "Espresso", es: "Espresso" } },
-      { categoryIndex: 0, sortOrder: 2, price: 2.8, name: { en: "Cappuccino", es: "Cappuccino" } },
-      { categoryIndex: 0, sortOrder: 3, price: 3.2, name: { en: "Latte", es: "Latte" } },
-      { categoryIndex: 1, sortOrder: 1, price: 2.2, name: { en: "Butter Croissant", es: "Croissant de Mantequilla" } },
-      { categoryIndex: 1, sortOrder: 2, price: 2.8, name: { en: "Blueberry Muffin", es: "Muffin de Arándanos" } },
-      { categoryIndex: 2, sortOrder: 1, price: 5.5, name: { en: "Ham & Cheese", es: "Jamón y Queso" } },
-      { categoryIndex: 2, sortOrder: 2, price: 6.5, name: { en: "Avocado Toast", es: "Tostada de Aguacate" } },
-    ],
-  },
-
-  bar: {
-    subtitle: { en: "Cocktails & Craft Beer", es: "Cócteles y Cerveza Artesana" },
-    categories: [
-      { sortOrder: 1, name: { en: "Cocktails", es: "Cócteles" } },
-      { sortOrder: 2, name: { en: "Beer", es: "Cerveza" } },
-      { sortOrder: 3, name: { en: "Snacks", es: "Para Picar" } },
-    ],
-    items: [
-      { categoryIndex: 0, sortOrder: 1, price: 8.5, name: { en: "Mojito", es: "Mojito" } },
-      { categoryIndex: 0, sortOrder: 2, price: 9.5, name: { en: "Aperol Spritz", es: "Aperol Spritz" } },
-      { categoryIndex: 0, sortOrder: 3, price: 10.0, name: { en: "Negroni", es: "Negroni" } },
-      { categoryIndex: 1, sortOrder: 1, price: 4.0, name: { en: "Lager, draft", es: "Cerveza rubia, de barril" } },
-      { categoryIndex: 1, sortOrder: 2, price: 5.5, name: { en: "IPA", es: "IPA" } },
-      { categoryIndex: 2, sortOrder: 1, price: 6.5, name: { en: "Nachos with Cheese", es: "Nachos con Queso" } },
-      { categoryIndex: 2, sortOrder: 2, price: 4.5, name: { en: "Marinated Olives", es: "Aceitunas Marinadas" } },
-    ],
-  },
-
-  bakery: {
-    subtitle: { en: "Fresh Bakery Daily", es: "Panadería Fresca Diaria" },
-    categories: [
-      { sortOrder: 1, name: { en: "Breads", es: "Panes" } },
-      { sortOrder: 2, name: { en: "Pastries", es: "Bollería" } },
-      { sortOrder: 3, name: { en: "Cakes", es: "Tartas" } },
-    ],
-    items: [
-      { categoryIndex: 0, sortOrder: 1, price: 4.5, name: { en: "Sourdough Loaf", es: "Pan de Masa Madre" } },
-      { categoryIndex: 0, sortOrder: 2, price: 2.5, name: { en: "Baguette", es: "Baguette" } },
-      { categoryIndex: 1, sortOrder: 1, price: 2.2, name: { en: "Butter Croissant", es: "Croissant de Mantequilla" } },
-      { categoryIndex: 1, sortOrder: 2, price: 2.8, name: { en: "Pain au Chocolat", es: "Pain au Chocolat" } },
-      { categoryIndex: 1, sortOrder: 3, price: 3.2, name: { en: "Cinnamon Roll", es: "Rollo de Canela" } },
-      { categoryIndex: 2, sortOrder: 1, price: 4.5, name: { en: "Cheesecake Slice", es: "Porción de Tarta de Queso" } },
-      { categoryIndex: 2, sortOrder: 2, price: 4.5, name: { en: "Tiramisu", es: "Tiramisú" } },
-    ],
-  },
-
-  restaurant: {
-    subtitle: { en: "Modern European Cuisine", es: "Cocina Europea Moderna" },
-    categories: [
-      { sortOrder: 1, name: { en: "Starters", es: "Entrantes" } },
-      { sortOrder: 2, name: { en: "Main Courses", es: "Platos Principales" } },
-      { sortOrder: 3, name: { en: "Desserts", es: "Postres" } },
-    ],
-    items: [
-      { categoryIndex: 0, sortOrder: 1, price: 8.5, name: { en: "Caesar Salad", es: "Ensalada César" } },
-      { categoryIndex: 0, sortOrder: 2, price: 7.5, name: { en: "Bruschetta (3 pcs)", es: "Bruschetta (3 uds)" } },
-      { categoryIndex: 1, sortOrder: 1, price: 22.0, name: { en: "Grilled Ribeye Steak", es: "Entrecot a la Parrilla" }, description: { en: "300g, served with roasted potatoes", es: "300g, con patatas asadas" } },
-      { categoryIndex: 1, sortOrder: 2, price: 18.5, name: { en: "Salmon Fillet", es: "Filete de Salmón" } },
-      { categoryIndex: 1, sortOrder: 3, price: 14.5, name: { en: "Mushroom Risotto", es: "Risotto de Setas" } },
-      { categoryIndex: 2, sortOrder: 1, price: 5.5, name: { en: "Tiramisu", es: "Tiramisú" } },
-      { categoryIndex: 2, sortOrder: 2, price: 5.8, name: { en: "Crème Brûlée", es: "Crème Brûlée" } },
-    ],
-  },
+/** Default restaurant name applied to every brand-new account (onboarding is
+ *  currently skipped, so the cuisine/name steps never run). Localized so the
+ *  seeded restaurant reads naturally in the user's language. */
+export const DEFAULT_RESTAURANT_NAME: LocaleString = {
+  en: "My restaurant",
+  es: "Mi restaurante",
+  de: "Mein Restaurant",
+  fr: "Mon restaurant",
+  it: "Il mio ristorante",
+  pt: "Meu restaurante",
+  nl: "Mijn restaurant",
+  pl: "Moja restauracja",
+  ru: "Мой ресторан",
+  uk: "Мій ресторан",
+  sv: "Min restaurang",
+  da: "Min restaurant",
+  no: "Min restaurant",
+  fi: "Ravintolani",
+  cs: "Moje restaurace",
+  el: "Το εστιατόριό μου",
+  tr: "Restoranım",
+  ro: "Restaurantul meu",
+  hu: "Az éttermem",
+  bg: "Моят ресторант",
+  hr: "Moj restoran",
+  sk: "Moja reštaurácia",
+  sl: "Moja restavracija",
+  et: "Minu restoran",
+  lv: "Mans restorāns",
+  lt: "Mano restoranas",
+  sr: "Moj restoran",
+  ca: "El meu restaurant",
+  ga: "Mo bhialann",
+  is: "Veitingastaðurinn minn",
+  fa: "رستوران من",
+  ar: "مطعمي",
+  ja: "マイレストラン",
+  ko: "내 레스토랑",
+  zh: "我的餐厅",
 };
 
-// Splice generated image URLs into the templates at module load.
-// JSON keys: dishes["<cuisine>:<itemIndex>"] and backgrounds["<cuisine>"].
-type ImagesJson = { dishes: Record<string, string>; backgrounds: Record<string, string> };
-const images = generatedImages as ImagesJson;
-for (const cuisine of Object.keys(cuisineTemplates) as CuisineKey[]) {
-  const tpl = cuisineTemplates[cuisine];
-  const bg = images.backgrounds?.[cuisine];
-  if (bg) tpl.backgroundUrl = bg;
-  tpl.items.forEach((item, idx) => {
-    const url = images.dishes?.[`${cuisine}:${idx}`];
-    if (url) item.imageUrl = url;
-  });
-}
-
-// Splice per-locale translation overrides into the base templates at module load.
-// JSON shape:
-//   { "<locale>": {
-//       "subtitles": { "<cuisine>": "..." },
-//       "categories": { "<cuisine>": ["cat0", "cat1", ...] },
-//       "items": { "<cuisine>": [ {"name": "...", "description": "..."}, ... ] }
-//     }
-//   }
-// Base templates carry `en` (and `es` for legacy reasons); other locales come from this JSON.
-type TranslationsJson = Record<
-  string,
-  {
-    subtitles?: Partial<Record<CuisineKey, string>>;
-    categories?: Partial<Record<CuisineKey, string[]>>;
-    items?: Partial<Record<CuisineKey, { name?: string; description?: string }[]>>;
-  }
->;
-const translations = translationOverrides as TranslationsJson;
-for (const [locale, data] of Object.entries(translations)) {
-  for (const cuisine of Object.keys(cuisineTemplates) as CuisineKey[]) {
-    const tpl = cuisineTemplates[cuisine];
-
-    const subtitle = data.subtitles?.[cuisine];
-    if (subtitle) tpl.subtitle[locale] = subtitle;
-
-    const cats = data.categories?.[cuisine];
-    if (cats) {
-      cats.forEach((name, i) => {
-        if (tpl.categories[i] && name) tpl.categories[i].name[locale] = name;
-      });
-    }
-
-    const items = data.items?.[cuisine];
-    if (items) {
-      items.forEach((override, i) => {
-        const item = tpl.items[i];
-        if (!item) return;
-        if (override.name) item.name[locale] = override.name;
-        if (override.description) {
-          if (!item.description) item.description = { en: override.description };
-          else item.description[locale] = override.description;
-        }
-      });
-    }
-  }
-}
+/** Single universal template. Two categories (Food / Drinks), two items each.
+ *  Food items carry a reused S3 photo; drinks intentionally have no image. */
+export const cuisineTemplates: Record<CuisineKey, CuisineTemplate> = {
+  restaurant: {
+    subtitle: {
+      en: "Fresh food & drinks",
+      es: "Comida y bebidas frescas",
+      de: "Frische Speisen & Getränke",
+      fr: "Plats & boissons frais",
+      it: "Cibo e bevande freschi",
+      pt: "Comida e bebidas frescas",
+      nl: "Vers eten & drinken",
+      pl: "Świeże jedzenie i napoje",
+      ru: "Свежая еда и напитки",
+      uk: "Свіжа їжа та напої",
+      sv: "Färsk mat & dryck",
+      da: "Frisk mad & drikke",
+      no: "Fersk mat og drikke",
+      fi: "Tuoretta ruokaa ja juomaa",
+      cs: "Čerstvé jídlo a nápoje",
+      el: "Φρέσκο φαγητό & ποτά",
+      tr: "Taze yemek & içecek",
+      ro: "Mâncare și băuturi proaspete",
+      hu: "Friss ételek és italok",
+      bg: "Прясна храна и напитки",
+      hr: "Svježa hrana i pića",
+      sk: "Čerstvé jedlo a nápoje",
+      sl: "Sveža hrana in pijača",
+      et: "Värske toit ja joogid",
+      lv: "Svaigs ēdiens un dzērieni",
+      lt: "Šviežias maistas ir gėrimai",
+      sr: "Sveža hrana i pića",
+      ca: "Menjar i begudes fresques",
+      ga: "Bia & deochanna úra",
+      is: "Ferskur matur og drykkir",
+      fa: "غذا و نوشیدنی تازه",
+      ar: "طعام ومشروبات طازجة",
+      ja: "新鮮な料理とドリンク",
+      ko: "신선한 음식과 음료",
+      zh: "新鲜美食与饮品",
+    },
+    categories: [
+      {
+        sortOrder: 1,
+        name: {
+          en: "Food",
+          es: "Comida",
+          de: "Speisen",
+          fr: "Plats",
+          it: "Cibo",
+          pt: "Comida",
+          nl: "Eten",
+          pl: "Jedzenie",
+          ru: "Еда",
+          uk: "Їжа",
+          sv: "Mat",
+          da: "Mad",
+          no: "Mat",
+          fi: "Ruoka",
+          cs: "Jídlo",
+          el: "Φαγητό",
+          tr: "Yemek",
+          ro: "Mâncare",
+          hu: "Ételek",
+          bg: "Храна",
+          hr: "Hrana",
+          sk: "Jedlo",
+          sl: "Hrana",
+          et: "Toit",
+          lv: "Ēdiens",
+          lt: "Maistas",
+          sr: "Hrana",
+          ca: "Menjar",
+          ga: "Bia",
+          is: "Matur",
+          fa: "غذا",
+          ar: "طعام",
+          ja: "料理",
+          ko: "음식",
+          zh: "美食",
+        },
+      },
+      {
+        sortOrder: 2,
+        name: {
+          en: "Drinks",
+          es: "Bebidas",
+          de: "Getränke",
+          fr: "Boissons",
+          it: "Bevande",
+          pt: "Bebidas",
+          nl: "Dranken",
+          pl: "Napoje",
+          ru: "Напитки",
+          uk: "Напої",
+          sv: "Drycker",
+          da: "Drikkevarer",
+          no: "Drikke",
+          fi: "Juomat",
+          cs: "Nápoje",
+          el: "Ποτά",
+          tr: "İçecekler",
+          ro: "Băuturi",
+          hu: "Italok",
+          bg: "Напитки",
+          hr: "Pića",
+          sk: "Nápoje",
+          sl: "Pijače",
+          et: "Joogid",
+          lv: "Dzērieni",
+          lt: "Gėrimai",
+          sr: "Pića",
+          ca: "Begudes",
+          ga: "Deochanna",
+          is: "Drykkir",
+          fa: "نوشیدنی‌ها",
+          ar: "مشروبات",
+          ja: "ドリンク",
+          ko: "음료",
+          zh: "饮品",
+        },
+      },
+    ],
+    items: [
+      {
+        categoryIndex: 0,
+        sortOrder: 1,
+        price: 9.5,
+        imageUrl: "https://nbg1.your-objectstorage.com/sobogd/templates/dishes/dish-burger-classic-cheeseburger-opt2.webp",
+        name: {
+          en: "Cheeseburger",
+          es: "Hamburguesa con queso",
+          de: "Cheeseburger",
+          fr: "Cheeseburger",
+          it: "Cheeseburger",
+          pt: "Cheeseburger",
+          nl: "Cheeseburger",
+          pl: "Cheeseburger",
+          ru: "Чизбургер",
+          uk: "Чизбургер",
+          sv: "Cheeseburgare",
+          da: "Cheeseburger",
+          no: "Cheeseburger",
+          fi: "Juustohampurilainen",
+          cs: "Cheeseburger",
+          el: "Τσίζμπεργκερ",
+          tr: "Çizburger",
+          ro: "Cheeseburger",
+          hu: "Sajtburger",
+          bg: "Чийзбургер",
+          hr: "Cheeseburger",
+          sk: "Cheeseburger",
+          sl: "Čizburger",
+          et: "Juustuburger",
+          lv: "Siera burgers",
+          lt: "Sūrio mėsainis",
+          sr: "Čizburger",
+          ca: "Hamburguesa amb formatge",
+          ga: "Cáisbhorgaire",
+          is: "Ostborgari",
+          fa: "چیزبرگر",
+          ar: "تشيزبرغر",
+          ja: "チーズバーガー",
+          ko: "치즈버거",
+          zh: "芝士汉堡",
+        },
+      },
+      {
+        categoryIndex: 0,
+        sortOrder: 2,
+        price: 8.5,
+        imageUrl: "https://nbg1.your-objectstorage.com/sobogd/templates/dishes/dish-restaurant-caesar-salad-opt2.webp",
+        name: {
+          en: "Caesar Salad",
+          es: "Ensalada César",
+          de: "Caesar Salat",
+          fr: "Salade César",
+          it: "Insalata Caesar",
+          pt: "Salada Caesar",
+          nl: "Caesarsalade",
+          pl: "Sałatka Cezar",
+          ru: "Салат «Цезарь»",
+          uk: "Салат «Цезар»",
+          sv: "Caesarsallad",
+          da: "Cæsarsalat",
+          no: "Cæsarsalat",
+          fi: "Caesar-salaatti",
+          cs: "Caesar salát",
+          el: "Σαλάτα του Καίσαρα",
+          tr: "Sezar Salatası",
+          ro: "Salată Caesar",
+          hu: "Cézár saláta",
+          bg: "Салата «Цезар»",
+          hr: "Cezar salata",
+          sk: "Caesar šalát",
+          sl: "Cezar solata",
+          et: "Caesari salat",
+          lv: "Cēzara salāti",
+          lt: "Cezario salotos",
+          sr: "Cezar salata",
+          ca: "Amanida Cèsar",
+          ga: "Sailéad Caesar",
+          is: "Caesar salat",
+          fa: "سالاد سزار",
+          ar: "سلطة سيزر",
+          ja: "シーザーサラダ",
+          ko: "시저 샐러드",
+          zh: "凯撒沙拉",
+        },
+      },
+      {
+        categoryIndex: 1,
+        sortOrder: 1,
+        price: 3.5,
+        name: {
+          en: "Orange Juice",
+          es: "Zumo de naranja",
+          de: "Orangensaft",
+          fr: "Jus d'orange",
+          it: "Succo d'arancia",
+          pt: "Sumo de laranja",
+          nl: "Sinaasappelsap",
+          pl: "Sok pomarańczowy",
+          ru: "Апельсиновый сок",
+          uk: "Апельсиновий сік",
+          sv: "Apelsinjuice",
+          da: "Appelsinjuice",
+          no: "Appelsinjuice",
+          fi: "Appelsiinimehu",
+          cs: "Pomerančový džus",
+          el: "Χυμός πορτοκάλι",
+          tr: "Portakal suyu",
+          ro: "Suc de portocale",
+          hu: "Narancslé",
+          bg: "Портокалов сок",
+          hr: "Sok od naranče",
+          sk: "Pomarančový džús",
+          sl: "Pomarančni sok",
+          et: "Apelsinimahl",
+          lv: "Apelsīnu sula",
+          lt: "Apelsinų sultys",
+          sr: "Sok od pomorandže",
+          ca: "Suc de taronja",
+          ga: "Sú oráiste",
+          is: "Appelsínusafi",
+          fa: "آب پرتقال",
+          ar: "عصير برتقال",
+          ja: "オレンジジュース",
+          ko: "오렌지 주스",
+          zh: "橙汁",
+        },
+      },
+      {
+        categoryIndex: 1,
+        sortOrder: 2,
+        price: 2.8,
+        name: {
+          en: "Cappuccino",
+          es: "Cappuccino",
+          de: "Cappuccino",
+          fr: "Cappuccino",
+          it: "Cappuccino",
+          pt: "Cappuccino",
+          nl: "Cappuccino",
+          pl: "Cappuccino",
+          ru: "Капучино",
+          uk: "Капучино",
+          sv: "Cappuccino",
+          da: "Cappuccino",
+          no: "Cappuccino",
+          fi: "Cappuccino",
+          cs: "Cappuccino",
+          el: "Καπουτσίνο",
+          tr: "Kapuçino",
+          ro: "Cappuccino",
+          hu: "Cappuccino",
+          bg: "Капучино",
+          hr: "Cappuccino",
+          sk: "Cappuccino",
+          sl: "Cappuccino",
+          et: "Kaputsiino",
+          lv: "Kapučīno",
+          lt: "Kapučino",
+          sr: "Cappuccino",
+          ca: "Cappuccino",
+          ga: "Cappuccino",
+          is: "Cappuccino",
+          fa: "کاپوچینو",
+          ar: "كابتشينو",
+          ja: "カプチーノ",
+          ko: "카푸치노",
+          zh: "卡布奇诺",
+        },
+      },
+    ],
+    backgroundUrl: "https://nbg1.your-objectstorage.com/sobogd/templates/backgrounds/bg-restaurant-opt2.webp",
+  },
+};
 
 // Pool of realistic guest names per locale, used to populate sample orders/reservations.
 // Locales not listed fall back to "en" in the seeder.

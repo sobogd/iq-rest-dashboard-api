@@ -109,9 +109,6 @@ export class OnboardingSeedService {
           slug,
           description,
           address: commonPlaceholders.address,
-          phone: commonPlaceholders.phone,
-          instagram: commonPlaceholders.instagram,
-          whatsapp: commonPlaceholders.whatsapp,
           currency,
           // Billing currency: the Scandinavian menu currencies (NOK/SEK/DKK)
           // double as billing currencies; everything else bills in EUR.

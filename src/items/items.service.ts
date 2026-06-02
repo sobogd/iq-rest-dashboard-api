@@ -146,11 +146,6 @@ export class ItemsService {
       data.options = (nextOptions as Prisma.InputJsonValue) ?? Prisma.JsonNull;
     }
     if (body.sortOrder !== undefined) data.sortOrder = body.sortOrder;
-    if (item.isExample) {
-      const renamedDefault = body.name !== undefined && body.name !== item.name;
-      const renamedTranslations = body.translations !== undefined;
-      if (renamedDefault || renamedTranslations) data.isExample = false;
-    }
     const sourceNameChanged = body.name !== undefined && body.name !== item.name;
     const sourceDescriptionChanged =
       body.description !== undefined && (body.description ?? null) !== (item.description ?? null);

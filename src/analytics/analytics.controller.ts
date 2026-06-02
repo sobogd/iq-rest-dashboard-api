@@ -198,7 +198,6 @@ export class AnalyticsController {
 
     const orderFilterWhere = {
       restaurantId: { in: scopeRestaurantIds },
-      isExample: false,
       status: "completed",
     };
 
@@ -208,14 +207,14 @@ export class AnalyticsController {
             FROM orders
             WHERE ${orderScopeWhere}
               AND "createdAt" >= ${startDate} AND "createdAt" < ${endDate}
-              AND "isExample" = false AND status = 'completed'
+              AND status = 'completed'
           `,
           this.prisma.$queryRaw<{ revenue: string | null; orders: bigint }[]>`
             SELECT COALESCE(SUM(total), 0) AS revenue, COUNT(*) AS orders
             FROM orders
             WHERE ${orderScopeWhere}
               AND "createdAt" >= ${prevStartDate} AND "createdAt" < ${prevEndDate}
-              AND "isExample" = false AND status = 'completed'
+              AND status = 'completed'
           `,
           this.prisma.$queryRaw<{ day: string; revenue: string; orders: bigint }[]>`
             SELECT TO_CHAR("createdAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day,
@@ -224,7 +223,7 @@ export class AnalyticsController {
             FROM orders
             WHERE ${orderScopeWhere}
               AND "createdAt" >= ${startDate} AND "createdAt" < ${endDate}
-              AND "isExample" = false AND status = 'completed'
+              AND status = 'completed'
             GROUP BY day
             ORDER BY day ASC
           `,
@@ -235,7 +234,7 @@ export class AnalyticsController {
             FROM orders
             WHERE ${orderScopeWhere}
               AND "createdAt" >= ${prevStartDate} AND "createdAt" < ${prevEndDate}
-              AND "isExample" = false AND status = 'completed'
+              AND status = 'completed'
             GROUP BY day
             ORDER BY day ASC
           `,
@@ -246,7 +245,7 @@ export class AnalyticsController {
             FROM orders
             WHERE ${orderScopeWhere}
               AND "createdAt" >= ${startDate} AND "createdAt" < ${endDate}
-              AND "isExample" = false AND status = 'completed'
+              AND status = 'completed'
             GROUP BY hour
             ORDER BY hour ASC
           `,
@@ -269,7 +268,7 @@ export class AnalyticsController {
             FROM orders
             WHERE ${orderScopeWhere}
               AND "createdAt" >= ${startDate} AND "createdAt" < ${endDate}
-              AND "isExample" = false AND status = 'completed'
+              AND status = 'completed'
             GROUP BY "paymentMethodId"
           `,
         ]);

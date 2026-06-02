@@ -232,7 +232,6 @@ model Table {
   y            Float?
   isActive     Boolean  @default(true)
   sortOrder    Int      @default(0)
-  isExample    Boolean  @default(false)
   // Soft-delete marker. Hidden from active table lists but kept so older
   // bookings / orders can still resolve their tableId and tableNumber.
   deletedAt    DateTime?
@@ -260,7 +259,6 @@ model Reservation {
   guestsCount  Int
   status       String   @default("pending") // pending, confirmed, cancelled, completed
   notes        String?
-  isExample    Boolean  @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -319,7 +317,6 @@ model Item {
   options      Json?
   sortOrder    Int      @default(0)
   isActive     Boolean  @default(true)
-  isExample    Boolean  @default(false)
   // Soft-delete marker. Hidden from menu lists, but kept around so orders'
   // dishId references and historical analytics can still resolve the row.
   deletedAt    DateTime?
@@ -338,7 +335,6 @@ model Item {
   @@index([categoryId, sortOrder])
   @@index([restaurantId])
   @@index([restaurantId, categoryId])
-  @@index([restaurantId, isExample])
   @@map("items")
 }
 
@@ -435,7 +431,6 @@ model Order {
   // Item-level discounts continue to live inside Order.items JSON.
   discount        Json?
   discountTotal   Decimal? @db.Decimal(10, 2)
-  isExample       Boolean  @default(false)
   // Soft-delete marker. Hidden from operational lists but preserved so
   // analytics (revenue, top dishes, etc.) survive a delete.
   deletedAt       DateTime?

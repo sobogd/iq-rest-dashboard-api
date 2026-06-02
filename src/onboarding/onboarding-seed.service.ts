@@ -73,8 +73,9 @@ export class OnboardingSeedService {
   constructor(private readonly prisma: PrismaService) {}
 
   /** Seed a brand-new user with a template restaurant + categories + items + tables + sample
-   *  orders and reservations. All seeded records are flagged isExample=true so the user can wipe
-   *  them with one click. Idempotent: aborts if the user already has an attached restaurant.
+   *  reservations. Sample dishes are named "Sample: …" so the owner can spot and replace them
+   *  (no sample orders — they would skew revenue analytics). Idempotent: aborts if the user
+   *  already has an attached restaurant.
    *
    *  The new restaurant is the user's FIRST → it gets a fresh 14-day trial.
    *  Subsequent restaurants (created via restaurant.controller.createForCompany)
@@ -120,6 +121,8 @@ export class OnboardingSeedService {
           // Billing currency: the Scandinavian menu currencies (NOK/SEK/DKK)
           // double as billing currencies; everything else bills in EUR.
           billingCurrency: isSupportedCurrency(currency) ? currency : "EUR",
+          // Dark accent by default for newly onboarded restaurants.
+          accentColor: "#1A1A1A",
           languages,
           defaultLanguage: seedLocale,
           // Orders are off by default now; the owner enables them in settings.
@@ -172,20 +175,26 @@ export class OnboardingSeedService {
       }> = [];
       for (const item of template.items) {
         const category = createdCategories[item.categoryIndex];
+        // Prefix every sample dish with "Sample: " so the owner can spot (and
+        // replace/delete) the seeded items at a glance — this replaces the old
+        // isExample flag as the way to mark seeded content.
+        const sampleName: LocaleString = {} as LocaleString;
         const nameMl: Record<string, string> = {};
         for (const [lang, value] of Object.entries(item.name)) {
-          if (typeof value === "string" && value.length > 0) nameMl[lang] = value;
+          if (typeof value === "string" && value.length > 0) {
+            sampleName[lang] = `Sample: ${value}`;
+            nameMl[lang] = sampleName[lang];
+          }
         }
         const created = await tx.item.create({
           data: {
             restaurantId: restaurant.id,
             categoryId: category.id,
-            name: pick(item.name, seedLocale)!,
+            name: pick(sampleName, seedLocale)!,
             description: pick(item.description, seedLocale),
-            translations: buildItemTranslations(item.name, item.description, seedLocale),
+            translations: buildItemTranslations(sampleName, item.description, seedLocale),
             price: item.price,
             sortOrder: item.sortOrder,
-            isExample: true,
             ...(item.imageUrl ? { imageUrl: item.imageUrl } : {}),
           },
         });
@@ -213,74 +222,15 @@ export class OnboardingSeedService {
             y: seed.y,
             color: seed.color,
             sortOrder: seed.number - 1,
-            isExample: true,
           },
         });
         tables.push(created);
       }
 
-      // Sample orders. Pick a few items from different categories so the order list looks lived-in.
+      // Sample orders are intentionally NOT seeded — they would otherwise count
+      // toward the new restaurant's revenue analytics. Sample reservations and
+      // tables stay (they don't affect revenue).
       const guests = sampleGuestNames[seedLocale] ?? sampleGuestNames.en;
-      const itemsByCategory = template.categories.map((_, ci) =>
-        createdItems.filter((_it, idx) => template.items[idx].categoryIndex === ci),
-      );
-      const pickItem = (catIdx: number, fallback: number) =>
-        itemsByCategory[catIdx]?.[0] ?? createdItems[fallback];
-
-      const orderSamples: Array<{ status: string; itemStatus: "pending" | "cooking" | "ready" | "served"; lines: { item: typeof createdItems[number]; qty: number }[] }> = [
-        { status: "new", itemStatus: "pending", lines: [{ item: pickItem(0, 0), qty: 2 }, { item: pickItem(2, 1), qty: 2 }] },
-        { status: "in_progress", itemStatus: "cooking", lines: [{ item: pickItem(1, 0), qty: 1 }, { item: pickItem(2, 0), qty: 1 }] },
-        { status: "completed", itemStatus: "served", lines: [{ item: pickItem(0, 0), qty: 1 }, { item: pickItem(2, 1), qty: 1 }] },
-      ];
-
-      const seedOrderDate = new Date();
-      seedOrderDate.setUTCHours(0, 0, 0, 0);
-      const nowIso = new Date().toISOString();
-      let itemSerial = 0;
-      for (let idx = 0; idx < orderSamples.length; idx++) {
-        const sample = orderSamples[idx];
-        const lines = sample.lines.filter((l) => l.item);
-        const total = lines.reduce((sum, l) => sum + Number(l.item.price) * l.qty, 0);
-        // The new dashboard renders the "fat" per-unit shape with dishNameSnapshot
-        // (Ml object), basePriceSnapshot, options[], and a per-unit status; the
-        // legacy soqrmenuweb dashboard still reads the flat { name, qty, price }
-        // tuple. Emit both shapes on the same row so either dashboard picks the
-        // sample order up correctly.
-        const items = lines.flatMap((l) =>
-          Array.from({ length: l.qty }, () => {
-            itemSerial++;
-            const localizedName = l.item.nameMl[seedLocale] || l.item.nameMl.en || l.item.name;
-            return {
-              id: `seed_${idx}_${itemSerial}`,
-              dishId: l.item.id,
-              dishNameSnapshot: l.item.nameMl,
-              basePriceSnapshot: String(Number(l.item.price)),
-              options: [],
-              notes: "",
-              status: sample.itemStatus,
-              createdAt: nowIso,
-              // Legacy fields for the old soqrmenuweb dashboard.
-              name: localizedName,
-              qty: 1,
-              price: Number(l.item.price),
-            };
-          }),
-        );
-        await tx.order.create({
-          data: {
-            restaurantId: restaurant.id,
-            items,
-            total,
-            currency,
-            customerName: guests[idx % guests.length],
-            tableNumber: tables[idx % tables.length].number,
-            status: sample.status,
-            isExample: true,
-            orderDate: seedOrderDate,
-            dailyNumber: idx + 1,
-          },
-        });
-      }
 
       // Sample reservations — one today, one tomorrow.
       const reservationSamples = [
@@ -301,7 +251,6 @@ export class OnboardingSeedService {
             guestEmail: `guest${idx + 1}@example.com`,
             guestsCount: s.guestsCount,
             status: idx === 0 ? "confirmed" : "pending",
-            isExample: true,
           },
         });
       }

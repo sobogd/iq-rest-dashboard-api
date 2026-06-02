@@ -429,7 +429,6 @@ export class RestaurantService {
           options: (it.options ?? Prisma.JsonNull) as Prisma.InputJsonValue,
           sortOrder: it.sortOrder,
           isActive: it.isActive,
-          isExample: it.isExample,
           categoryId: newCatId,
           restaurantId: toRestaurantId,
         },

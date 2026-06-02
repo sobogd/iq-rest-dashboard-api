@@ -219,7 +219,9 @@ export class ScanMenuController {
     );
     if (incoming.length === 0) throw new BadRequestException("No items selected");
 
-    await this.prisma.item.deleteMany({ where: { restaurantId, isExample: true } });
+    // Seeded sample dishes are named "Sample: …" — wipe them before importing
+    // the scanned menu (replaces the old isExample-flag cleanup).
+    await this.prisma.item.deleteMany({ where: { restaurantId, name: { startsWith: "Sample: " } } });
 
     if (body.replaceExisting) {
       await this.prisma.item.deleteMany({ where: { restaurantId } });

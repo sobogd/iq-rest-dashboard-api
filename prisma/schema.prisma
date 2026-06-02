@@ -107,6 +107,9 @@ model Restaurant {
   // or "drill" (vertical list of categories → click into per-category dish screen).
   // Groups, when present, always show as a vertical drill above this layout.
   menuLayout      String   @default("flat")
+  // Public-menu hero title/description font scale: "small" | "medium" | "large".
+  // Proportional steps applied over the background image (default large).
+  titleScale      String   @default("large")
   // Payment methods this restaurant offers — enum codes only (cash, card, ...).
   // Display strings live in dashboard locales; integrations add new codes here.
   paymentMethods  String[] @default(["cash", "card"])

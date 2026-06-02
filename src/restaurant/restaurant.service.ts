@@ -58,6 +58,7 @@ interface RestaurantInput {
   defaultLanguage?: string;
   hideTitle?: boolean;
   menuLayout?: string;
+  titleScale?: string;
   paymentMethods?: string[];
   reservationsEnabled?: boolean;
   reservationMode?: string;
@@ -76,7 +77,7 @@ interface RestaurantInput {
 const FIELDS: (keyof RestaurantInput)[] = [
   "title", "subtitle", "description", "slug", "currency", "billingCurrency", "source", "backgroundType",
   "accentColor", "address", "x", "y", "googlePlaceId", "phone", "instagram", "whatsapp", "languages",
-  "defaultLanguage", "hideTitle", "menuLayout", "paymentMethods", "reservationsEnabled", "reservationMode",
+  "defaultLanguage", "hideTitle", "menuLayout", "titleScale", "paymentMethods", "reservationsEnabled", "reservationMode",
   "reservationSlotMinutes", "workingHoursStart", "workingHoursEnd",
   "reservationSchedule", "timezone", "ordersEnabled",
   "orderNameEnabled", "orderPhoneEnabled", "orderAddressEnabled", "orderMode",
@@ -116,6 +117,13 @@ function pickFields(raw: Record<string, unknown>): RestaurantInput {
       throw new BadRequestException("Invalid menuLayout: must be 'flat' or 'drill'");
     }
     out.menuLayout = v;
+  }
+  if (out.titleScale !== undefined) {
+    const v = String(out.titleScale);
+    if (v !== "small" && v !== "medium" && v !== "large") {
+      throw new BadRequestException("Invalid titleScale: must be 'small', 'medium' or 'large'");
+    }
+    out.titleScale = v;
   }
   if (out.slug !== undefined && out.slug !== null) {
     // Normalise and re-check reserved set so a user-typed slug can't slip

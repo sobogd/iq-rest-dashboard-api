@@ -970,21 +970,6 @@ export class AdminController {
     };
   }
 
-  /** A single CAPI send record (with the Meta response) for the log page. */
-  @Get("capi/entry/:id")
-  async capiEntry(@Param("id") id: string) {
-    const row = await this.prisma.capiSend.findUnique({ where: { id } });
-    if (!row) throw new NotFoundException("Entry not found");
-    return {
-      id: row.id,
-      fbclid: row.fbclid,
-      eventName: row.eventName,
-      status: row.status,
-      response: row.response,
-      createdAt: row.createdAt.toISOString(),
-    };
-  }
-
   // ────────────────── SESSION DELETE ──────────────────
 
   /** Delete whole sessions: for each descriptor, remove every event matching

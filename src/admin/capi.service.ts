@@ -83,11 +83,13 @@ export class CapiService {
     return { ok, response: json };
   }
 
-  /** Every 5 minutes: find Facebook-click sessions over the last 7 days, work
+  /** Every 15 minutes: find Facebook-click sessions over the last 7 days, work
    *  out which CAPI milestones they reached, and send the ones not yet
    *  successfully sent for that fbclid. The capi_sends journal is the dedup
-   *  source of truth, so re-runs never double-send. */
-  @Cron(CronExpression.EVERY_5_MINUTES)
+   *  source of truth, so re-runs never double-send. The 7-day window must cover
+   *  the click→milestone lag (a click can register days later, and the stitch
+   *  cron backfills old events) — it is NOT a "recent activity" window. */
+  @Cron(CronExpression.EVERY_15_MINUTES)
   async scheduledAutoSend(): Promise<void> {
     if (this.autoRunning) return;
     if (!this.config.get<string>("FB_ADS_TOKEN") || !this.config.get<string>("FB_ADS_PIXEL_ID")) return;

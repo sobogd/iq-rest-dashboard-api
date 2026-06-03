@@ -5,10 +5,11 @@ import { DevicesModule } from "../devices/devices.module";
 import { RestaurantModule } from "../restaurant/restaurant.module";
 import { AdminController } from "./admin.controller";
 import { AdminGuard } from "./admin.guard";
+import { UsageStitchService } from "./usage-stitch.service";
 
 @Module({
   imports: [AuthModule, MailModule, DevicesModule, RestaurantModule],
   controllers: [AdminController],
-  providers: [AdminGuard],
+  providers: [AdminGuard, UsageStitchService],
 })
 export class AdminModule {}

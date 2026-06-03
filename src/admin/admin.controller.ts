@@ -1062,6 +1062,42 @@ export class AdminController {
     return this.stitch.stitch();
   }
 
+  /** Support-chat threads: restaurants with at least one message, newest first. */
+  @Get("messages/threads")
+  async messageThreads() {
+    type Row = {
+      rid: string;
+      title: string;
+      lang: string | null;
+      c: number;
+      last_at: Date;
+      last_msg: string;
+      last_admin: boolean;
+    };
+    const rows = await this.prisma.$queryRaw<Row[]>(Prisma.sql`
+      SELECT sm."restaurantId" AS rid, r.title, r."defaultLanguage" AS lang,
+             count(*)::int AS c,
+             max(sm."createdAt") AS last_at,
+             (array_agg(sm.message ORDER BY sm."createdAt" DESC))[1] AS last_msg,
+             (array_agg(sm."isAdmin" ORDER BY sm."createdAt" DESC))[1] AS last_admin
+      FROM support_messages sm
+      JOIN restaurants r ON r.id = sm."restaurantId"
+      GROUP BY sm."restaurantId", r.title, r."defaultLanguage"
+      ORDER BY max(sm."createdAt") DESC
+    `);
+    return {
+      threads: rows.map((r) => ({
+        restaurantId: r.rid,
+        title: r.title,
+        defaultLanguage: r.lang,
+        count: r.c,
+        lastMessage: r.last_msg,
+        lastAt: r.last_at.toISOString(),
+        lastFromAdmin: r.last_admin,
+      })),
+    };
+  }
+
   /** Restaurants for the manual session-assign picker. */
   @Get("usage/restaurants")
   async usageRestaurants() {

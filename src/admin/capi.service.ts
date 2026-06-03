@@ -1,5 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { Cron, CronExpression } from "@nestjs/schedule";
+import { Cron } from "@nestjs/schedule";
 import { ConfigService } from "@nestjs/config";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
@@ -89,7 +89,7 @@ export class CapiService {
    *  source of truth, so re-runs never double-send. The 7-day window must cover
    *  the click→milestone lag (a click can register days later, and the stitch
    *  cron backfills old events) — it is NOT a "recent activity" window. */
-  @Cron(CronExpression.EVERY_15_MINUTES)
+  @Cron("*/15 * * * *")
   async scheduledAutoSend(): Promise<void> {
     if (this.autoRunning) return;
     if (!this.config.get<string>("FB_ADS_TOKEN") || !this.config.get<string>("FB_ADS_PIXEL_ID")) return;

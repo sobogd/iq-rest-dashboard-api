@@ -638,23 +638,11 @@ export class AdminController {
 
   // ────────────────── USAGE EVENTS (new unified analytics) ──────────────────
 
-  /** UTC day window [start, end) for a `YYYY-MM-DD` param; defaults to today. */
-  private utcDayRange(day?: string): { start: Date; end: Date } {
-    let start: Date;
-    if (day && /^\d{4}-\d{2}-\d{2}$/.test(day)) {
-      start = new Date(`${day}T00:00:00.000Z`);
-    } else {
-      const now = new Date();
-      start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-    }
-    return { start, end: new Date(start.getTime() + 24 * 60 * 60 * 1000) };
-  }
-
-  /** Sessions inside a [from, to) window (absolute instants — the caller passes
-   *  its own local-day boundaries so the grouping respects the admin's
-   *  timezone). A "session" = all events sharing the same fingerprint
-   *  (coalesce(ip, region) | country | device | platform) within the window.
-   *  Grouped in-DB so the payload is one row per session, not per event. */
+  /** Sessions inside a [from, to) window (default: last 30 days). Groups by the
+   *  effective restaurant — the event's restaurantId, else the restaurant
+   *  attached to its userId — so a venue's whole activity (across devices/days)
+   *  collapses into one row. Anonymous events (no restaurant/user) group by
+   *  ip/region. Device/platform are NOT part of the key. */
   @Get("usage/sessions")
   async usageSessions(@Query("from") from?: string, @Query("to") to?: string) {
     let start: Date;
@@ -666,78 +654,90 @@ export class AdminController {
         throw new BadRequestException("from/to invalid");
       }
     } else {
-      ({ start, end } = this.utcDayRange(undefined));
+      end = new Date();
+      start = new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
     }
     type Row = {
+      kind: string;
+      rid: string | null;
+      uid: string | null;
       ipkey: string | null;
       has_ip: boolean;
       country: string;
       region: string | null;
-      device: string | null;
-      platform: string | null;
       first_at: Date;
       last_at: Date;
       event_count: number;
       has_google: boolean;
       has_fb: boolean;
-      user_id: string | null;
-      restaurant_id: string | null;
+      last_fbclid_event: string | null;
+      last_fb_at: Date | null;
     };
     const rows = await this.prisma.$queryRaw<Row[]>(Prisma.sql`
+      WITH ev AS (
+        SELECT ue.*, COALESCE(ue."restaurantId", ru."restaurantId") AS eff_rid
+        FROM usage_events ue
+        LEFT JOIN LATERAL (
+          SELECT "restaurantId" FROM restaurant_users
+          WHERE "userId" = ue."userId" ORDER BY "addedAt" ASC LIMIT 1
+        ) ru ON ue."userId" IS NOT NULL
+        WHERE ue.at >= ${start} AND ue.at < ${end}
+      )
       SELECT
-        COALESCE(ip, region) AS ipkey,
+        CASE WHEN eff_rid IS NOT NULL THEN 'r' ELSE 'a' END AS kind,
+        eff_rid AS rid,
+        (array_remove(array_agg(DISTINCT "userId"), NULL))[1] AS uid,
+        MAX(COALESCE(ip, region)) AS ipkey,
         bool_or(ip IS NOT NULL) AS has_ip,
-        country,
+        MAX(country) AS country,
         MAX(region) AS region,
-        device,
-        platform,
         MIN(at) AS first_at,
         MAX(at) AS last_at,
         COUNT(*)::int AS event_count,
         bool_or(gclid IS NOT NULL OR is_google_ads) AS has_google,
         bool_or(is_facebook_ads OR event LIKE 'l_fbclid_%') AS has_fb,
-        (array_remove(array_agg(DISTINCT "userId"), NULL))[1] AS user_id,
-        (array_remove(array_agg(DISTINCT "restaurantId"), NULL))[1] AS restaurant_id
-      FROM usage_events
-      WHERE at >= ${start} AND at < ${end}
-      GROUP BY COALESCE(ip, region), country, device, platform
+        (array_agg(event ORDER BY at DESC) FILTER (WHERE event LIKE 'l_fbclid_%'))[1] AS last_fbclid_event,
+        MAX(at) FILTER (WHERE event LIKE 'l_fbclid_%') AS last_fb_at
+      FROM ev
+      GROUP BY eff_rid, (CASE WHEN eff_rid IS NULL THEN COALESCE(ip, region) END)
       ORDER BY MAX(at) DESC
     `);
 
     const labels = await this.resolveUsageLabels(
-      rows.map((r) => ({ userId: r.user_id, restaurantId: r.restaurant_id })),
+      rows.map((r) => ({ userId: r.uid, restaurantId: r.rid })),
     );
 
     return {
       sessions: rows.map((r) => ({
+        kind: r.kind,
+        rid: r.rid,
         ipkey: r.ipkey,
         hasIp: r.has_ip,
         country: r.country,
         region: r.region,
-        device: r.device,
-        platform: r.platform,
         firstAt: r.first_at.toISOString(),
         lastAt: r.last_at.toISOString(),
         eventCount: r.event_count,
         hasGoogle: r.has_google,
         hasFacebook: r.has_fb,
-        userId: r.user_id,
-        restaurantId: r.restaurant_id,
-        userLabel: r.user_id ? labels.email(r.user_id) : null,
-        restaurantLabel: labels.restaurantName(r.restaurant_id, r.user_id),
+        latestFbclid: r.last_fbclid_event ? r.last_fbclid_event.replace(/^l_fbclid_/, "") : null,
+        latestFbTs: r.last_fb_at ? r.last_fb_at.getTime() : null,
+        userLabel: r.uid ? labels.email(r.uid) : null,
+        restaurantLabel: labels.restaurantName(r.rid, r.uid),
       })),
     };
   }
 
-  /** Events of one session, matched by its fingerprint + the [from, to] window
-   *  (the session's first/last event time). Oldest-first. */
+  /** Events of one session within [from, to]. kind 'r' → all events of the
+   *  restaurant (its restaurantId or any attached user's events); kind 'a' →
+   *  events of the anonymous ip/region. Newest-first; each carries its own
+   *  ip/device/platform. */
   @Get("usage/sessions/events")
   async usageSessionEvents(
+    @Query("kind") kind?: string,
+    @Query("rid") rid?: string,
     @Query("ipkey") ipkey?: string,
     @Query("hasIp") hasIp?: string,
-    @Query("country") country?: string,
-    @Query("device") device?: string,
-    @Query("platform") platform?: string,
     @Query("from") from?: string,
     @Query("to") to?: string,
   ) {
@@ -747,13 +747,19 @@ export class AdminController {
     if (Number.isNaN(fromD.getTime()) || Number.isNaN(toD.getTime())) {
       throw new BadRequestException("from/to invalid");
     }
-    const where: Prisma.UsageEventWhereInput = {
-      ...(country ? { country } : {}),
-      device: device ? device : null,
-      platform: platform ? platform : null,
-      at: { gte: fromD, lte: toD },
-    };
-    if (hasIp === "1" || hasIp === "true") {
+    const where: Prisma.UsageEventWhereInput = { at: { gte: fromD, lte: toD } };
+    if (kind === "r") {
+      if (!rid) throw new BadRequestException("rid required");
+      const us = await this.prisma.restaurantUser.findMany({
+        where: { restaurantId: rid },
+        select: { userId: true },
+      });
+      const userIds = us.map((u) => u.userId);
+      where.OR = [
+        { restaurantId: rid },
+        ...(userIds.length ? [{ userId: { in: userIds } }] : []),
+      ];
+    } else if (hasIp === "1" || hasIp === "true") {
       where.ip = ipkey ?? undefined;
     } else {
       where.ip = null;
@@ -761,12 +767,15 @@ export class AdminController {
     }
     const rows = await this.prisma.usageEvent.findMany({
       where,
-      orderBy: { at: "asc" },
-      take: 1000,
+      orderBy: { at: "desc" },
+      take: 2000,
       select: {
         id: true,
         at: true,
         event: true,
+        ip: true,
+        device: true,
+        platform: true,
         gclid: true,
         is_facebook_ads: true,
       },
@@ -776,6 +785,9 @@ export class AdminController {
         id: r.id,
         at: r.at.toISOString(),
         event: r.event,
+        ip: r.ip,
+        device: r.device,
+        platform: r.platform,
         gclid: r.gclid,
         isFacebookAds: r.is_facebook_ads,
       })),
@@ -972,39 +984,47 @@ export class AdminController {
 
   // ────────────────── SESSION DELETE ──────────────────
 
-  /** Delete whole sessions: for each descriptor, remove every event matching
-   *  the session fingerprint within its [from, to] window. */
+  /** Delete whole sessions: for each group descriptor, remove every matching
+   *  event within [from, to]. kind 'r' → the restaurant's events; 'a' → the
+   *  anonymous ip/region's events. */
   @Post("usage/sessions/delete")
   @HttpCode(HttpStatus.OK)
   async deleteSessions(
     @Body()
     body: {
+      from?: string;
+      to?: string;
       sessions?: Array<{
+        kind?: string;
+        rid?: string | null;
         ipkey?: string | null;
         hasIp?: boolean;
-        country?: string;
-        device?: string | null;
-        platform?: string | null;
-        from?: string;
-        to?: string;
       }>;
     },
   ) {
     const list = Array.isArray(body?.sessions) ? body.sessions : [];
     if (list.length === 0) throw new BadRequestException("sessions required");
+    if (!body.from || !body.to) throw new BadRequestException("from/to required");
+    const fromD = new Date(body.from);
+    const toD = new Date(body.to);
+    if (Number.isNaN(fromD.getTime()) || Number.isNaN(toD.getTime())) {
+      throw new BadRequestException("from/to invalid");
+    }
     let deleted = 0;
     for (const s of list) {
-      if (!s.from || !s.to) continue;
-      const fromD = new Date(s.from);
-      const toD = new Date(s.to);
-      if (Number.isNaN(fromD.getTime()) || Number.isNaN(toD.getTime())) continue;
-      const where: Prisma.UsageEventWhereInput = {
-        ...(s.country ? { country: s.country } : {}),
-        device: s.device ? s.device : null,
-        platform: s.platform ? s.platform : null,
-        at: { gte: fromD, lte: toD },
-      };
-      if (s.hasIp) {
+      const where: Prisma.UsageEventWhereInput = { at: { gte: fromD, lte: toD } };
+      if (s.kind === "r") {
+        if (!s.rid) continue;
+        const us = await this.prisma.restaurantUser.findMany({
+          where: { restaurantId: s.rid },
+          select: { userId: true },
+        });
+        const userIds = us.map((u) => u.userId);
+        where.OR = [
+          { restaurantId: s.rid },
+          ...(userIds.length ? [{ userId: { in: userIds } }] : []),
+        ];
+      } else if (s.hasIp) {
         where.ip = s.ipkey ?? undefined;
       } else {
         where.ip = null;

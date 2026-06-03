@@ -678,7 +678,7 @@ export class AdminController {
     const rows = await this.prisma.$queryRaw<Row[]>(Prisma.sql`
       WITH ev AS (
         SELECT ue.*,
-               COALESCE(ue."restaurantId", ue."stitchedRestaurantId", ru."restaurantId") AS eff_rid,
+               COALESCE(ue."manualRestaurantId", ue."restaurantId", ue."stitchedRestaurantId", ru."restaurantId") AS eff_rid,
                COALESCE(ue."userId", ue."stitchedUserId") AS eff_uid
         FROM usage_events ue
         LEFT JOIN LATERAL (
@@ -772,7 +772,7 @@ export class AdminController {
       WITH ev AS (
         SELECT ue.id, ue.at, ue.event, ue.ip, ue.region, ue.device, ue.platform,
                ue.gclid, ue.is_facebook_ads,
-               COALESCE(ue."restaurantId", ue."stitchedRestaurantId", ru."restaurantId") AS eff_rid
+               COALESCE(ue."manualRestaurantId", ue."restaurantId", ue."stitchedRestaurantId", ru."restaurantId") AS eff_rid
         FROM usage_events ue
         LEFT JOIN LATERAL (
           SELECT "restaurantId" FROM restaurant_users
@@ -1028,7 +1028,7 @@ export class AdminController {
       const r = await this.prisma.$executeRaw(Prisma.sql`
         WITH ev AS (
           SELECT ue.id,
-                 COALESCE(ue."restaurantId", ue."stitchedRestaurantId", ru."restaurantId") AS eff_rid,
+                 COALESCE(ue."manualRestaurantId", ue."restaurantId", ue."stitchedRestaurantId", ru."restaurantId") AS eff_rid,
                  ue.ip, ue.region
           FROM usage_events ue
           LEFT JOIN LATERAL (
@@ -1058,6 +1058,54 @@ export class AdminController {
   @HttpCode(HttpStatus.OK)
   async stitchSessions() {
     return this.stitch.stitch();
+  }
+
+  /** Restaurants for the manual session-assign picker. */
+  @Get("usage/restaurants")
+  async usageRestaurants() {
+    const rs = await this.prisma.restaurant.findMany({
+      select: { id: true, title: true },
+      orderBy: { title: "asc" },
+    });
+    return { restaurants: rs };
+  }
+
+  /** Manually merge a session into a restaurant: stamp manualRestaurantId
+   *  (highest precedence) onto the session's events so they regroup under it. */
+  @Post("usage/sessions/assign")
+  @HttpCode(HttpStatus.OK)
+  async assignSession(
+    @Body()
+    body: { kind?: string; rid?: string | null; ipkey?: string | null; from?: string; to?: string; restaurantId?: string },
+  ) {
+    const restaurantId = (body.restaurantId ?? "").trim();
+    if (!restaurantId) throw new BadRequestException("restaurantId required");
+    if (!body.from || !body.to) throw new BadRequestException("from/to required");
+    const fromD = new Date(body.from);
+    const toD = new Date(body.to);
+    if (Number.isNaN(fromD.getTime()) || Number.isNaN(toD.getTime())) {
+      throw new BadRequestException("from/to invalid");
+    }
+    const cond =
+      body.kind === "r"
+        ? Prisma.sql`eff_rid = ${body.rid}`
+        : Prisma.sql`eff_rid IS NULL AND COALESCE(ip, region) = ${body.ipkey ?? ""}`;
+    const updated = await this.prisma.$executeRaw(Prisma.sql`
+      WITH ev AS (
+        SELECT ue.id,
+               COALESCE(ue."manualRestaurantId", ue."restaurantId", ue."stitchedRestaurantId", ru."restaurantId") AS eff_rid,
+               ue.ip, ue.region
+        FROM usage_events ue
+        LEFT JOIN LATERAL (
+          SELECT "restaurantId" FROM restaurant_users
+          WHERE "userId" = COALESCE(ue."userId", ue."stitchedUserId") ORDER BY "addedAt" ASC LIMIT 1
+        ) ru ON COALESCE(ue."userId", ue."stitchedUserId") IS NOT NULL
+        WHERE ue.at >= ${fromD} AND ue.at <= ${toD}
+      )
+      UPDATE usage_events SET "manualRestaurantId" = ${restaurantId}
+      WHERE id IN (SELECT id FROM ev WHERE ${cond})
+    `);
+    return { ok: true, updated };
   }
 
 }

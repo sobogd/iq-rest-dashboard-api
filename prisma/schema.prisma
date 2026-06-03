@@ -408,6 +408,9 @@ model UsageEvent {
   // stitching pass; only ever populated on otherwise-anonymous events.
   stitchedUserId       String?
   stitchedRestaurantId String?
+  // Manual admin attribution of a session to a restaurant. Highest precedence;
+  // never touched by the stitching pass.
+  manualRestaurantId   String?
 
   @@index([at])
   @@index([event, at])

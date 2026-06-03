@@ -22,6 +22,7 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AdminGuard } from "./admin.guard";
 import { UsageStitchService } from "./usage-stitch.service";
+import { CapiService } from "./capi.service";
 import { AuthService } from "../auth/auth.service";
 import { MailService } from "../mail/mail.service";
 import { DevicesService } from "../devices/devices.service";
@@ -51,6 +52,7 @@ export class AdminController {
     private readonly devices: DevicesService,
     private readonly restaurants: RestaurantService,
     private readonly stitch: UsageStitchService,
+    private readonly capi: CapiService,
   ) {}
 
   // ────────────────── DEVICES ──────────────────
@@ -705,7 +707,7 @@ export class AdminController {
         bool_or(gclid IS NOT NULL OR is_google_ads) AS has_google,
         bool_or(is_facebook_ads OR event LIKE 'l_fbclid_%') AS has_fb,
         bool_or(event LIKE '%onb%') AS has_onb,
-        bool_or(event LIKE '%pricing%' OR event LIKE '%demo%') AS has_content,
+        bool_or(event = 'l_page_pricing' OR event LIKE '%demo%') AS has_content,
         (array_agg(event ORDER BY at DESC) FILTER (WHERE event LIKE 'l_fbclid_%'))[1] AS last_fbclid_event,
         MAX(at) FILTER (WHERE event LIKE 'l_fbclid_%') AS last_fb_at
       FROM ev
@@ -955,49 +957,15 @@ export class AdminController {
     });
     if (already) throw new ConflictException(`${eventName} already sent for this fbclid`);
 
-    const token = this.config.get<string>("FB_ADS_TOKEN");
-    const pixelId = this.config.get<string>("FB_ADS_PIXEL_ID");
-    if (!token || !pixelId) {
-      throw new BadRequestException("FB_ADS_TOKEN / FB_ADS_PIXEL_ID not configured");
-    }
-
     const clickMs = typeof body.clickTs === "number" && body.clickTs > 0 ? body.clickTs : Date.now();
-    const fbc = `fb.1.${clickMs}.${fbclid}`;
-    const eventTime = Math.floor(Date.now() / 1000);
-
-    let ok = false;
-    let json: unknown = {};
+    let result: { ok: boolean; response: unknown };
     try {
-      const res = await fetch(
-        `https://graph.facebook.com/v21.0/${pixelId}/events?access_token=${token}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            data: [{
-              event_name: eventName,
-              event_time: eventTime,
-              action_source: "website",
-              event_source_url: "https://soqrmenu.com/",
-              user_data: { fbc },
-            }],
-          }),
-        },
-      );
-      ok = res.ok;
-      json = await res.json().catch(() => ({}));
+      result = await this.capi.send(fbclid, eventName, clickMs);
     } catch (e) {
-      await this.prisma.capiSend.create({
-        data: { fbclid, eventName, status: "error", response: { error: String(e) } },
-      });
       throw new BadRequestException({ message: "Meta CAPI request failed", response: { error: String(e) } });
     }
-
-    await this.prisma.capiSend.create({
-      data: { fbclid, eventName, status: ok ? "success" : "error", response: json as Prisma.InputJsonValue },
-    });
-    if (!ok) throw new BadRequestException({ message: "Meta CAPI rejected the event", response: json });
-    return { ok: true, eventName, fbc, response: json };
+    if (!result.ok) throw new BadRequestException({ message: "Meta CAPI rejected the event", response: result.response });
+    return { ok: true, eventName, response: result.response };
   }
 
   /** Most recent fbclid landing click (the CAPI form targets this one). */

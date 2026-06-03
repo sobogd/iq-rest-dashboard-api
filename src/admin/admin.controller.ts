@@ -723,15 +723,29 @@ export class AdminController {
           .filter((x): x is string => !!x),
       ),
     );
-    const sentFbclids = new Set<string>();
+    // fbclid → set of successfully-sent CAPI event names.
+    const sentByFbclid = new Map<string, Set<string>>();
     if (fbclids.length) {
       const sent = await this.prisma.capiSend.findMany({
         where: { fbclid: { in: fbclids }, status: "success" },
-        select: { fbclid: true },
-        distinct: ["fbclid"],
+        select: { fbclid: true, eventName: true },
       });
-      for (const s of sent) sentFbclids.add(s.fbclid);
+      for (const s of sent) {
+        let set = sentByFbclid.get(s.fbclid);
+        if (!set) { set = new Set(); sentByFbclid.set(s.fbclid, set); }
+        set.add(s.eventName);
+      }
     }
+    // Deepest funnel milestone sent → chip colour (reg > checkout > view).
+    const fbStageOf = (fbclid: string | null): "reg" | "checkout" | "view" | null => {
+      if (!fbclid) return null;
+      const set = sentByFbclid.get(fbclid);
+      if (!set || set.size === 0) return null;
+      if (set.has("CompleteRegistration")) return "reg";
+      if (set.has("InitiateCheckout")) return "checkout";
+      if (set.has("ViewContent")) return "view";
+      return "view"; // some other event was sent — still mark as touched
+    };
 
     return {
       sessions: rows.map((r) => {
@@ -750,7 +764,7 @@ export class AdminController {
           hasFacebook: r.has_fb,
           latestFbclid,
           latestFbTs: r.last_fb_at ? r.last_fb_at.getTime() : null,
-          fbSent: latestFbclid ? sentFbclids.has(latestFbclid) : false,
+          fbStage: fbStageOf(latestFbclid),
           userLabel: r.uid ? labels.email(r.uid) : null,
           restaurantLabel: labels.restaurantName(r.rid, r.uid),
         };

@@ -671,6 +671,7 @@ export class AdminController {
       ipkey: string | null;
       has_ip: boolean;
       country: string;
+      region: string | null;
       device: string | null;
       platform: string | null;
       first_at: Date;
@@ -686,6 +687,7 @@ export class AdminController {
         COALESCE(ip, region) AS ipkey,
         bool_or(ip IS NOT NULL) AS has_ip,
         country,
+        MAX(region) AS region,
         device,
         platform,
         MIN(at) AS first_at,
@@ -710,6 +712,7 @@ export class AdminController {
         ipkey: r.ipkey,
         hasIp: r.has_ip,
         country: r.country,
+        region: r.region,
         device: r.device,
         platform: r.platform,
         firstAt: r.first_at.toISOString(),

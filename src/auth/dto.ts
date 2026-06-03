@@ -3,8 +3,9 @@ import { Type } from "class-transformer";
 import { CUISINE_KEYS } from "../onboarding/cuisine";
 
 export class SignupContextDto {
+  @IsOptional()
   @IsIn(CUISINE_KEYS as unknown as string[])
-  cuisine!: string;
+  cuisine?: string;
 
   @IsString()
   @MaxLength(120)

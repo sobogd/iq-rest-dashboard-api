@@ -25,7 +25,7 @@ import {
 } from "../common/session-utils";
 import { validateEmail } from "../common/validate-email";
 
-export type SignupContext = { cuisine: string; restaurantName: string };
+export type SignupContext = { cuisine?: string; restaurantName: string };
 
 const SEND_LIMIT_WINDOW = 15 * 60 * 1000;
 const SEND_LIMIT_MAX = 5;
@@ -175,11 +175,12 @@ export class AuthService implements OnModuleDestroy {
     ctx: SignupContext | undefined,
     currency: string | undefined,
   ): { pendingCuisine: CuisineKey; pendingRestaurantName: string; pendingCurrency: string } | Record<string, never> {
-    if (!ctx || !isCuisineKey(ctx.cuisine)) return {};
+    if (!ctx) return {};
     const name = ctx.restaurantName?.trim().slice(0, 120);
     if (!name) return {};
+    const cuisine: CuisineKey = isCuisineKey(ctx.cuisine) ? ctx.cuisine : "restaurant";
     return {
-      pendingCuisine: ctx.cuisine,
+      pendingCuisine: cuisine,
       pendingRestaurantName: name,
       pendingCurrency: currency || "EUR",
     };

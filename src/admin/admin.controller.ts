@@ -637,119 +637,142 @@ export class AdminController {
 
   // ────────────────── USAGE EVENTS (new unified analytics) ──────────────────
 
-  /** Usage events, paginated for infinite scroll across full history.
-   *  20 events per page, ordered by at/id desc. */
-  @Get("usage/timeline")
-  async usageTimeline(
-    @Query("scope") scope: "all" | "anonymous" | "identified" = "all",
-    @Query("userId") userId?: string,
-    @Query("cursor") cursor?: string,
+  /** UTC day window [start, end) for a `YYYY-MM-DD` param; defaults to today. */
+  private utcDayRange(day?: string): { start: Date; end: Date } {
+    let start: Date;
+    if (day && /^\d{4}-\d{2}-\d{2}$/.test(day)) {
+      start = new Date(`${day}T00:00:00.000Z`);
+    } else {
+      const now = new Date();
+      start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    }
+    return { start, end: new Date(start.getTime() + 24 * 60 * 60 * 1000) };
+  }
+
+  /** Sessions for a single UTC day. A "session" = all events sharing the same
+   *  fingerprint (coalesce(ip, region) | country | device | platform) within
+   *  the day. Grouped in-DB so the payload is one row per session, not per
+   *  event. */
+  @Get("usage/sessions")
+  async usageSessions(@Query("day") day?: string) {
+    const { start, end } = this.utcDayRange(day);
+    type Row = {
+      ipkey: string | null;
+      has_ip: boolean;
+      country: string;
+      device: string | null;
+      platform: string | null;
+      first_at: Date;
+      last_at: Date;
+      event_count: number;
+      has_google: boolean;
+      has_fb: boolean;
+      user_id: string | null;
+      restaurant_id: string | null;
+    };
+    const rows = await this.prisma.$queryRaw<Row[]>(Prisma.sql`
+      SELECT
+        COALESCE(ip, region) AS ipkey,
+        bool_or(ip IS NOT NULL) AS has_ip,
+        country,
+        device,
+        platform,
+        MIN(at) AS first_at,
+        MAX(at) AS last_at,
+        COUNT(*)::int AS event_count,
+        bool_or(gclid IS NOT NULL OR is_google_ads) AS has_google,
+        bool_or(is_facebook_ads OR event LIKE 'l_fbclid_%') AS has_fb,
+        (array_remove(array_agg(DISTINCT "userId"), NULL))[1] AS user_id,
+        (array_remove(array_agg(DISTINCT "restaurantId"), NULL))[1] AS restaurant_id
+      FROM usage_events
+      WHERE at >= ${start} AND at < ${end}
+      GROUP BY COALESCE(ip, region), country, device, platform
+      ORDER BY MAX(at) DESC
+    `);
+
+    const labels = await this.resolveUsageLabels(
+      rows.map((r) => ({ userId: r.user_id, restaurantId: r.restaurant_id })),
+    );
+
+    return {
+      day: start.toISOString().slice(0, 10),
+      sessions: rows.map((r) => ({
+        ipkey: r.ipkey,
+        hasIp: r.has_ip,
+        country: r.country,
+        device: r.device,
+        platform: r.platform,
+        firstAt: r.first_at.toISOString(),
+        lastAt: r.last_at.toISOString(),
+        eventCount: r.event_count,
+        hasGoogle: r.has_google,
+        hasFacebook: r.has_fb,
+        userId: r.user_id,
+        restaurantId: r.restaurant_id,
+        userLabel: r.user_id ? labels.userLabel(r.user_id) : null,
+        restaurantLabel: r.restaurant_id ? labels.restaurantLabel(r.restaurant_id) : null,
+      })),
+    };
+  }
+
+  /** Events of one session, matched by its fingerprint + the [from, to] window
+   *  (the session's first/last event time). Oldest-first. */
+  @Get("usage/sessions/events")
+  async usageSessionEvents(
+    @Query("ipkey") ipkey?: string,
+    @Query("hasIp") hasIp?: string,
+    @Query("country") country?: string,
+    @Query("device") device?: string,
+    @Query("platform") platform?: string,
     @Query("from") from?: string,
     @Query("to") to?: string,
-    @Query("sort") sort?: "asc" | "desc",
-    @Query("similarTo") similarTo?: string,
   ) {
-    const where: Prisma.UsageEventWhereInput = {};
-
-    // similarTo: narrow the timeline to rows sharing the geo + device shape
-    // of one specific event (same heuristic as /usage/similar). Folds the
-    // base event's identifying tuple into `where` so the standard cursor
-    // pagination keeps working unchanged.
-    if (similarTo) {
-      const base = await this.prisma.usageEvent.findUnique({ where: { id: similarTo } });
-      if (!base) throw new BadRequestException("similarTo event not found");
-      where.country = base.country;
-      where.device = base.device;
-      where.platform = base.platform;
-      if (base.ip) {
-        where.ip = base.ip;
-      } else {
-        where.region = base.region;
-        where.ip = null;
-      }
+    if (!from || !to) throw new BadRequestException("from/to required");
+    const fromD = new Date(from);
+    const toD = new Date(to);
+    if (Number.isNaN(fromD.getTime()) || Number.isNaN(toD.getTime())) {
+      throw new BadRequestException("from/to invalid");
     }
-    if (userId) {
-      where.userId = userId;
-    } else if (scope === "anonymous") {
-      where.userId = null;
-    } else if (scope === "identified") {
-      where.userId = { not: null };
+    const where: Prisma.UsageEventWhereInput = {
+      ...(country ? { country } : {}),
+      device: device ? device : null,
+      platform: platform ? platform : null,
+      at: { gte: fromD, lte: toD },
+    };
+    if (hasIp === "1" || hasIp === "true") {
+      where.ip = ipkey ?? undefined;
+    } else {
+      where.ip = null;
+      where.region = ipkey ?? "";
     }
-
-    const atRange: { gte?: Date; lt?: Date } = {};
-    if (from) {
-      const d = new Date(from);
-      if (Number.isNaN(d.getTime())) throw new BadRequestException("from invalid");
-      atRange.gte = d;
-    }
-    if (to) {
-      const d = new Date(to);
-      if (Number.isNaN(d.getTime())) throw new BadRequestException("to invalid");
-      atRange.lt = d;
-    }
-    if (atRange.gte || atRange.lt) where.at = atRange;
-
-    const PAGE_SIZE = 50;
-    const dir: "asc" | "desc" = sort === "asc" ? "asc" : "desc";
     const rows = await this.prisma.usageEvent.findMany({
       where,
-      orderBy: [{ at: dir }, { id: dir }],
-      take: PAGE_SIZE,
-      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      orderBy: { at: "asc" },
+      take: 1000,
       select: {
         id: true,
         at: true,
         event: true,
-        country: true,
-        region: true,
-        device: true,
-        platform: true,
         gclid: true,
-        ad_params: true,
-        userId: true,
-        restaurantId: true,
-        ip: true,
-        is_search: true,
-        is_google_ads: true,
         is_facebook_ads: true,
         fbSentEvents: true,
       },
     });
-
-    const labels = await this.resolveUsageLabels(rows);
-
-    // Total count for the header — only computed on the first page request.
-    const total = !cursor ? await this.prisma.usageEvent.count({ where }) : undefined;
-
     return {
-      ...(total !== undefined ? { total } : {}),
-      hasMore: rows.length === PAGE_SIZE,
-      nextCursor: rows.length === PAGE_SIZE ? rows[rows.length - 1].id : null,
       events: rows.map((r) => ({
         id: r.id,
         at: r.at.toISOString(),
         event: r.event,
-        country: r.country,
-        region: r.region,
-        device: r.device,
-        platform: r.platform,
         gclid: r.gclid,
-        adParams: r.ad_params,
-        userId: r.userId,
-        restaurantId: r.restaurantId,
-        label: labels.forRow(r),
-        ip: r.ip,
-        isSearch: r.is_search,
-        isGoogleAds: r.is_google_ads,
         isFacebookAds: r.is_facebook_ads,
         fbSentEvents: r.fbSentEvents,
       })),
     };
   }
 
-  // Resolve userId / restaurantId on a batch of usage events to a single
-  // display label (restaurant title preferred, owner email fallback). Pulled
-  // out so /usage/timeline and /usage/similar share the same lookup.
+  // Resolve a batch of userId / restaurantId to display labels (user email,
+  // restaurant title). Both are returned separately so a session can show the
+  // logged-in owner AND the active restaurant at once.
   private async resolveUsageLabels(
     rows: { userId: string | null; restaurantId: string | null }[],
   ) {
@@ -776,67 +799,8 @@ export class AdminController {
       for (const r of restaurants) restaurantLabels.set(r.id, r.title);
     }
     return {
-      forRow(r: { userId: string | null; restaurantId: string | null }): string | null {
-        if (r.restaurantId) return restaurantLabels.get(r.restaurantId) ?? null;
-        if (r.userId) return userLabels.get(r.userId) ?? null;
-        return null;
-      },
-    };
-  }
-
-  @Get("usage/similar/:id")
-  async usageSimilar(@Param("id") id: string) {
-    const base = await this.prisma.usageEvent.findUnique({ where: { id } });
-    if (!base) throw new NotFoundException("Event not found");
-
-    const where: Prisma.UsageEventWhereInput = {
-      country: base.country,
-      device: base.device,
-      platform: base.platform,
-    };
-    if (base.ip) {
-      where.ip = base.ip;
-    } else {
-      where.region = base.region;
-      where.ip = null;
-    }
-
-    const rows = await this.prisma.usageEvent.findMany({
-      where,
-      orderBy: { at: "desc" },
-      take: 500,
-      select: {
-        id: true, at: true, event: true,
-        country: true, region: true, device: true, platform: true,
-        gclid: true, ad_params: true, userId: true, restaurantId: true, ip: true,
-        is_search: true, is_google_ads: true, is_facebook_ads: true,
-        fbSentEvents: true,
-      },
-    });
-
-    const labels = await this.resolveUsageLabels(rows);
-
-    return {
-      total: rows.length,
-      events: rows.map((r) => ({
-        id: r.id,
-        at: r.at.toISOString(),
-        event: r.event,
-        country: r.country,
-        region: r.region,
-        device: r.device,
-        platform: r.platform,
-        gclid: r.gclid,
-        adParams: r.ad_params,
-        userId: r.userId,
-        restaurantId: r.restaurantId,
-        label: labels.forRow(r),
-        ip: r.ip,
-        isSearch: r.is_search,
-        isGoogleAds: r.is_google_ads,
-        isFacebookAds: r.is_facebook_ads,
-        fbSentEvents: r.fbSentEvents,
-      })),
+      userLabel: (id: string): string | null => userLabels.get(id) ?? null,
+      restaurantLabel: (id: string): string | null => restaurantLabels.get(id) ?? null,
     };
   }
 
@@ -915,17 +879,6 @@ export class AdminController {
       });
     }
     return { ok: true, event_name: eventName, fbc, sentEvents, response: json };
-  }
-
-  // ────────────────── BULK EVENT ACTIONS ──────────────────
-
-  @Post("usage/events/delete")
-  @HttpCode(HttpStatus.OK)
-  async bulkDeleteEvents(@Body() body: { ids?: string[] }) {
-    const ids = Array.isArray(body?.ids) ? body.ids.filter((s) => typeof s === "string" && s.length > 0) : [];
-    if (ids.length === 0) throw new BadRequestException("ids required");
-    const r = await this.prisma.usageEvent.deleteMany({ where: { id: { in: ids } } });
-    return { ok: true, deleted: r.count };
   }
 
 }

@@ -719,8 +719,8 @@ export class AdminController {
         hasFacebook: r.has_fb,
         userId: r.user_id,
         restaurantId: r.restaurant_id,
-        userLabel: r.user_id ? labels.userLabel(r.user_id) : null,
-        restaurantLabel: r.restaurant_id ? labels.restaurantLabel(r.restaurant_id) : null,
+        userLabel: r.user_id ? labels.email(r.user_id) : null,
+        restaurantLabel: labels.restaurantName(r.restaurant_id, r.user_id),
       })),
     };
   }
@@ -780,37 +780,60 @@ export class AdminController {
     };
   }
 
-  // Resolve a batch of userId / restaurantId to display labels (user email,
-  // restaurant title). Both are returned separately so a session can show the
-  // logged-in owner AND the active restaurant at once.
+  // Resolve a batch of userId / restaurantId to display labels. `email` is the
+  // user's email; `restaurantName` always prefers a restaurant TITLE — the
+  // event's own restaurantId, else the restaurant attached to the userId (so a
+  // session with only a logged-in user still shows a restaurant name, never the
+  // bare email).
   private async resolveUsageLabels(
     rows: { userId: string | null; restaurantId: string | null }[],
   ) {
     const userIds = Array.from(
       new Set(rows.map((r) => r.userId).filter((x): x is string => !!x)),
     );
-    const restaurantIds = Array.from(
-      new Set(rows.map((r) => r.restaurantId).filter((x): x is string => !!x)),
-    );
-    const userLabels = new Map<string, string>();
-    const restaurantLabels = new Map<string, string>();
+    const directRestaurantIds = rows.map((r) => r.restaurantId).filter((x): x is string => !!x);
+
+    const emails = new Map<string, string>();
+    const userRestaurant = new Map<string, string>(); // userId → first attached restaurantId
     if (userIds.length) {
       const users = await this.prisma.user.findMany({
         where: { id: { in: userIds } },
         select: { id: true, email: true },
       });
-      for (const u of users) userLabels.set(u.id, u.email);
+      for (const u of users) emails.set(u.id, u.email);
+
+      const attachments = await this.prisma.restaurantUser.findMany({
+        where: { userId: { in: userIds } },
+        orderBy: { addedAt: "asc" },
+        select: { userId: true, restaurantId: true },
+      });
+      for (const a of attachments) {
+        if (!userRestaurant.has(a.userId)) userRestaurant.set(a.userId, a.restaurantId);
+      }
     }
-    if (restaurantIds.length) {
+
+    const allRestaurantIds = Array.from(
+      new Set([...directRestaurantIds, ...userRestaurant.values()]),
+    );
+    const titles = new Map<string, string>();
+    if (allRestaurantIds.length) {
       const restaurants = await this.prisma.restaurant.findMany({
-        where: { id: { in: restaurantIds } },
+        where: { id: { in: allRestaurantIds } },
         select: { id: true, title: true },
       });
-      for (const r of restaurants) restaurantLabels.set(r.id, r.title);
+      for (const r of restaurants) titles.set(r.id, r.title);
     }
+
     return {
-      userLabel: (id: string): string | null => userLabels.get(id) ?? null,
-      restaurantLabel: (id: string): string | null => restaurantLabels.get(id) ?? null,
+      email: (userId: string): string | null => emails.get(userId) ?? null,
+      restaurantName: (restaurantId: string | null, userId: string | null): string | null => {
+        if (restaurantId && titles.get(restaurantId)) return titles.get(restaurantId)!;
+        if (userId) {
+          const rid = userRestaurant.get(userId);
+          if (rid) return titles.get(rid) ?? null;
+        }
+        return null;
+      },
     };
   }
 

@@ -737,7 +737,6 @@ export class AdminController {
     @Query("kind") kind?: string,
     @Query("rid") rid?: string,
     @Query("ipkey") ipkey?: string,
-    @Query("hasIp") hasIp?: string,
     @Query("from") from?: string,
     @Query("to") to?: string,
   ) {
@@ -747,39 +746,42 @@ export class AdminController {
     if (Number.isNaN(fromD.getTime()) || Number.isNaN(toD.getTime())) {
       throw new BadRequestException("from/to invalid");
     }
-    const where: Prisma.UsageEventWhereInput = { at: { gte: fromD, lte: toD } };
-    if (kind === "r") {
-      if (!rid) throw new BadRequestException("rid required");
-      const us = await this.prisma.restaurantUser.findMany({
-        where: { restaurantId: rid },
-        select: { userId: true },
-      });
-      const userIds = us.map((u) => u.userId);
-      where.OR = [
-        { restaurantId: rid },
-        ...(userIds.length ? [{ userId: { in: userIds } }] : []),
-      ];
-    } else if (hasIp === "1" || hasIp === "true") {
-      where.ip = ipkey ?? undefined;
-    } else {
-      where.ip = null;
-      where.region = ipkey ?? "";
-    }
-    const rows = await this.prisma.usageEvent.findMany({
-      where,
-      orderBy: { at: "desc" },
-      take: 2000,
-      select: {
-        id: true,
-        at: true,
-        event: true,
-        ip: true,
-        device: true,
-        platform: true,
-        gclid: true,
-        is_facebook_ads: true,
-      },
-    });
+    // Match the SAME effective-restaurant grouping as /usage/sessions so an
+    // anonymous (ip) group never leaks identified events that merely share its
+    // ip, and a restaurant group catches its userId-only events.
+    if (kind === "r" && !rid) throw new BadRequestException("rid required");
+    const cond =
+      kind === "r"
+        ? Prisma.sql`eff_rid = ${rid}`
+        : Prisma.sql`eff_rid IS NULL AND COALESCE(ip, region) = ${ipkey ?? ""}`;
+    type Row = {
+      id: string;
+      at: Date;
+      event: string;
+      ip: string | null;
+      device: string | null;
+      platform: string | null;
+      gclid: string | null;
+      is_facebook_ads: boolean;
+    };
+    const rows = await this.prisma.$queryRaw<Row[]>(Prisma.sql`
+      WITH ev AS (
+        SELECT ue.id, ue.at, ue.event, ue.ip, ue.region, ue.device, ue.platform,
+               ue.gclid, ue.is_facebook_ads,
+               COALESCE(ue."restaurantId", ru."restaurantId") AS eff_rid
+        FROM usage_events ue
+        LEFT JOIN LATERAL (
+          SELECT "restaurantId" FROM restaurant_users
+          WHERE "userId" = ue."userId" ORDER BY "addedAt" ASC LIMIT 1
+        ) ru ON ue."userId" IS NOT NULL
+        WHERE ue.at >= ${fromD} AND ue.at <= ${toD}
+      )
+      SELECT id, at, event, ip, device, platform, gclid, is_facebook_ads
+      FROM ev
+      WHERE ${cond}
+      ORDER BY at DESC
+      LIMIT 2000
+    `);
     return {
       events: rows.map((r) => ({
         id: r.id,
@@ -1012,26 +1014,29 @@ export class AdminController {
     }
     let deleted = 0;
     for (const s of list) {
-      const where: Prisma.UsageEventWhereInput = { at: { gte: fromD, lte: toD } };
-      if (s.kind === "r") {
-        if (!s.rid) continue;
-        const us = await this.prisma.restaurantUser.findMany({
-          where: { restaurantId: s.rid },
-          select: { userId: true },
-        });
-        const userIds = us.map((u) => u.userId);
-        where.OR = [
-          { restaurantId: s.rid },
-          ...(userIds.length ? [{ userId: { in: userIds } }] : []),
-        ];
-      } else if (s.hasIp) {
-        where.ip = s.ipkey ?? undefined;
-      } else {
-        where.ip = null;
-        where.region = s.ipkey ?? "";
-      }
-      const r = await this.prisma.usageEvent.deleteMany({ where });
-      deleted += r.count;
+      if (s.kind === "r" && !s.rid) continue;
+      // Same effective-restaurant matching as the list/events so deleting an
+      // anonymous ip group never removes identified events sharing that ip.
+      const cond =
+        s.kind === "r"
+          ? Prisma.sql`eff_rid = ${s.rid}`
+          : Prisma.sql`eff_rid IS NULL AND COALESCE(ip, region) = ${s.ipkey ?? ""}`;
+      const r = await this.prisma.$executeRaw(Prisma.sql`
+        WITH ev AS (
+          SELECT ue.id,
+                 COALESCE(ue."restaurantId", ru."restaurantId") AS eff_rid,
+                 ue.ip, ue.region
+          FROM usage_events ue
+          LEFT JOIN LATERAL (
+            SELECT "restaurantId" FROM restaurant_users
+            WHERE "userId" = ue."userId" ORDER BY "addedAt" ASC LIMIT 1
+          ) ru ON ue."userId" IS NOT NULL
+          WHERE ue.at >= ${fromD} AND ue.at <= ${toD}
+        )
+        DELETE FROM usage_events
+        WHERE id IN (SELECT id FROM ev WHERE ${cond})
+      `);
+      deleted += r;
     }
     return { ok: true, deleted };
   }

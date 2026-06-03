@@ -674,6 +674,8 @@ export class AdminController {
       event_count: number;
       has_google: boolean;
       has_fb: boolean;
+      has_onb: boolean;
+      has_content: boolean;
       last_fbclid_event: string | null;
       last_fb_at: Date | null;
     };
@@ -702,6 +704,8 @@ export class AdminController {
         COUNT(*)::int AS event_count,
         bool_or(gclid IS NOT NULL OR is_google_ads) AS has_google,
         bool_or(is_facebook_ads OR event LIKE 'l_fbclid_%') AS has_fb,
+        bool_or(event LIKE '%onb%') AS has_onb,
+        bool_or(event LIKE '%pricing%' OR event LIKE '%demo%') AS has_content,
         (array_agg(event ORDER BY at DESC) FILTER (WHERE event LIKE 'l_fbclid_%'))[1] AS last_fbclid_event,
         MAX(at) FILTER (WHERE event LIKE 'l_fbclid_%') AS last_fb_at
       FROM ev
@@ -762,6 +766,8 @@ export class AdminController {
           eventCount: r.event_count,
           hasGoogle: r.has_google,
           hasFacebook: r.has_fb,
+          hasOnboarding: r.has_onb,
+          hasContent: r.has_content,
           latestFbclid,
           latestFbTs: r.last_fb_at ? r.last_fb_at.getTime() : null,
           fbStage: fbStageOf(latestFbclid),

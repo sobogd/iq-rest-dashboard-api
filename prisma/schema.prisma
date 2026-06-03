@@ -402,11 +402,18 @@ model UsageEvent {
   is_google_ads Boolean @default(false) // arrival via gclid/gbraid/wbraid on the URL
   is_facebook_ads Boolean @default(false) // arrival via fbclid on the URL (Facebook/Instagram ads)
   is_search     Boolean @default(false) // arrival from a search engine referrer (google/bing/yandex/…)
+  // Identity stitched from device-fingerprint islands (anonymous pre-login
+  // activity attributed to the user/restaurant that later logged in from the
+  // same ip+device+platform+country+region within a <=3-day gap). Set by the
+  // stitching pass; only ever populated on otherwise-anonymous events.
+  stitchedUserId       String?
+  stitchedRestaurantId String?
 
   @@index([at])
   @@index([event, at])
   @@index([userId, at])
   @@index([restaurantId, at])
+  @@index([stitchedRestaurantId])
   @@index([gclid])
   @@index([is_google_ads, at])
   @@index([is_facebook_ads, at])

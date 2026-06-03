@@ -741,7 +741,7 @@ export class AdminController {
       if (!fbclid) return null;
       const set = sentByFbclid.get(fbclid);
       if (!set || set.size === 0) return null;
-      if (set.has("CompleteRegistration")) return "reg";
+      if (set.has("CompleteRegistration") || set.has("Subscribe")) return "reg";
       if (set.has("InitiateCheckout")) return "checkout";
       if (set.has("ViewContent")) return "view";
       return "view"; // some other event was sent — still mark as touched
@@ -922,13 +922,10 @@ export class AdminController {
 
   /** Meta CAPI conversion event_names that can be sent manually. */
   private static readonly CAPI_EVENTS = [
-    "PageView",
     "ViewContent",
-    "Lead",
     "InitiateCheckout",
     "CompleteRegistration",
     "Subscribe",
-    "Purchase",
   ];
 
   /** Manually send a Meta CAPI conversion for a Facebook click id (fbclid).

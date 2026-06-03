@@ -765,15 +765,20 @@ export class AdminController {
       at: Date;
       event: string;
       ip: string | null;
+      country: string | null;
+      region: string | null;
       device: string | null;
       platform: string | null;
       gclid: string | null;
       is_facebook_ads: boolean;
+      eff_rid: string | null;
+      eff_uid: string | null;
     };
     const rows = await this.prisma.$queryRaw<Row[]>(Prisma.sql`
       WITH ev AS (
-        SELECT ue.id, ue.at, ue.event, ue.ip, ue.region, ue.device, ue.platform,
+        SELECT ue.id, ue.at, ue.event, ue.ip, ue.country, ue.region, ue.device, ue.platform,
                ue.gclid, ue.is_facebook_ads,
+               COALESCE(ue."userId", ue."stitchedUserId") AS eff_uid,
                COALESCE(ue."manualRestaurantId", ue."restaurantId", ue."stitchedRestaurantId", ru."restaurantId") AS eff_rid
         FROM usage_events ue
         LEFT JOIN LATERAL (
@@ -782,13 +787,29 @@ export class AdminController {
         ) ru ON COALESCE(ue."userId", ue."stitchedUserId") IS NOT NULL
         WHERE ue.at >= ${fromD} AND ue.at <= ${toD}
       )
-      SELECT id, at, event, ip, device, platform, gclid, is_facebook_ads
+      SELECT id, at, event, ip, country, region, device, platform, gclid, is_facebook_ads, eff_rid, eff_uid
       FROM ev
       WHERE ${cond}
       ORDER BY at DESC
       LIMIT 2000
     `);
+
+    // Header summary — country/region/labels aren't on individual events in the
+    // client, so resolve them here (newest non-empty country; first identity).
+    const country = rows.find((r) => r.country)?.country ?? "";
+    const region = rows.find((r) => r.region)?.region ?? null;
+    const effUid = rows.find((r) => r.eff_uid)?.eff_uid ?? null;
+    const effRid = rows.find((r) => r.eff_rid)?.eff_rid ?? null;
+    const labels = await this.resolveUsageLabels([{ userId: effUid, restaurantId: effRid }]);
+    const summary = {
+      country,
+      region,
+      userLabel: effUid ? labels.email(effUid) : null,
+      restaurantLabel: labels.restaurantName(effRid, effUid),
+    };
+
     return {
+      summary,
       events: rows.map((r) => ({
         id: r.id,
         at: r.at.toISOString(),

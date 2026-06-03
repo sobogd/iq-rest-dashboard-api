@@ -713,24 +713,48 @@ export class AdminController {
       rows.map((r) => ({ userId: r.uid, restaurantId: r.rid })),
     );
 
+    // Which sessions already had a Meta CAPI event sent? Flag by the session's
+    // latest fbclid (the one the FB chip would send to). One indexed lookup on
+    // the small capi_sends journal — no per-session queries.
+    const fbclids = Array.from(
+      new Set(
+        rows
+          .map((r) => (r.last_fbclid_event ? r.last_fbclid_event.replace(/^l_fbclid_/, "") : null))
+          .filter((x): x is string => !!x),
+      ),
+    );
+    const sentFbclids = new Set<string>();
+    if (fbclids.length) {
+      const sent = await this.prisma.capiSend.findMany({
+        where: { fbclid: { in: fbclids }, status: "success" },
+        select: { fbclid: true },
+        distinct: ["fbclid"],
+      });
+      for (const s of sent) sentFbclids.add(s.fbclid);
+    }
+
     return {
-      sessions: rows.map((r) => ({
-        kind: r.kind,
-        rid: r.rid,
-        ipkey: r.ipkey,
-        hasIp: r.has_ip,
-        country: r.country,
-        region: r.region,
-        firstAt: r.first_at.toISOString(),
-        lastAt: r.last_at.toISOString(),
-        eventCount: r.event_count,
-        hasGoogle: r.has_google,
-        hasFacebook: r.has_fb,
-        latestFbclid: r.last_fbclid_event ? r.last_fbclid_event.replace(/^l_fbclid_/, "") : null,
-        latestFbTs: r.last_fb_at ? r.last_fb_at.getTime() : null,
-        userLabel: r.uid ? labels.email(r.uid) : null,
-        restaurantLabel: labels.restaurantName(r.rid, r.uid),
-      })),
+      sessions: rows.map((r) => {
+        const latestFbclid = r.last_fbclid_event ? r.last_fbclid_event.replace(/^l_fbclid_/, "") : null;
+        return {
+          kind: r.kind,
+          rid: r.rid,
+          ipkey: r.ipkey,
+          hasIp: r.has_ip,
+          country: r.country,
+          region: r.region,
+          firstAt: r.first_at.toISOString(),
+          lastAt: r.last_at.toISOString(),
+          eventCount: r.event_count,
+          hasGoogle: r.has_google,
+          hasFacebook: r.has_fb,
+          latestFbclid,
+          latestFbTs: r.last_fb_at ? r.last_fb_at.getTime() : null,
+          fbSent: latestFbclid ? sentFbclids.has(latestFbclid) : false,
+          userLabel: r.uid ? labels.email(r.uid) : null,
+          restaurantLabel: labels.restaurantName(r.rid, r.uid),
+        };
+      }),
     };
   }
 

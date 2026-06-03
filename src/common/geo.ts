@@ -1,5 +1,5 @@
 import type { Request } from "express";
-import { getCurrencyByCountry, isSupportedCurrency, type SupportedCurrency } from "./stripe";
+import { getCurrencyByCountry, type SupportedCurrency } from "./stripe";
 import { getMenuCurrencyByCountry } from "./menu-currency";
 
 /**
@@ -24,19 +24,12 @@ export function getRequestCurrency(req: Request): string {
   return getMenuCurrencyByCountry(getRequestCountry(req));
 }
 
-/** IQ Rest billing currency (EUR/NOK/SEK/DKK). Priority:
- *   1. nginx-injected `x-currency` header (GeoIP2 map) or `geo_currency` cookie
- *   2. country → billing-currency map
- * Always one of SUPPORTED_CURRENCIES; defaults to EUR. */
+/** IQ Rest billing currency. A primitive, hardcoded country→currency map
+ *  (see stripe.ts `BILLING_CURRENCY_BY_COUNTRY`). We intentionally do NOT read
+ *  the nginx `x-currency` header or the `geo_currency` cookie — currency is a
+ *  direct function of the detected country only, so it can't drift away from it
+ *  (that drift is how a Swedish visitor got billed in USD). Always one of
+ *  SUPPORTED_CURRENCIES; defaults to EUR. */
 export function getRequestBillingCurrency(req: Request): SupportedCurrency {
-  const header = req.headers["x-currency"];
-  if (typeof header === "string" && isSupportedCurrency(header.toUpperCase())) {
-    return header.toUpperCase() as SupportedCurrency;
-  }
-  const cookie = typeof req.headers.cookie === "string" ? req.headers.cookie : "";
-  const m = /(?:^|;\s*)geo_currency=([^;]+)/.exec(cookie);
-  if (m && isSupportedCurrency(decodeURIComponent(m[1]).toUpperCase())) {
-    return decodeURIComponent(m[1]).toUpperCase() as SupportedCurrency;
-  }
   return getCurrencyByCountry(getRequestCountry(req));
 }

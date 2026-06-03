@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Body,
+  ConflictException,
   Controller,
   Delete,
   ForbiddenException,
@@ -768,7 +769,6 @@ export class AdminController {
         event: true,
         gclid: true,
         is_facebook_ads: true,
-        fbSentEvents: true,
       },
     });
     return {
@@ -778,7 +778,6 @@ export class AdminController {
         event: r.event,
         gclid: r.gclid,
         isFacebookAds: r.is_facebook_ads,
-        fbSentEvents: r.fbSentEvents,
       })),
     };
   }
@@ -842,33 +841,37 @@ export class AdminController {
 
   // ────────────────── META CAPI ──────────────────
 
-  /** Send a Meta Conversions API (CAPI) event built from a fbclid landing event.
-   *  Manual, live (no test_event_code). fbc is rebuilt from the fbclid embedded
-   *  in the event name (`l_fbclid_<ID>`) + the click time. Sent event_names are
-   *  recorded on UsageEvent.fbSentEvents for dedup. */
-  @Post("usage-events/:id/fb-send")
+  /** Meta CAPI conversion event_names that can be sent manually. */
+  private static readonly CAPI_EVENTS = [
+    "PageView",
+    "ViewContent",
+    "Lead",
+    "InitiateCheckout",
+    "CompleteRegistration",
+    "Subscribe",
+    "Purchase",
+  ];
+
+  /** Manually send a Meta CAPI conversion for a Facebook click id (fbclid).
+   *  Live (no test_event_code). Refuses a duplicate that already succeeded for
+   *  the same (fbclid, eventName); every attempt is journaled in CapiSend.
+   *  `clickTs` (ms) is the original click time when known (session detail),
+   *  else now. */
+  @Post("capi/send")
   @HttpCode(HttpStatus.OK)
-  async fbSendEvent(@Param("id") id: string, @Body() body: { event_name?: string }) {
-    const ALLOWED = [
-      "PageView",
-      "ViewContent",
-      "Lead",
-      "InitiateCheckout",
-      "CompleteRegistration",
-      "Subscribe",
-      "Purchase",
-    ];
-    const eventName = (body?.event_name ?? "").trim();
-    if (!ALLOWED.includes(eventName)) {
-      throw new BadRequestException(`event_name must be one of: ${ALLOWED.join(", ")}`);
+  async capiSend(@Body() body: { fbclid?: string; eventName?: string; clickTs?: number }) {
+    const fbclid = (body?.fbclid ?? "").trim();
+    const eventName = (body?.eventName ?? "").trim();
+    if (!fbclid) throw new BadRequestException("fbclid required");
+    if (!AdminController.CAPI_EVENTS.includes(eventName)) {
+      throw new BadRequestException(`eventName must be one of: ${AdminController.CAPI_EVENTS.join(", ")}`);
     }
 
-    const ev = await this.prisma.usageEvent.findUnique({ where: { id } });
-    if (!ev) throw new NotFoundException("Event not found");
-
-    const m = /^l_fbclid_(.+)$/.exec(ev.event);
-    if (!m) throw new BadRequestException("Event is not a fbclid landing event");
-    const fbclid = m[1];
+    const already = await this.prisma.capiSend.findFirst({
+      where: { fbclid, eventName, status: "success" },
+      select: { id: true },
+    });
+    if (already) throw new ConflictException(`${eventName} already sent for this fbclid`);
 
     const token = this.config.get<string>("FB_ADS_TOKEN");
     const pixelId = this.config.get<string>("FB_ADS_PIXEL_ID");
@@ -876,45 +879,56 @@ export class AdminController {
       throw new BadRequestException("FB_ADS_TOKEN / FB_ADS_PIXEL_ID not configured");
     }
 
-    const fbc = `fb.1.${ev.at.getTime()}.${fbclid}`;
+    const clickMs = typeof body.clickTs === "number" && body.clickTs > 0 ? body.clickTs : Date.now();
+    const fbc = `fb.1.${clickMs}.${fbclid}`;
     const eventTime = Math.floor(Date.now() / 1000);
 
-    const userData: Record<string, unknown> = { fbc };
-    if (ev.ip) userData.client_ip_address = ev.ip;
-
-    const res = await fetch(
-      `https://graph.facebook.com/v21.0/${pixelId}/events?access_token=${token}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          data: [{
-            event_name: eventName,
-            event_time: eventTime,
-            action_source: "website",
-            event_source_url: "https://soqrmenu.com/",
-            user_data: userData,
-          }],
-        }),
-      },
-    );
-    const json = (await res.json().catch(() => ({}))) as {
-      events_received?: number;
-      messages?: unknown[];
-      error?: unknown;
-    };
-    if (!res.ok) {
-      throw new BadRequestException({ message: "Meta CAPI rejected the event", response: json });
-    }
-
-    const sentEvents = Array.from(new Set([...ev.fbSentEvents, eventName]));
-    if (!ev.fbSentEvents.includes(eventName)) {
-      await this.prisma.usageEvent.update({
-        where: { id },
-        data: { fbSentEvents: { push: eventName } },
+    let ok = false;
+    let json: unknown = {};
+    try {
+      const res = await fetch(
+        `https://graph.facebook.com/v21.0/${pixelId}/events?access_token=${token}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            data: [{
+              event_name: eventName,
+              event_time: eventTime,
+              action_source: "website",
+              event_source_url: "https://soqrmenu.com/",
+              user_data: { fbc },
+            }],
+          }),
+        },
+      );
+      ok = res.ok;
+      json = await res.json().catch(() => ({}));
+    } catch (e) {
+      await this.prisma.capiSend.create({
+        data: { fbclid, eventName, status: "error", response: { error: String(e) } },
       });
+      throw new BadRequestException({ message: "Meta CAPI request failed", response: { error: String(e) } });
     }
-    return { ok: true, event_name: eventName, fbc, sentEvents, response: json };
+
+    await this.prisma.capiSend.create({
+      data: { fbclid, eventName, status: ok ? "success" : "error", response: json as Prisma.InputJsonValue },
+    });
+    if (!ok) throw new BadRequestException({ message: "Meta CAPI rejected the event", response: json });
+    return { ok: true, eventName, fbc, response: json };
+  }
+
+  /** event_names already successfully sent for a fbclid (dedup display). */
+  @Get("capi/sent")
+  async capiSent(@Query("fbclid") fbclid?: string) {
+    const id = (fbclid ?? "").trim();
+    if (!id) return { sent: [] as string[] };
+    const rows = await this.prisma.capiSend.findMany({
+      where: { fbclid: id, status: "success" },
+      select: { eventName: true },
+      distinct: ["eventName"],
+    });
+    return { sent: rows.map((r) => r.eventName) };
   }
 
   // ────────────────── SESSION DELETE ──────────────────

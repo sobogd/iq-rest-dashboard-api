@@ -402,7 +402,6 @@ model UsageEvent {
   is_google_ads Boolean @default(false) // arrival via gclid/gbraid/wbraid on the URL
   is_facebook_ads Boolean @default(false) // arrival via fbclid on the URL (Facebook/Instagram ads)
   is_search     Boolean @default(false) // arrival from a search engine referrer (google/bing/yandex/…)
-  fbSentEvents String[] @default([]) // Meta CAPI event_names already sent from this fbclid event (manual admin send, dedup)
 
   @@index([at])
   @@index([event, at])
@@ -413,6 +412,22 @@ model UsageEvent {
   @@index([is_facebook_ads, at])
   @@index([is_search, at])
   @@map("usage_events")
+}
+
+// Journal of manual Meta CAPI sends. One row per (fbclid, eventName) attempt;
+// a row with status="success" blocks re-sending the same event for the same
+// click. Replaces the old UsageEvent.fbSentEvents array.
+model CapiSend {
+  id        String   @id @default(cuid())
+  fbclid    String
+  eventName String
+  status    String   // "success" | "error"
+  response  Json?
+  createdAt DateTime @default(now())
+
+  @@index([fbclid])
+  @@index([fbclid, eventName, status])
+  @@map("capi_sends")
 }
 
 model Order {

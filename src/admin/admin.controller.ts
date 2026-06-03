@@ -649,13 +649,24 @@ export class AdminController {
     return { start, end: new Date(start.getTime() + 24 * 60 * 60 * 1000) };
   }
 
-  /** Sessions for a single UTC day. A "session" = all events sharing the same
-   *  fingerprint (coalesce(ip, region) | country | device | platform) within
-   *  the day. Grouped in-DB so the payload is one row per session, not per
-   *  event. */
+  /** Sessions inside a [from, to) window (absolute instants — the caller passes
+   *  its own local-day boundaries so the grouping respects the admin's
+   *  timezone). A "session" = all events sharing the same fingerprint
+   *  (coalesce(ip, region) | country | device | platform) within the window.
+   *  Grouped in-DB so the payload is one row per session, not per event. */
   @Get("usage/sessions")
-  async usageSessions(@Query("day") day?: string) {
-    const { start, end } = this.utcDayRange(day);
+  async usageSessions(@Query("from") from?: string, @Query("to") to?: string) {
+    let start: Date;
+    let end: Date;
+    if (from && to) {
+      start = new Date(from);
+      end = new Date(to);
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+        throw new BadRequestException("from/to invalid");
+      }
+    } else {
+      ({ start, end } = this.utcDayRange(undefined));
+    }
     type Row = {
       ipkey: string | null;
       has_ip: boolean;
@@ -695,7 +706,6 @@ export class AdminController {
     );
 
     return {
-      day: start.toISOString().slice(0, 10),
       sessions: rows.map((r) => ({
         ipkey: r.ipkey,
         hasIp: r.has_ip,
@@ -879,6 +889,52 @@ export class AdminController {
       });
     }
     return { ok: true, event_name: eventName, fbc, sentEvents, response: json };
+  }
+
+  // ────────────────── SESSION DELETE ──────────────────
+
+  /** Delete whole sessions: for each descriptor, remove every event matching
+   *  the session fingerprint within its [from, to] window. */
+  @Post("usage/sessions/delete")
+  @HttpCode(HttpStatus.OK)
+  async deleteSessions(
+    @Body()
+    body: {
+      sessions?: Array<{
+        ipkey?: string | null;
+        hasIp?: boolean;
+        country?: string;
+        device?: string | null;
+        platform?: string | null;
+        from?: string;
+        to?: string;
+      }>;
+    },
+  ) {
+    const list = Array.isArray(body?.sessions) ? body.sessions : [];
+    if (list.length === 0) throw new BadRequestException("sessions required");
+    let deleted = 0;
+    for (const s of list) {
+      if (!s.from || !s.to) continue;
+      const fromD = new Date(s.from);
+      const toD = new Date(s.to);
+      if (Number.isNaN(fromD.getTime()) || Number.isNaN(toD.getTime())) continue;
+      const where: Prisma.UsageEventWhereInput = {
+        ...(s.country ? { country: s.country } : {}),
+        device: s.device ? s.device : null,
+        platform: s.platform ? s.platform : null,
+        at: { gte: fromD, lte: toD },
+      };
+      if (s.hasIp) {
+        where.ip = s.ipkey ?? undefined;
+      } else {
+        where.ip = null;
+        where.region = s.ipkey ?? "";
+      }
+      const r = await this.prisma.usageEvent.deleteMany({ where });
+      deleted += r.count;
+    }
+    return { ok: true, deleted };
   }
 
 }

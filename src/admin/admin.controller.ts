@@ -918,6 +918,18 @@ export class AdminController {
     return { ok: true, eventName, fbc, response: json };
   }
 
+  /** Most recent fbclid landing click (the CAPI form targets this one). */
+  @Get("capi/latest")
+  async capiLatest() {
+    const ev = await this.prisma.usageEvent.findFirst({
+      where: { event: { startsWith: "l_fbclid_" } },
+      orderBy: { at: "desc" },
+      select: { event: true, at: true },
+    });
+    if (!ev) return { fbclid: null as string | null, clickTs: null as number | null };
+    return { fbclid: ev.event.replace(/^l_fbclid_/, ""), clickTs: ev.at.getTime() };
+  }
+
   /** Recent CAPI send journal (newest first) for the admin CAPI page. */
   @Get("capi/log")
   async capiLog(@Query("limit") limit?: string) {

@@ -918,17 +918,59 @@ export class AdminController {
     return { ok: true, eventName, fbc, response: json };
   }
 
-  /** event_names already successfully sent for a fbclid (dedup display). */
-  @Get("capi/sent")
-  async capiSent(@Query("fbclid") fbclid?: string) {
-    const id = (fbclid ?? "").trim();
-    if (!id) return { sent: [] as string[] };
+  /** Recent CAPI send journal (newest first) for the admin CAPI page. */
+  @Get("capi/log")
+  async capiLog(@Query("limit") limit?: string) {
+    const take = Math.min(Math.max(parseInt(limit ?? "100", 10) || 100, 1), 500);
     const rows = await this.prisma.capiSend.findMany({
-      where: { fbclid: id, status: "success" },
-      select: { eventName: true },
-      distinct: ["eventName"],
+      orderBy: { createdAt: "desc" },
+      take,
+      select: { id: true, fbclid: true, eventName: true, status: true, createdAt: true },
     });
-    return { sent: rows.map((r) => r.eventName) };
+    return {
+      log: rows.map((r) => ({
+        id: r.id,
+        fbclid: r.fbclid,
+        eventName: r.eventName,
+        status: r.status,
+        createdAt: r.createdAt.toISOString(),
+      })),
+    };
+  }
+
+  /** Full CAPI send history for a single fbclid (newest first). */
+  @Get("capi/history")
+  async capiHistory(@Query("fbclid") fbclid?: string) {
+    const id = (fbclid ?? "").trim();
+    if (!id) return { history: [] as unknown[] };
+    const rows = await this.prisma.capiSend.findMany({
+      where: { fbclid: id },
+      orderBy: { createdAt: "desc" },
+      select: { id: true, eventName: true, status: true, createdAt: true },
+    });
+    return {
+      history: rows.map((r) => ({
+        id: r.id,
+        eventName: r.eventName,
+        status: r.status,
+        createdAt: r.createdAt.toISOString(),
+      })),
+    };
+  }
+
+  /** A single CAPI send record (with the Meta response) for the log page. */
+  @Get("capi/entry/:id")
+  async capiEntry(@Param("id") id: string) {
+    const row = await this.prisma.capiSend.findUnique({ where: { id } });
+    if (!row) throw new NotFoundException("Entry not found");
+    return {
+      id: row.id,
+      fbclid: row.fbclid,
+      eventName: row.eventName,
+      status: row.status,
+      response: row.response,
+      createdAt: row.createdAt.toISOString(),
+    };
   }
 
   // ────────────────── SESSION DELETE ──────────────────

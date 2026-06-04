@@ -41,11 +41,11 @@ async function main() {
   if (!host || !user || !pass || !from) throw new Error("SMTP creds missing in soqrmenuweb/.env");
 
   const locale = "en";
-  const name = "Bella Cucina";
   const t = pickMenuAlmostReady(locale);
-  const subject = t.subject.replace("{name}", name);
-  const greeting = t.greeting.replace("{name}", name);
+  const subject = t.subject;
+  const greeting = t.greeting;
   const dir = isRtl(locale) ? "rtl" : "ltr";
+  const dashUrl = "https://dashboard.iq-rest.com";
 
   const transporter = nodemailer.createTransport({
     host,
@@ -63,13 +63,14 @@ async function main() {
         <div dir="${dir}" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:520px;margin:0 auto;padding:32px 20px;color:#1a1a1a">
           ${logoMark()}
           <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${greeting}</p>
-          <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${t.body}</p>
+          <p style="font-size:17px;line-height:1.7;margin:0 0 24px">${t.body}</p>
+          <p style="margin:0 0 24px"><a href="${dashUrl}" style="display:inline-block;background:#FF6229;color:#ffffff;text-decoration:none;font-size:16px;font-weight:600;padding:12px 24px;border-radius:8px">${t.cta}</a></p>
           <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${t.help}</p>
           <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${t.closing}</p>
           <p style="font-size:15px;margin:0;color:#1a1a1a">${t.signature}</p>
         </div>
       `,
-    text: `${greeting}\n\n${t.body}\n\n${t.help}\n\n${t.closing}\n\n${t.signature.replace(/<br>/g, "\n")}`,
+    text: `${greeting}\n\n${t.body}\n\n${t.cta}: ${dashUrl}\n\n${t.help}\n\n${t.closing}\n\n${t.signature.replace(/<br>/g, "\n")}`,
   });
 
   console.log("sent:", info.messageId, "->", to);

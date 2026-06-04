@@ -37,15 +37,17 @@ export class InboxController {
   /** Unified thread list, newest activity first. filter: all | watched | new. */
   @Get("threads")
   async threads(@Query("filter") filter?: string) {
-    const f = filter === "watched" || filter === "new" ? filter : "all";
+    const f =
+      filter === "watched" || filter === "new" || filter === "muted" ? filter : "all";
 
     // WhatsApp threads.
     const contacts = await this.prisma.inboxContact.findMany({
       where: {
         channel: "whatsapp",
-        ...(f === "watched" ? { watched: true } : {}),
+        ...(f === "watched" ? { watched: true, muted: false } : {}),
         // "new" surfaces non-muted contacts not yet curated (watch/mute).
         ...(f === "new" ? { watched: false, muted: false } : {}),
+        ...(f === "muted" ? { muted: true } : {}),
         ...(f === "all" ? { muted: false } : {}),
       },
       orderBy: { lastMessageAt: "desc" },
@@ -138,11 +140,35 @@ export class InboxController {
     };
   }
 
+  /** Preview the translation of a Russian reply in the contact's language,
+   *  WITHOUT sending — lets the admin verify before delivery. */
+  @Post("threads/:id/preview")
+  @HttpCode(HttpStatus.OK)
+  async preview(@Param("id") id: string, @Body() body: { ru?: string }) {
+    const contactId = this.waId(id);
+    const ru = (body?.ru ?? "").trim();
+    if (!ru) throw new BadRequestException("ru text required");
+    const contact = await this.prisma.inboxContact.findUnique({ where: { id: contactId } });
+    if (!contact) throw new NotFoundException("Thread not found");
+    const target = contact.lang || "en";
+    let text = ru;
+    if (target !== "ru") {
+      try {
+        text = await translateText(ru, target, "ru");
+      } catch {
+        text = ru;
+      }
+    }
+    return { lang: target, text };
+  }
+
   /** Send a reply written in Russian; translate to the contact's language and
-   *  deliver via WhatsApp. Stores both the sent text and the RU original. */
+   *  deliver via WhatsApp. Stores both the sent text and the RU original. If
+   *  `text` is supplied (the approved preview), it is sent verbatim so what the
+   *  admin saw is exactly what goes out. */
   @Post("threads/:id/send")
   @HttpCode(HttpStatus.OK)
-  async send(@Param("id") id: string, @Body() body: { ru?: string }) {
+  async send(@Param("id") id: string, @Body() body: { ru?: string; text?: string }) {
     const contactId = this.waId(id);
     const ru = (body?.ru ?? "").trim();
     if (!ru) throw new BadRequestException("ru text required");
@@ -150,8 +176,9 @@ export class InboxController {
     if (!contact) throw new NotFoundException("Thread not found");
 
     const target = contact.lang || "en";
-    let outText = ru;
-    if (target !== "ru") {
+    const approved = (body?.text ?? "").trim();
+    let outText = approved || ru;
+    if (!approved && target !== "ru") {
       try {
         outText = await translateText(ru, target, "ru");
       } catch {

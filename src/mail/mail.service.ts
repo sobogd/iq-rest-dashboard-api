@@ -107,131 +107,115 @@ export class MailService implements OnModuleDestroy {
     });
   }
 
-  /** Personal welcome email — manually triggered from admin panel.
-   *  Locale picks the matching translation (falls back to English).
-   *  `name` substitutes {name} in subject + greeting (restaurant title or
-   *  email local-part).
-   */
-  async sendWelcomePersonal({
-    email,
-    name,
-    locale,
-  }: {
+  /** Shared renderer for the personal "Bogdan" emails (welcome,
+   *  setup-incomplete, trial-ending). Builds the HTML + text, an optional CTA
+   *  button and the List-Unsubscribe header, then sends. Name-less by design —
+   *  many owners never set a restaurant title. */
+  private async sendPersonalEmail(opts: {
+    kind: string;
     email: string;
-    name: string;
-    locale: string;
+    subject: string;
+    dir: "rtl" | "ltr";
+    greeting: string;
+    body: string;
+    help: string;
+    closing: string;
+    signature: string;
+    cta?: string;
+    ctaUrl?: string;
   }): Promise<void> {
     const cfg = this.smtpConfig();
     if (!cfg) {
-      this.logger.warn("SMTP not configured — welcome_personal skipped");
+      this.logger.warn(`SMTP not configured — ${opts.kind} skipped`);
       return;
     }
     const transporter = await this.getTransporter(cfg);
-    const t = pickWelcomePersonal(locale);
-    const subject = t.subject.replace("{name}", name);
-    const greeting = t.greeting.replace("{name}", name);
-    const dir = isWelcomeRtl(locale) ? "rtl" : "ltr";
+    const hasCta = Boolean(opts.cta && opts.ctaUrl);
+    const button = hasCta
+      ? `<p style="margin:0 0 24px"><a href="${opts.ctaUrl}" style="display:inline-block;background:#FF6229;color:#ffffff;text-decoration:none;font-size:16px;font-weight:600;padding:12px 24px;border-radius:8px">${opts.cta}</a></p>`
+      : "";
+    const buttonText = hasCta ? `${opts.cta}: ${opts.ctaUrl}\n\n` : "";
 
     await transporter.sendMail({
       from: this.cachedFrom ?? cfg.from,
-      to: email,
-      subject,
-      html: `
-        <div dir="${dir}" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:520px;margin:0 auto;padding:32px 20px;color:#1a1a1a">
-          ${this.logoMark()}
-          <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${greeting}</p>
-          <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${t.body}</p>
-          <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${t.help}</p>
-          <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${t.closing}</p>
-          <p style="font-size:15px;margin:0;color:#1a1a1a">${t.signature}</p>
-        </div>
-      `,
-      text: `${greeting}\n\n${t.body}\n\n${t.help}\n\n${t.closing}\n\n${t.signature.replace(/<br>/g, "\n")}`,
-    });
-  }
-
-  /** Menu-almost-ready reminder — same shape as welcome_personal, different
-   *  copy aimed at owners who started menu setup but didn't finish. */
-  async sendMenuAlmostReady({
-    email,
-    name,
-    locale,
-  }: {
-    email: string;
-    name: string;
-    locale: string;
-  }): Promise<void> {
-    const cfg = this.smtpConfig();
-    if (!cfg) {
-      this.logger.warn("SMTP not configured — menu_almost_ready skipped");
-      return;
-    }
-    const transporter = await this.getTransporter(cfg);
-    const t = pickMenuAlmostReady(locale);
-    const subject = t.subject;
-    const greeting = t.greeting;
-    const dir = isMarRtl(locale) ? "rtl" : "ltr";
-    const dashUrl = this.config.get<string>("DASHBOARD_URL") || "https://dashboard.iq-rest.com";
-
-    await transporter.sendMail({
-      from: this.cachedFrom ?? cfg.from,
-      to: email,
-      subject,
+      to: opts.email,
+      subject: opts.subject,
       // List-Unsubscribe lets Gmail/Apple Mail render a native "Unsubscribe"
       // action; mailto variant needs no endpoint — replies land in support.
       headers: { "List-Unsubscribe": "<mailto:support@iq-rest.com?subject=unsubscribe>" },
       html: `
-        <div dir="${dir}" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:520px;margin:0 auto;padding:32px 20px;color:#1a1a1a">
+        <div dir="${opts.dir}" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:520px;margin:0 auto;padding:32px 20px;color:#1a1a1a">
           ${this.logoMark()}
-          <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${greeting}</p>
-          <p style="font-size:17px;line-height:1.7;margin:0 0 24px">${t.body}</p>
-          <p style="margin:0 0 24px"><a href="${dashUrl}" style="display:inline-block;background:#FF6229;color:#ffffff;text-decoration:none;font-size:16px;font-weight:600;padding:12px 24px;border-radius:8px">${t.cta}</a></p>
-          <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${t.help}</p>
-          <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${t.closing}</p>
-          <p style="font-size:15px;margin:0;color:#1a1a1a">${t.signature}</p>
+          <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${opts.greeting}</p>
+          <p style="font-size:17px;line-height:1.7;margin:0 0 ${hasCta ? "24px" : "20px"}">${opts.body}</p>
+          ${button}
+          <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${opts.help}</p>
+          <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${opts.closing}</p>
+          <p style="font-size:15px;margin:0;color:#1a1a1a">${opts.signature}</p>
         </div>
       `,
-      text: `${greeting}\n\n${t.body}\n\n${t.cta}: ${dashUrl}\n\n${t.help}\n\n${t.closing}\n\n${t.signature.replace(/<br>/g, "\n")}`,
+      text: `${opts.greeting}\n\n${opts.body}\n\n${buttonText}${opts.help}\n\n${opts.closing}\n\n${opts.signature.replace(/<br>/g, "\n")}`,
     });
   }
 
-  /** Trial-ending reminder — sent 1 day before trial expiry. Same shape as
-   *  welcome_personal/menu_almost_ready. */
-  async sendTrialEnding({
-    email,
-    name,
-    locale,
-  }: {
-    email: string;
-    name: string;
-    locale: string;
-  }): Promise<void> {
-    const cfg = this.smtpConfig();
-    if (!cfg) {
-      this.logger.warn("SMTP not configured — trial_ending skipped");
-      return;
-    }
-    const transporter = await this.getTransporter(cfg);
-    const t = pickTrialEnding(locale);
-    const subject = t.subject.replace("{name}", name);
-    const greeting = t.greeting.replace("{name}", name);
-    const dir = isTrialEndingRtl(locale) ? "rtl" : "ltr";
+  private dashboardUrl(): string {
+    return this.config.get<string>("DASHBOARD_URL") || "https://dashboard.iq-rest.com";
+  }
 
-    await transporter.sendMail({
-      from: this.cachedFrom ?? cfg.from,
-      to: email,
-      subject,
-      html: `
-        <div dir="${dir}" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:520px;margin:0 auto;padding:32px 20px;color:#1a1a1a">
-          ${this.logoMark()}
-          <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${greeting}</p>
-          <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${t.body}</p>
-          <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${t.help}</p>
-          <p style="font-size:17px;line-height:1.7;margin:0 0 20px">${t.closing}</p>
-          <p style="font-size:15px;margin:0;color:#1a1a1a">${t.signature}</p>
-        </div>
-      `,
-      text: `${greeting}\n\n${t.body}\n\n${t.help}\n\n${t.closing}\n\n${t.signature.replace(/<br>/g, "\n")}`,
+  /** Personal welcome email — manually triggered from the admin panel.
+   *  Name-less; CTA opens the dashboard. */
+  async sendWelcomePersonal({ email, locale }: { email: string; locale: string }): Promise<void> {
+    const t = pickWelcomePersonal(locale);
+    await this.sendPersonalEmail({
+      kind: "welcome_personal",
+      email,
+      subject: t.subject,
+      dir: isWelcomeRtl(locale) ? "rtl" : "ltr",
+      greeting: t.greeting,
+      body: t.body,
+      help: t.help,
+      closing: t.closing,
+      signature: t.signature,
+      cta: t.cta,
+      ctaUrl: this.dashboardUrl(),
+    });
+  }
+
+  /** Setup-incomplete reminder — owners who started but didn't finish setup.
+   *  Name-less; CTA opens the dashboard. */
+  async sendMenuAlmostReady({ email, locale }: { email: string; locale: string }): Promise<void> {
+    const t = pickMenuAlmostReady(locale);
+    await this.sendPersonalEmail({
+      kind: "menu_almost_ready",
+      email,
+      subject: t.subject,
+      dir: isMarRtl(locale) ? "rtl" : "ltr",
+      greeting: t.greeting,
+      body: t.body,
+      help: t.help,
+      closing: t.closing,
+      signature: t.signature,
+      cta: t.cta,
+      ctaUrl: this.dashboardUrl(),
+    });
+  }
+
+  /** Trial-ending reminder — sent 1 day before trial expiry. Name-less; CTA
+   *  opens the billing page. */
+  async sendTrialEnding({ email, locale }: { email: string; locale: string }): Promise<void> {
+    const t = pickTrialEnding(locale);
+    await this.sendPersonalEmail({
+      kind: "trial_ending",
+      email,
+      subject: t.subject,
+      dir: isTrialEndingRtl(locale) ? "rtl" : "ltr",
+      greeting: t.greeting,
+      body: t.body,
+      help: t.help,
+      closing: t.closing,
+      signature: t.signature,
+      cta: t.cta,
+      ctaUrl: `${this.dashboardUrl()}/settings/billing`,
     });
   }
 

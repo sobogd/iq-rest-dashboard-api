@@ -549,14 +549,13 @@ export class AdminController {
     const restaurant = user.restaurantUsers[0]?.restaurant;
     const requestedLocale = (body.locale ?? "").trim().toLowerCase();
     const locale = requestedLocale || user.preferredLocale || restaurant?.defaultLanguage || "en";
-    const name = restaurant?.title || user.email.split("@")[0];
 
     if (template === "welcome_personal") {
-      await this.mail.sendWelcomePersonal({ email: user.email, name, locale });
+      await this.mail.sendWelcomePersonal({ email: user.email, locale });
     } else if (template === "trial_ending") {
-      await this.mail.sendTrialEnding({ email: user.email, name, locale });
+      await this.mail.sendTrialEnding({ email: user.email, locale });
     } else {
-      await this.mail.sendMenuAlmostReady({ email: user.email, name, locale });
+      await this.mail.sendMenuAlmostReady({ email: user.email, locale });
     }
 
     const existing =

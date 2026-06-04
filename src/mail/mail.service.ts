@@ -176,6 +176,9 @@ export class MailService implements OnModuleDestroy {
       from: this.cachedFrom ?? cfg.from,
       to: email,
       subject,
+      // List-Unsubscribe lets Gmail/Apple Mail render a native "Unsubscribe"
+      // action; mailto variant needs no endpoint — replies land in support.
+      headers: { "List-Unsubscribe": "<mailto:support@iq-rest.com?subject=unsubscribe>" },
       html: `
         <div dir="${dir}" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:520px;margin:0 auto;padding:32px 20px;color:#1a1a1a">
           ${this.logoMark()}

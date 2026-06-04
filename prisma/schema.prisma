@@ -539,7 +539,9 @@ model InboxContact {
   id            String   @id @default(cuid())
   channel       String   // "whatsapp"
   externalId    String   // WhatsApp phone (digits, e.g. "34123456789")
-  name          String?
+  name          String?  // WhatsApp profile name (as received from Meta)
+  customName    String?  // admin-assigned internal name (highest display priority)
+  note          String?  // free-form admin comment about the contact
   lang          String?  // detected language of the contact's messages
   watched       Boolean  @default(false)
   muted         Boolean  @default(false)

@@ -62,7 +62,9 @@ export class InboxController {
         id: `wa:${c.id}`,
         channel: "whatsapp" as const,
         contactId: c.id,
-        name: c.name || c.externalId,
+        // Display priority: admin's custom name → WhatsApp profile name → phone.
+        name: c.customName || c.name || c.externalId,
+        customName: c.customName,
         externalId: c.externalId,
         lang: c.lang,
         watched: c.watched,
@@ -122,7 +124,10 @@ export class InboxController {
     return {
       contact: {
         id: contact.id,
-        name: contact.name || contact.externalId,
+        name: contact.customName || contact.name || contact.externalId,
+        customName: contact.customName,
+        profileName: contact.name,
+        note: contact.note,
         externalId: contact.externalId,
         lang: contact.lang,
         watched: contact.watched,
@@ -217,10 +222,21 @@ export class InboxController {
   /** Pin (watch) / hide (mute) a contact. */
   @Post("contacts/:id/flags")
   @HttpCode(HttpStatus.OK)
-  async flags(@Param("id") id: string, @Body() body: { watched?: boolean; muted?: boolean }) {
-    const data: { watched?: boolean; muted?: boolean } = {};
+  async flags(
+    @Param("id") id: string,
+    @Body() body: { watched?: boolean; muted?: boolean; customName?: string | null; note?: string | null },
+  ) {
+    const data: { watched?: boolean; muted?: boolean; customName?: string | null; note?: string | null } = {};
     if (typeof body.watched === "boolean") data.watched = body.watched;
     if (typeof body.muted === "boolean") data.muted = body.muted;
+    if (body.customName !== undefined) {
+      const v = (body.customName ?? "").trim();
+      data.customName = v || null;
+    }
+    if (body.note !== undefined) {
+      const v = (body.note ?? "").trim();
+      data.note = v || null;
+    }
     if (Object.keys(data).length === 0) throw new BadRequestException("nothing to update");
     await this.prisma.inboxContact.update({ where: { id }, data });
     return { ok: true };

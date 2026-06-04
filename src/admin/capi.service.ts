@@ -164,21 +164,37 @@ export class CapiService {
     }
     if (wanted.size === 0) return { sent: 0, skipped: 0 };
 
-    // Which (fbclid, eventName) already succeeded? One lookup over the journal.
+    // Journal lookup for these fbclids: a successful (fbclid,eventName) is never
+    // resent; a pair that already failed MAX_ERRORS times is given up on (a
+    // permanently-rejected event must not be retried forever every 15 minutes).
+    const MAX_ERRORS = 3;
+    const MAX_PER_RUN = 300;
     const fbclids = Array.from(wanted.keys());
-    const already = await this.prisma.capiSend.findMany({
-      where: { fbclid: { in: fbclids }, status: "success" },
-      select: { fbclid: true, eventName: true },
+    const journal = await this.prisma.capiSend.findMany({
+      where: { fbclid: { in: fbclids }, status: { in: ["success", "error"] } },
+      select: { fbclid: true, eventName: true, status: true },
     });
-    const alreadySet = new Set(already.map((a) => `${a.fbclid}|${a.eventName}`));
+    const successSet = new Set<string>();
+    const errorCount = new Map<string, number>();
+    for (const j of journal) {
+      const key = `${j.fbclid}|${j.eventName}`;
+      if (j.status === "success") successSet.add(key);
+      else errorCount.set(key, (errorCount.get(key) ?? 0) + 1);
+    }
 
     let sent = 0;
     let skipped = 0;
-    for (const [fbclid, { events, clickMs }] of wanted) {
+    let capped = false;
+    outer: for (const [fbclid, { events, clickMs }] of wanted) {
       for (const eventName of events) {
-        if (alreadySet.has(`${fbclid}|${eventName}`)) {
+        const key = `${fbclid}|${eventName}`;
+        if (successSet.has(key) || (errorCount.get(key) ?? 0) >= MAX_ERRORS) {
           skipped++;
           continue;
+        }
+        if (sent >= MAX_PER_RUN) {
+          capped = true;
+          break outer;
         }
         try {
           const r = await this.send(fbclid, eventName, clickMs);
@@ -188,7 +204,9 @@ export class CapiService {
         }
       }
     }
-    if (sent > 0) this.logger.log(`CAPI auto-send: ${sent} sent, ${skipped} already present`);
+    if (sent > 0 || capped) {
+      this.logger.log(`CAPI auto-send: ${sent} sent, ${skipped} skipped${capped ? " (capped, more next run)" : ""}`);
+    }
     return { sent, skipped };
   }
 }

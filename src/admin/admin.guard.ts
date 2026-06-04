@@ -15,15 +15,18 @@ export class AdminGuard implements CanActivate {
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
     const req = ctx.switchToHttp().getRequest<Request>();
     const path = (req.path || req.originalUrl || req.url || "").split("?")[0];
-    // POST /api/admin/impersonate/exit must work while impersonating —
-    // the current user is the target (not admin). Skip the admin email
-    // check; the endpoint itself validates admin_original_* cookies.
+
+    // Everyone hitting the admin module must still hold a valid session.
+    const ok = await this.authGuard.canActivate(ctx);
+    if (!ok) return false;
+
+    // POST /api/admin/impersonate/exit must work while impersonating — the
+    // current user is the target (not an admin). Skip only the admin-email
+    // check; the endpoint itself validates the admin_original_* cookies.
     if (path === "/admin/impersonate/exit" || path === "/api/admin/impersonate/exit") {
       return true;
     }
 
-    const ok = await this.authGuard.canActivate(ctx);
-    if (!ok) return false;
     const email = (req as AuthedRequest).authUser?.email;
     if (!isAdminEmail(email)) {
       throw new ForbiddenException("Admin access required");

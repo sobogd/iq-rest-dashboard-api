@@ -78,6 +78,7 @@ export class AdminController {
     const startOf30d = new Date(upper30d.getTime() - 30 * DAY_MS);
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const startOfMessagesLastDay = new Date(now.getTime() - DAY_MS);
+    const startOfLastVisit = new Date(now.getTime() - 90 * DAY_MS);
 
     const restaurants = await this.prisma.restaurant.findMany({
       select: {
@@ -132,7 +133,7 @@ export class AdminController {
         SELECT ru."restaurantId", MAX(ue."at") AS last_visit
         FROM restaurant_users ru
         JOIN usage_events ue ON ue."userId" = ru."userId"
-        WHERE ru."restaurantId" = ANY(${ids}::text[])
+        WHERE ru."restaurantId" = ANY(${ids}::text[]) AND ue."at" >= ${startOfLastVisit}
         GROUP BY ru."restaurantId"`,
     ]);
 
@@ -819,7 +820,11 @@ export class AdminController {
       is_facebook_ads: boolean;
       eff_rid: string | null;
       eff_uid: string | null;
+      total: number;
     };
+    // COUNT(*) OVER() is computed before LIMIT, so each returned row carries the
+    // true total even though we cap the listed events at 2000.
+    const LIST_LIMIT = 2000;
     const rows = await this.prisma.$queryRaw<Row[]>(Prisma.sql`
       WITH ev AS (
         SELECT ue.id, ue.at, ue.event, ue.ip, ue.country, ue.region, ue.device, ue.platform,
@@ -833,11 +838,12 @@ export class AdminController {
         ) ru ON COALESCE(ue."userId", ue."stitchedUserId") IS NOT NULL
         WHERE ue.at >= ${fromD} AND ue.at <= ${toD}
       )
-      SELECT id, at, event, ip, country, region, device, platform, gclid, is_facebook_ads, eff_rid, eff_uid
+      SELECT id, at, event, ip, country, region, device, platform, gclid, is_facebook_ads, eff_rid, eff_uid,
+             COUNT(*) OVER()::int AS total
       FROM ev
       WHERE ${cond}
       ORDER BY at DESC
-      LIMIT 2000
+      LIMIT ${LIST_LIMIT}
     `);
 
     // Header summary — country/region/labels aren't on individual events in the
@@ -847,11 +853,14 @@ export class AdminController {
     const effUid = rows.find((r) => r.eff_uid)?.eff_uid ?? null;
     const effRid = rows.find((r) => r.eff_rid)?.eff_rid ?? null;
     const labels = await this.resolveUsageLabels([{ userId: effUid, restaurantId: effRid }]);
+    const total = rows.length > 0 ? rows[0].total : 0;
     const summary = {
       country,
       region,
       userLabel: effUid ? labels.email(effUid) : null,
       restaurantLabel: labels.restaurantName(effRid, effUid),
+      eventCount: total,
+      truncated: total > LIST_LIMIT,
     };
 
     return {
@@ -966,38 +975,6 @@ export class AdminController {
     }
     if (!result.ok) throw new BadRequestException({ message: "Meta CAPI rejected the event", response: result.response });
     return { ok: true, eventName, response: result.response };
-  }
-
-  /** Most recent fbclid landing click (the CAPI form targets this one). */
-  @Get("capi/latest")
-  async capiLatest() {
-    const ev = await this.prisma.usageEvent.findFirst({
-      where: { event: { startsWith: "l_fbclid_" } },
-      orderBy: { at: "desc" },
-      select: { event: true, at: true },
-    });
-    if (!ev) return { fbclid: null as string | null, clickTs: null as number | null };
-    return { fbclid: ev.event.replace(/^l_fbclid_/, ""), clickTs: ev.at.getTime() };
-  }
-
-  /** Recent CAPI send journal (newest first) for the admin CAPI page. */
-  @Get("capi/log")
-  async capiLog(@Query("limit") limit?: string) {
-    const take = Math.min(Math.max(parseInt(limit ?? "100", 10) || 100, 1), 500);
-    const rows = await this.prisma.capiSend.findMany({
-      orderBy: { createdAt: "desc" },
-      take,
-      select: { id: true, fbclid: true, eventName: true, status: true, createdAt: true },
-    });
-    return {
-      log: rows.map((r) => ({
-        id: r.id,
-        fbclid: r.fbclid,
-        eventName: r.eventName,
-        status: r.status,
-        createdAt: r.createdAt.toISOString(),
-      })),
-    };
   }
 
   /** Full CAPI send history for a single fbclid (newest first). */

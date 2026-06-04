@@ -25,6 +25,10 @@ export class UsageStitchService {
     this.running = true;
     try {
       const GAP_MS = 3 * 24 * 60 * 60 * 1000;
+      // Only the last 7 days are (re)stitched: bounds memory/CPU and matches the
+      // CAPI auto-send window. Older events keep the stitching computed when they
+      // were fresh — so clearing must be scoped to this window too (see below).
+      const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
       const rus = await this.prisma.restaurantUser.findMany({
         orderBy: { addedAt: "asc" },
@@ -34,6 +38,7 @@ export class UsageStitchService {
       for (const r of rus) if (!userRest.has(r.userId)) userRest.set(r.userId, r.restaurantId);
 
       const evs = await this.prisma.usageEvent.findMany({
+        where: { at: { gte: since } },
         select: {
           id: true, at: true, ip: true, region: true, device: true,
           platform: true, country: true, userId: true, restaurantId: true,
@@ -83,10 +88,6 @@ export class UsageStitchService {
         flush();
       }
 
-      await this.prisma.usageEvent.updateMany({
-        where: { OR: [{ stitchedRestaurantId: { not: null } }, { stitchedUserId: { not: null } }] },
-        data: { stitchedRestaurantId: null, stitchedUserId: null },
-      });
       const byKey = new Map<string, { rid: string | null; uid: string | null; ids: string[] }>();
       for (const a of assignments) {
         const k = `${a.rid}|${a.uid}`;
@@ -94,12 +95,25 @@ export class UsageStitchService {
         if (g) g.ids.push(a.id);
         else byKey.set(k, { rid: a.rid, uid: a.uid, ids: [a.id] });
       }
-      for (const { rid, uid, ids } of byKey.values()) {
-        await this.prisma.usageEvent.updateMany({
-          where: { id: { in: ids } },
-          data: { stitchedRestaurantId: rid, stitchedUserId: uid },
-        });
-      }
+
+      // Clear + rewrite atomically so the CAPI cron / admin list never observe a
+      // half-cleared state. Clearing is scoped to the same 7-day window we
+      // recompute — older stitched events keep their values.
+      await this.prisma.$transaction([
+        this.prisma.usageEvent.updateMany({
+          where: {
+            at: { gte: since },
+            OR: [{ stitchedRestaurantId: { not: null } }, { stitchedUserId: { not: null } }],
+          },
+          data: { stitchedRestaurantId: null, stitchedUserId: null },
+        }),
+        ...Array.from(byKey.values()).map(({ rid, uid, ids }) =>
+          this.prisma.usageEvent.updateMany({
+            where: { id: { in: ids } },
+            data: { stitchedRestaurantId: rid, stitchedUserId: uid },
+          }),
+        ),
+      ]);
       return { ok: true, stitched: assignments.length, islands: byKey.size };
     } finally {
       this.running = false;

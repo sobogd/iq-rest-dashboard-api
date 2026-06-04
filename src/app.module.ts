@@ -24,6 +24,7 @@ import { AnalyticsModule } from "./analytics/analytics.module";
 import { UsageModule } from "./usage/usage.module";
 import { AdminModule } from "./admin/admin.module";
 import { ScanMenuModule } from "./scan-menu/scan-menu.module";
+import { InboxModule } from "./inbox/inbox.module";
 import { HealthController } from "./health/health.controller";
 
 @Module({
@@ -55,6 +56,7 @@ import { HealthController } from "./health/health.controller";
     UsageModule,
     AdminModule,
     ScanMenuModule,
+    InboxModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

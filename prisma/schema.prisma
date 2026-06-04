@@ -531,3 +531,45 @@ model PairingCode {
 }
 
 
+
+/// A person who messages us on an external channel (currently WhatsApp). One
+/// row per (channel, externalId). `watched` = pin to the inbox; `muted` = hide
+/// new messages (e.g. personal contacts like family). Soft-hidden via `muted`.
+model InboxContact {
+  id            String   @id @default(cuid())
+  channel       String   // "whatsapp"
+  externalId    String   // WhatsApp phone (digits, e.g. "34123456789")
+  name          String?
+  lang          String?  // detected language of the contact's messages
+  watched       Boolean  @default(false)
+  muted         Boolean  @default(false)
+  lastMessageAt DateTime @default(now())
+  createdAt     DateTime @default(now())
+
+  messages      InboxMessage[]
+
+  @@unique([channel, externalId])
+  @@index([lastMessageAt])
+  @@map("inbox_contacts")
+}
+
+/// One message in an inbox thread. `direction` in = from the contact, out =
+/// sent by the admin. `translatedRu` holds the Russian translation of inbound
+/// text; outbound stores the admin's Russian original in `translatedRu` and the
+/// sent (contact-language) text in `body`.
+model InboxMessage {
+  id           String   @id @default(cuid())
+  contactId    String
+  direction    String   // "in" | "out"
+  body         String   // text actually sent/received (contact language)
+  lang         String?  // language of `body`
+  translatedRu String?  // Russian rendering (in: translation; out: admin original)
+  externalId   String?  // provider message id (WhatsApp wamid)
+  status       String   @default("received") // received | sent | failed
+  createdAt    DateTime @default(now())
+
+  contact      InboxContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([contactId, createdAt])
+  @@map("inbox_messages")
+}

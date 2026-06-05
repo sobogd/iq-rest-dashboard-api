@@ -20,7 +20,7 @@ export function languageName(code: string | null | undefined): string {
 const GEMINI_URL =
   "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
 
-async function callGemini(system: string, user: string, maxTokens = 600): Promise<string> {
+async function callGemini(system: string, user: string, maxTokens = 4096): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY not configured");
   const res = await fetch(GEMINI_URL, {
@@ -29,7 +29,13 @@ async function callGemini(system: string, user: string, maxTokens = 600): Promis
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: system }] },
       contents: [{ role: "user", parts: [{ text: user }] }],
-      generationConfig: { temperature: 0.2, maxOutputTokens: maxTokens },
+      generationConfig: {
+        temperature: 0.2,
+        maxOutputTokens: maxTokens,
+        // gemini-2.5-flash spends "thinking" tokens from the same budget; leaving
+        // it on truncated longer chat messages (see /translate fix). Disable it.
+        thinkingConfig: { thinkingBudget: 0 },
+      },
     }),
   });
   if (!res.ok) throw new Error(`Gemini error ${res.status}: ${await res.text()}`);

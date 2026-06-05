@@ -47,7 +47,11 @@ export class TranslateController {
             ],
           },
           contents: [{ role: "user", parts: [{ text }] }],
-          generationConfig: { temperature: 0.3, maxOutputTokens: 500 },
+          generationConfig: {
+            temperature: 0.3,
+            maxOutputTokens: 8192,
+            thinkingConfig: { thinkingBudget: 0 },
+          },
         }),
       },
     );

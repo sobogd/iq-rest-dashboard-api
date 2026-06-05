@@ -23,6 +23,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { AdminGuard } from "./admin.guard";
 import { UsageStitchService } from "./usage-stitch.service";
 import { CapiService } from "./capi.service";
+import { analyzeSession } from "./usage-analyze";
 import { AuthService } from "../auth/auth.service";
 import { MailService } from "../mail/mail.service";
 import { DevicesService } from "../devices/devices.service";
@@ -792,6 +793,72 @@ export class AdminController {
     @Query("from") from?: string,
     @Query("to") to?: string,
   ) {
+    const { rows, summary } = await this.loadSessionEvents(kind, rid, ipkey, from, to);
+    return {
+      summary,
+      events: rows.map((r) => ({
+        id: r.id,
+        at: r.at.toISOString(),
+        event: r.event,
+        ip: r.ip,
+        device: r.device,
+        platform: r.platform,
+        gclid: r.gclid,
+        isFacebookAds: r.is_facebook_ads,
+      })),
+    };
+  }
+
+  // AI behavioural analysis of one session — same grouping/window as the events
+  // endpoint, then hands the transcript + product/event-vocabulary context to
+  // Gemini (see usage-analyze.ts) and returns a Russian narrative.
+  @Post("usage/sessions/analyze")
+  async analyzeUsageSession(
+    @Body()
+    body: { kind?: string; rid?: string; ipkey?: string; from?: string; to?: string },
+  ) {
+    const { rows, summary } = await this.loadSessionEvents(
+      body.kind,
+      body.rid,
+      body.ipkey,
+      body.from,
+      body.to,
+    );
+    if (rows.length === 0) {
+      return { analysis: "В этой сессии нет событий для анализа." };
+    }
+    const analysis = await analyzeSession(
+      rows.map((r) => ({
+        at: r.at.toISOString(),
+        event: r.event,
+        device: r.device,
+        platform: r.platform,
+        country: r.country,
+        region: r.region,
+      })),
+      {
+        country: summary.country,
+        region: summary.region,
+        userLabel: summary.userLabel,
+        restaurantLabel: summary.restaurantLabel,
+        eventCount: summary.eventCount,
+        hasGoogle: summary.hasGoogle,
+        hasFacebook: summary.hasFacebook,
+      },
+    );
+    return { analysis };
+  }
+
+  // Shared loader for one usage session: validates the window, runs the
+  // effective-restaurant grouped query, and resolves the header summary. Used
+  // by both the events listing and the AI analysis endpoint.
+  private async loadSessionEvents(
+    kind?: string,
+    rid?: string,
+    ipkey?: string,
+    from?: string,
+    to?: string,
+  ) {
     if (!from || !to) throw new BadRequestException("from/to required");
     const fromD = new Date(from);
     const toD = new Date(to);
@@ -817,6 +884,7 @@ export class AdminController {
       platform: string | null;
       gclid: string | null;
       is_facebook_ads: boolean;
+      is_google_ads: boolean;
       eff_rid: string | null;
       eff_uid: string | null;
       total: number;
@@ -827,7 +895,7 @@ export class AdminController {
     const rows = await this.prisma.$queryRaw<Row[]>(Prisma.sql`
       WITH ev AS (
         SELECT ue.id, ue.at, ue.event, ue.ip, ue.country, ue.region, ue.device, ue.platform,
-               ue.gclid, ue.is_facebook_ads,
+               ue.gclid, ue.is_facebook_ads, ue.is_google_ads,
                COALESCE(ue."userId", ue."stitchedUserId") AS eff_uid,
                COALESCE(ue."manualRestaurantId", ue."restaurantId", ue."stitchedRestaurantId", ru."restaurantId") AS eff_rid
         FROM usage_events ue
@@ -837,7 +905,7 @@ export class AdminController {
         ) ru ON COALESCE(ue."userId", ue."stitchedUserId") IS NOT NULL
         WHERE ue.at >= ${fromD} AND ue.at <= ${toD}
       )
-      SELECT id, at, event, ip, country, region, device, platform, gclid, is_facebook_ads, eff_rid, eff_uid,
+      SELECT id, at, event, ip, country, region, device, platform, gclid, is_facebook_ads, is_google_ads, eff_rid, eff_uid,
              COUNT(*) OVER()::int AS total
       FROM ev
       WHERE ${cond}
@@ -853,6 +921,12 @@ export class AdminController {
     const effRid = rows.find((r) => r.eff_rid)?.eff_rid ?? null;
     const labels = await this.resolveUsageLabels([{ userId: effUid, restaurantId: effRid }]);
     const total = rows.length > 0 ? rows[0].total : 0;
+    const hasGoogle = rows.some(
+      (r) => r.is_google_ads || r.gclid || r.event.startsWith("l_gclid_"),
+    );
+    const hasFacebook = rows.some(
+      (r) => r.is_facebook_ads || r.event.startsWith("l_fbclid_"),
+    );
     const summary = {
       country,
       region,
@@ -860,21 +934,11 @@ export class AdminController {
       restaurantLabel: labels.restaurantName(effRid, effUid),
       eventCount: total,
       truncated: total > LIST_LIMIT,
+      hasGoogle,
+      hasFacebook,
     };
 
-    return {
-      summary,
-      events: rows.map((r) => ({
-        id: r.id,
-        at: r.at.toISOString(),
-        event: r.event,
-        ip: r.ip,
-        device: r.device,
-        platform: r.platform,
-        gclid: r.gclid,
-        isFacebookAds: r.is_facebook_ads,
-      })),
-    };
+    return { rows, summary };
   }
 
   // Resolve a batch of userId / restaurantId to display labels. `email` is the

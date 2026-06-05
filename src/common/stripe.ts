@@ -22,7 +22,7 @@ export type PriceLookupKey = (typeof PRICE_LOOKUP_KEYS)[keyof typeof PRICE_LOOKU
 
 // Billing currencies we actually price in Stripe. EUR is the base/fallback;
 // NOK/SEK/DKK have currency-suffixed Stripe prices (e.g. `basic_monthly_nok`).
-export const SUPPORTED_CURRENCIES = ["EUR", "NOK", "SEK", "DKK", "MXN", "USD", "AUD", "GBP", "PLN", "CZK", "HUF", "ISK"] as const;
+export const SUPPORTED_CURRENCIES = ["EUR", "NOK", "SEK", "DKK", "MXN", "USD", "AUD", "GBP", "PLN", "CZK", "HUF", "ISK", "CHF", "RSD"] as const;
 
 export type SupportedCurrency = (typeof SUPPORTED_CURRENCIES)[number];
 
@@ -52,6 +52,8 @@ const BILLING_CURRENCY_BY_COUNTRY: Record<string, SupportedCurrency> = {
   CZ: "CZK",
   HU: "HUF",
   IS: "ISK",
+  CH: "CHF",
+  RS: "RSD",
 };
 
 export function getCurrencyByCountry(countryCode: string | null): SupportedCurrency {
@@ -72,4 +74,6 @@ export const CURRENCY_INFO: Record<SupportedCurrency, { symbol: string; name: st
   CZK: { symbol: "Kč", name: "Czech Koruna", symbolPosition: "after", zeroDecimal: false },
   HUF: { symbol: "Ft", name: "Hungarian Forint", symbolPosition: "after", zeroDecimal: false },
   ISK: { symbol: "kr", name: "Icelandic Króna", symbolPosition: "after", zeroDecimal: false },
+  CHF: { symbol: "CHF", name: "Swiss Franc", symbolPosition: "after", zeroDecimal: false },
+  RSD: { symbol: "RSD", name: "Serbian Dinar", symbolPosition: "after", zeroDecimal: false },
 };

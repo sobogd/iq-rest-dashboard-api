@@ -49,9 +49,14 @@ Prefixes:
 - dash_* = logged-in DASHBOARD event (owner using the product).
 - l_gclid_<id> / l_fbclid_<id> = a PAID AD click landed (Google / Meta). Presence means this visitor came from paid advertising.
 
+AUTOMATIC (non-engagement) events — DO NOT treat these as deliberate actions; they fire on page load / scroll, not from a click:
+- l_page_<feature> = a page was opened. Feature tokens: home, pricing, help, digital (digital menu), qr (QR menu), orders (ordering system), bookings (table reservations), kds (kitchen display). Page opens DO matter (which pages they visited), but they are passive, not clicks.
+- l_section_view_* and l_hero (bare) = a section/the hero scrolled into view or was auto-rendered on load. Several of these sharing the SAME timestamp = the page simply loaded. Ignore them as "interest" signals; only their presence tells you a page was opened.
+- l_currency_<code> = the visitor's auto-detected billing currency (e.g. l_currency_gbp → GBP). This is a MARKET signal, not an action. Use it for the summary, not the behaviour story.
+Treat a burst of events at one identical timestamp as the page-load batch, not engagement. Real engagement = a later, deliberate click/focus (l_hero_cta_*, l_demo_*, l_pricing_*, l_onb_*, dash_*).
+
 Landing (l_) tokens:
-- l_page_<feature> = viewed a page. Feature tokens: home, pricing, help, digital (digital menu), qr (QR menu), orders (ordering system), bookings (table reservations), kds (kitchen display).
-- l_hero_* = interacted with the homepage hero (e.g. main CTA, demo button).
+- l_hero_* (with an action suffix, e.g. l_hero_cta_click) = clicked something in the hero (main CTA, demo button). Bare l_hero with no suffix is just the section loading (see above).
 - l_demo_* = opened/used the interactive product demo embedded on the landing.
 - l_pricing_* = pricing page interactions (plan clicks, CTA).
 - l_feature_* = feature-page interactions.
@@ -75,8 +80,10 @@ HOW TO READ DROP-OFF
 - Dashboard session that stalls after repeated focus_* / save_error on the same area = a usability blocker there.
 - Repeated views of one area = what they care about most.
 
-OUTPUT (write in RUSSIAN, plain text, no markdown tables, no code fences). Use these sections with short paragraphs / dashes:
-1. Кто это — тип пользователя (случайный залётный / заинтересованный лид / зарегистрировавшийся владелец / активный клиент), источник трафика (платная реклама?), устройство/страна.
+OUTPUT (write in RUSSIAN, plain text, no markdown tables, no code fences). Start with a ONE-LINE summary header before the sections:
+Саммери: <страна/город> · <валюта> · <устройство> · <источник: платная реклама Meta/Google или органика> · <тип: залётный / лид / регистрация / клиент>
+Then the sections with short paragraphs / dashes:
+1. Кто это — тип пользователя (случайный залётный / заинтересованный лид / зарегистрировавшийся владелец / активный клиент), источник трафика (платная реклама?), устройство/страна/валюта.
 2. Что делал — краткая хронология ключевых шагов и на что смотрел чаще всего.
 3. Где затык / почему отвалился — конкретный момент и вероятная причина (ошибки, брошенный шаг воронки, потеря интереса).
 4. Рекомендации — 2-4 конкретных действия по продукту/воронке, которые могли бы удержать таких пользователей.
@@ -105,13 +112,24 @@ function fmt(e: AnalyzeEvent, t0: number): string {
   return `[+${mm}:${ss}] ${e.event}`;
 }
 
+/** Detected billing currency from an `l_currency_<code>` event, if any. */
+function detectCurrency(events: AnalyzeEvent[]): string | null {
+  for (const e of events) {
+    const m = /^l_currency_([a-z]{3})$/.exec(e.event);
+    if (m) return m[1].toUpperCase();
+  }
+  return null;
+}
+
 function buildUserMessage(events: AnalyzeEvent[], ctx: AnalyzeContext): string {
   const dev = events.find((e) => e.device || e.platform);
   const device = dev ? [dev.platform, dev.device].filter(Boolean).join(" / ") : "unknown";
+  const currency = detectCurrency(events);
   const meta = [
     `Identified user: ${ctx.userLabel ?? "anonymous"}`,
     `Restaurant: ${ctx.restaurantLabel ?? "—"}`,
     `Country/region: ${ctx.country || "??"}${ctx.region ? " / " + ctx.region : ""}`,
+    `Detected currency: ${currency ?? "unknown"}`,
     `Device: ${device}`,
     `Arrived via paid ads: Google=${ctx.hasGoogle ? "yes" : "no"}, Meta=${ctx.hasFacebook ? "yes" : "no"}`,
     `Total events in session: ${ctx.eventCount}`,
@@ -132,7 +150,13 @@ export async function analyzeSession(
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
       contents: [{ role: "user", parts: [{ text: buildUserMessage(events, ctx) }] }],
-      generationConfig: { temperature: 0.4, maxOutputTokens: 1400 },
+      // Disable "thinking" — gemini-2.5-flash otherwise spends the output
+      // budget on hidden reasoning and the visible answer gets truncated.
+      generationConfig: {
+        temperature: 0.4,
+        maxOutputTokens: 1800,
+        thinkingConfig: { thinkingBudget: 0 },
+      },
     }),
   });
   if (!res.ok) throw new Error(`Gemini error ${res.status}: ${await res.text()}`);

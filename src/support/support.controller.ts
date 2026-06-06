@@ -1,18 +1,12 @@
-import { BadRequestException, Body, Controller, Get, Logger, Post, Req, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Post, Req, UseGuards } from "@nestjs/common";
 import type { Request } from "express";
 import { AuthGuard, type AuthedRequest } from "../auth/auth.guard";
-import { MailService } from "../mail/mail.service";
 import { PrismaService } from "../prisma/prisma.service";
 
 @Controller("support/messages")
 @UseGuards(AuthGuard)
 export class SupportController {
-  private readonly logger = new Logger(SupportController.name);
-
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly mail: MailService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   @Get()
   async list(@Req() req: Request) {
@@ -38,32 +32,8 @@ export class SupportController {
       select: { id: true, message: true, isAdmin: true, createdAt: true },
     });
 
-    // Fire-and-forget admin notification — SMTP errors must not bubble
-    // back to the writer, the message itself was already persisted.
-    void this.notifyAdmin({ restaurantId, userId, text }).catch((err) => {
-      this.logger.warn(`admin support notification failed: ${err?.message ?? err}`);
-    });
-
+    // Admin is notified by the half-hourly unread-inbox digest cron
+    // (InboxNotifyService), not per-message.
     return created;
-  }
-
-  private async notifyAdmin({
-    restaurantId,
-    userId,
-    text,
-  }: {
-    restaurantId: string;
-    userId: string;
-    text: string;
-  }): Promise<void> {
-    const [restaurant, user] = await Promise.all([
-      this.prisma.restaurant.findUnique({ where: { id: restaurantId }, select: { title: true } }),
-      this.prisma.user.findUnique({ where: { id: userId }, select: { email: true } }),
-    ]);
-    await this.mail.sendAdminSupportNewMessageNotification({
-      companyName: restaurant?.title ?? "Unnamed restaurant",
-      userEmail: user?.email ?? "unknown",
-      message: text,
-    });
   }
 }

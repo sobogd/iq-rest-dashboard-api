@@ -328,6 +328,39 @@ export class MailService implements OnModuleDestroy {
     });
   }
 
+  /** Half-hourly reminder that the unified admin inbox has unread threads.
+   *  Recipient comes from SUPPORT_INBOX_EMAIL (falls back to support@iq-rest.com). */
+  async sendAdminUnreadInboxNotification(count: number): Promise<void> {
+    const cfg = this.smtpConfig();
+    if (!cfg) {
+      this.logger.warn("SMTP not configured — unread inbox notification skipped");
+      return;
+    }
+    const transporter = await this.getTransporter(cfg);
+    const to =
+      this.config.get<string>("SUPPORT_INBOX_EMAIL") || "support@iq-rest.com";
+    const appUrl = (this.config.get<string>("APP_URL") || "https://dashboard.iq-rest.com").replace(/\/$/, "");
+    const inboxUrl = `${appUrl}/en/dashboard/settings/admin/inbox?from=email`;
+    const label = count === 1 ? "1 unread conversation" : `${count} unread conversations`;
+    const subject = `[IQ Rest inbox] ${label}`;
+
+    await transporter.sendMail({
+      from: this.cachedFrom ?? cfg.from,
+      to,
+      subject,
+      html: `
+        <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:520px;margin:0 auto;padding:32px 20px;color:#1a1a1a">
+          ${this.logoMark()}
+          <p style="font-size:15px;line-height:1.6;margin:0 0 8px">You have <strong>${label}</strong> waiting in the admin inbox.</p>
+          <p style="font-size:15px;line-height:1.7;margin:24px 0 0">
+            <a href="${inboxUrl}" style="color:#0066cc">Open inbox</a>
+          </p>
+        </div>
+      `,
+      text: `You have ${label} waiting in the admin inbox.\n\nInbox: ${inboxUrl}`,
+    });
+  }
+
   async sendSupportReplyNotification(toEmail: string, locale = "en"): Promise<void> {
     const cfg = this.smtpConfig();
     if (!cfg) {

@@ -575,3 +575,17 @@ model InboxMessage {
   @@index([contactId, createdAt])
   @@map("inbox_messages")
 }
+
+/// Admin-side read marker for a unified inbox thread. `threadId` is the same
+/// composite key the inbox API uses: "wa:<contactId>" for WhatsApp contacts and
+/// "int:<restaurantId>" for internal support threads. Opening a thread upserts
+/// `readAt = now()`; a thread counts as unread when it has inbound messages
+/// newer than `readAt` (or no marker yet). Drives the half-hourly digest email.
+model InboxRead {
+  id        String   @id @default(cuid())
+  threadId  String   @unique
+  readAt    DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("inbox_reads")
+}

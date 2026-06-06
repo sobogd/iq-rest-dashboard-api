@@ -94,7 +94,8 @@ export class AdminController {
         createdAt: true,
         _count: { select: { categories: true, items: true } },
         restaurantUsers: {
-          select: { user: { select: { id: true, email: true } } },
+          orderBy: { addedAt: "asc" },
+          select: { addedBy: true, user: { select: { id: true, email: true, emailsSent: true } } },
         },
       },
       orderBy: { createdAt: "desc" },
@@ -146,12 +147,20 @@ export class AdminController {
     const mLastDay = byId(msgsLastDayRows);
     const lv = byId(lastVisits);
 
+    // The 3 lifecycle email templates an admin can trigger; we report how many
+    // distinct ones the owner has received (e.g. 1/3) instead of a date.
+    const EMAIL_TEMPLATES = ["welcome_personal", "menu_almost_ready", "trial_ending"];
+
     return {
       restaurants: restaurants.map((r) => {
         const plan = r.plan ?? "FREE";
         const subscriptionStatus = r.subscriptionStatus;
         const isManualSub =
           subscriptionStatus === "ACTIVE" && !r.stripeSubscriptionId;
+        // Owner = the user with addedBy === null (falls back to the first).
+        const ownerRu = r.restaurantUsers.find((ru) => ru.addedBy === null) ?? r.restaurantUsers[0];
+        const sent = (ownerRu?.user.emailsSent as Record<string, unknown> | null) ?? null;
+        const emailsSentCount = sent ? EMAIL_TEMPLATES.filter((t) => t in sent).length : 0;
         return {
           id: r.id,
           title: r.title,
@@ -178,6 +187,8 @@ export class AdminController {
           messagesCount: Number(mTotal.get(r.id)?.count ?? 0),
           messagesLastDayCount: Number(mLastDay.get(r.id)?.count ?? 0),
           lastVisit: lv.get(r.id)?.last_visit?.toISOString() ?? null,
+          emailsSentCount,
+          emailTemplatesTotal: EMAIL_TEMPLATES.length,
         };
       }),
     };

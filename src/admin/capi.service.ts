@@ -2,7 +2,20 @@ import { Injectable, Logger } from "@nestjs/common";
 import { Cron } from "@nestjs/schedule";
 import { ConfigService } from "@nestjs/config";
 import { Prisma } from "@prisma/client";
+import { createHash } from "crypto";
 import { PrismaService } from "../prisma/prisma.service";
+
+/** Match data Meta uses to attribute a CAPI event to a person. All cookieless:
+ *  fbc comes from the fbclid URL param, em/external_id are hashed identifiers. */
+export interface CapiMatch {
+  email?: string | null;
+  userId?: string | null;
+}
+
+/** SHA-256 hex of a normalised value, as Meta requires for em/external_id. */
+function hashField(value: string): string {
+  return createHash("sha256").update(value.trim().toLowerCase()).digest("hex");
+}
 
 export type CapiEventName =
   | "ViewContent"
@@ -19,6 +32,7 @@ export interface CapiSendResult {
 interface FbSessionRow {
   fbclid: string;
   fb_at: Date;
+  user_id: string | null; // effective user reached in the session (for em/external_id)
   has_content: boolean; // pricing page OR demo
   has_onb: boolean; // any onboarding step
   has_registered: boolean; // verify_success OR any dashboard event
@@ -35,8 +49,15 @@ export class CapiService {
   ) {}
 
   /** Low-level Meta CAPI send. Always journals the attempt in CapiSend. Does
-   *  NOT dedup — callers decide (manual send 409s, the cron skips). */
-  async send(fbclid: string, eventName: string, clickMs?: number): Promise<CapiSendResult> {
+   *  NOT dedup — callers decide (manual send 409s, the cron skips). `match`
+   *  carries cookieless identifiers (hashed email + external_id) that lift the
+   *  Event Match Quality far above fbc-only. */
+  async send(
+    fbclid: string,
+    eventName: string,
+    clickMs?: number,
+    match?: CapiMatch,
+  ): Promise<CapiSendResult> {
     const token = this.config.get<string>("FB_ADS_TOKEN");
     const pixelId = this.config.get<string>("FB_ADS_PIXEL_ID");
     if (!token || !pixelId) {
@@ -46,6 +67,15 @@ export class CapiService {
     const clickTs = typeof clickMs === "number" && clickMs > 0 ? clickMs : Date.now();
     const fbc = `fb.1.${clickTs}.${fbclid}`;
     const eventTime = Math.floor(Date.now() / 1000);
+
+    const userData: Record<string, unknown> = { fbc };
+    if (match?.email) userData.em = [hashField(match.email)];
+    if (match?.userId) userData.external_id = [hashField(match.userId)];
+
+    // Stable per-(fbclid,event) id so Meta dedups our own retries and any
+    // future browser pixel that mirrors the same conversion.
+    const eventId = createHash("sha256").update(`${fbclid}:${eventName}`).digest("hex");
+    const sourceUrl = (this.config.get<string>("LANDING_URL") || "https://iq-rest.com").replace(/\/$/, "") + "/";
 
     let ok = false;
     let json: unknown = {};
@@ -60,9 +90,10 @@ export class CapiService {
               {
                 event_name: eventName,
                 event_time: eventTime,
+                event_id: eventId,
                 action_source: "website",
-                event_source_url: "https://soqrmenu.com/",
-                user_data: { fbc },
+                event_source_url: sourceUrl,
+                user_data: userData,
               },
             ],
           }),
@@ -124,6 +155,7 @@ export class CapiService {
         SELECT
           (array_agg(event ORDER BY at DESC) FILTER (WHERE event LIKE 'l_fbclid_%'))[1] AS last_fbclid_event,
           MAX(at) FILTER (WHERE event LIKE 'l_fbclid_%') AS fb_at,
+          (array_agg(COALESCE("userId", "stitchedUserId") ORDER BY at DESC) FILTER (WHERE COALESCE("userId", "stitchedUserId") IS NOT NULL))[1] AS user_id,
           bool_or(event = 'l_page_pricing' OR event LIKE '%demo%') AS has_content,
           bool_or(event LIKE '%onb%') AS has_onb,
           bool_or(event = 'l_onb_verify_success' OR event LIKE 'dash\\_%') AS has_registered
@@ -133,6 +165,7 @@ export class CapiService {
       SELECT
         regexp_replace(last_fbclid_event, '^l_fbclid_', '') AS fbclid,
         fb_at,
+        user_id,
         has_content,
         has_onb,
         has_registered
@@ -145,7 +178,7 @@ export class CapiService {
     // Build the set of (fbclid → events to ensure). Full ladder: every reached
     // milestone. ViewContent ⊂ content/demo; InitiateCheckout ⊂ onboarding;
     // CompleteRegistration ⊂ verify_success or any dashboard activity.
-    const wanted = new Map<string, { events: Set<CapiEventName>; clickMs: number }>();
+    const wanted = new Map<string, { events: Set<CapiEventName>; clickMs: number; userId: string | null }>();
     for (const r of rows) {
       if (!r.fbclid) continue;
       const events = new Set<CapiEventName>();
@@ -158,11 +191,20 @@ export class CapiService {
       if (prev) {
         for (const e of events) prev.events.add(e);
         prev.clickMs = Math.max(prev.clickMs, clickMs);
+        if (!prev.userId && r.user_id) prev.userId = r.user_id;
       } else {
-        wanted.set(r.fbclid, { events, clickMs });
+        wanted.set(r.fbclid, { events, clickMs, userId: r.user_id });
       }
     }
     if (wanted.size === 0) return { sent: 0, skipped: 0 };
+
+    // Resolve emails for the userIds we found, to enrich the match (cookieless).
+    const userIds = Array.from(new Set(Array.from(wanted.values()).map((w) => w.userId).filter((v): v is string => !!v)));
+    const emailById = new Map<string, string>();
+    if (userIds.length > 0) {
+      const users = await this.prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, email: true } });
+      for (const u of users) if (u.email) emailById.set(u.id, u.email);
+    }
 
     // Journal lookup for these fbclids: a successful (fbclid,eventName) is never
     // resent; a pair that already failed MAX_ERRORS times is given up on (a
@@ -185,7 +227,8 @@ export class CapiService {
     let sent = 0;
     let skipped = 0;
     let capped = false;
-    outer: for (const [fbclid, { events, clickMs }] of wanted) {
+    outer: for (const [fbclid, { events, clickMs, userId }] of wanted) {
+      const match: CapiMatch = { userId, email: userId ? emailById.get(userId) ?? null : null };
       for (const eventName of events) {
         const key = `${fbclid}|${eventName}`;
         if (successSet.has(key) || (errorCount.get(key) ?? 0) >= MAX_ERRORS) {
@@ -197,7 +240,7 @@ export class CapiService {
           break outer;
         }
         try {
-          const r = await this.send(fbclid, eventName, clickMs);
+          const r = await this.send(fbclid, eventName, clickMs, match);
           if (r.ok) sent++;
         } catch (e) {
           this.logger.warn(`CAPI auto-send ${eventName} for ${fbclid} failed: ${String(e)}`);

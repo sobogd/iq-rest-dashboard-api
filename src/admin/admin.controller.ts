@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   Body,
-  ConflictException,
   Controller,
   Delete,
   ForbiddenException,
@@ -22,7 +21,6 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AdminGuard } from "./admin.guard";
 import { UsageStitchService } from "./usage-stitch.service";
-import { CapiService } from "./capi.service";
 import { analyzeSession } from "./usage-analyze";
 import { AuthService } from "../auth/auth.service";
 import { MailService } from "../mail/mail.service";
@@ -53,7 +51,6 @@ export class AdminController {
     private readonly devices: DevicesService,
     private readonly restaurants: RestaurantService,
     private readonly stitch: UsageStitchService,
-    private readonly capi: CapiService,
   ) {}
 
   // ────────────────── DEVICES ──────────────────
@@ -999,66 +996,9 @@ export class AdminController {
   }
 
   // ────────────────── META CAPI ──────────────────
-
-  /** Meta CAPI conversion event_names that can be sent manually. */
-  private static readonly CAPI_EVENTS = [
-    "ViewContent",
-    "InitiateCheckout",
-    "CompleteRegistration",
-    "Subscribe",
-  ];
-
-  /** Manually send a Meta CAPI conversion for a Facebook click id (fbclid).
-   *  Live (no test_event_code). Refuses a duplicate that already succeeded for
-   *  the same (fbclid, eventName); every attempt is journaled in CapiSend.
-   *  `clickTs` (ms) is the original click time when known (session detail),
-   *  else now. */
-  @Post("capi/send")
-  @HttpCode(HttpStatus.OK)
-  async capiSend(@Body() body: { fbclid?: string; eventName?: string; clickTs?: number }) {
-    const fbclid = (body?.fbclid ?? "").trim();
-    const eventName = (body?.eventName ?? "").trim();
-    if (!fbclid) throw new BadRequestException("fbclid required");
-    if (!AdminController.CAPI_EVENTS.includes(eventName)) {
-      throw new BadRequestException(`eventName must be one of: ${AdminController.CAPI_EVENTS.join(", ")}`);
-    }
-
-    const already = await this.prisma.capiSend.findFirst({
-      where: { fbclid, eventName, status: "success" },
-      select: { id: true },
-    });
-    if (already) throw new ConflictException(`${eventName} already sent for this fbclid`);
-
-    const clickMs = typeof body.clickTs === "number" && body.clickTs > 0 ? body.clickTs : Date.now();
-    let result: { ok: boolean; response: unknown };
-    try {
-      result = await this.capi.send(fbclid, eventName, clickMs);
-    } catch (e) {
-      throw new BadRequestException({ message: "Meta CAPI request failed", response: { error: String(e) } });
-    }
-    if (!result.ok) throw new BadRequestException({ message: "Meta CAPI rejected the event", response: result.response });
-    return { ok: true, eventName, response: result.response };
-  }
-
-  /** Full CAPI send history for a single fbclid (newest first). */
-  @Get("capi/history")
-  async capiHistory(@Query("fbclid") fbclid?: string) {
-    const id = (fbclid ?? "").trim();
-    if (!id) return { history: [] as unknown[] };
-    const rows = await this.prisma.capiSend.findMany({
-      where: { fbclid: id },
-      orderBy: { createdAt: "desc" },
-      select: { id: true, eventName: true, status: true, createdAt: true },
-    });
-    return {
-      history: rows.map((r) => ({
-        id: r.id,
-        eventName: r.eventName,
-        status: r.status,
-        createdAt: r.createdAt.toISOString(),
-      })),
-    };
-  }
+  // CAPI conversions are sent fully automatically by CapiService's cron
+  // (15-min funnel sweep, cookieless em/external_id match). The manual
+  // send/history admin endpoints were removed.
 
   // ────────────────── SESSION DELETE ──────────────────
 

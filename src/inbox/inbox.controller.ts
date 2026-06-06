@@ -157,7 +157,7 @@ export class InboxController {
           restaurantUsers: {
             take: 1,
             orderBy: { addedAt: "asc" },
-            select: { user: { select: { email: true } } },
+            select: { user: { select: { email: true, preferredLocale: true } } },
           },
         },
       });
@@ -166,7 +166,7 @@ export class InboxController {
         where: { restaurantId: thread.key },
         orderBy: { createdAt: "asc" },
         take: 500,
-        select: { id: true, message: true, isAdmin: true, createdAt: true },
+        select: { id: true, message: true, isAdmin: true, createdAt: true, lang: true, translatedRu: true },
       });
       await this.markRead(id);
       return {
@@ -178,7 +178,7 @@ export class InboxController {
           profileName: null,
           note: null,
           externalId: restaurant.title || "",
-          lang: restaurant.defaultLanguage,
+          lang: restaurant.restaurantUsers[0]?.user.preferredLocale || restaurant.defaultLanguage,
           watched: false,
           muted: false,
         },
@@ -186,8 +186,8 @@ export class InboxController {
           id: m.id,
           direction: m.isAdmin ? ("out" as const) : ("in" as const),
           body: m.message,
-          lang: null,
-          translatedRu: null,
+          lang: m.lang,
+          translatedRu: m.translatedRu,
           status: "",
           createdAt: m.createdAt.toISOString(),
         })),
@@ -229,16 +229,18 @@ export class InboxController {
   }
 
   /** Preview the translation of a Russian reply in the contact's language,
-   *  WITHOUT sending — lets the admin verify before delivery. WhatsApp only. */
+   *  WITHOUT sending — lets the admin verify before delivery. Both channels. */
   @Post("threads/:id/preview")
   @HttpCode(HttpStatus.OK)
   async preview(@Param("id") id: string, @Body() body: { ru?: string }) {
-    const contactId = this.waId(id);
+    const thread = this.parseThread(id);
     const ru = (body?.ru ?? "").trim();
     if (!ru) throw new BadRequestException("ru text required");
-    const contact = await this.prisma.inboxContact.findUnique({ where: { id: contactId } });
-    if (!contact) throw new NotFoundException("Thread not found");
-    const target = contact.lang || "en";
+
+    const target =
+      thread.channel === "internal"
+        ? await this.internalLang(thread.key)
+        : (await this.requireContact(thread.key)).lang || "en";
     let text = ru;
     if (target !== "ru") {
       try {
@@ -311,26 +313,19 @@ export class InboxController {
     };
   }
 
-  /** Internal support reply: persist as admin message + notify the owner. */
+  /** Internal support reply: the admin writes Russian; translate it to the
+   *  owner's language, persist as an admin message (owner-language `message`,
+   *  Russian original in `translatedRu`) and email the owner. */
   private async sendInternal(
     req: Request,
     restaurantId: string,
     body: { ru?: string; text?: string },
   ) {
-    const text = (body?.text ?? body?.ru ?? "").trim();
-    if (!text) throw new BadRequestException("Message is required");
-    if (text.length > 2000) throw new BadRequestException("Message too long");
+    const ru = (body?.ru ?? "").trim();
+    if (!ru) throw new BadRequestException("ru text required");
+    if (ru.length > 2000) throw new BadRequestException("Message too long");
 
     const adminEmail = (req as AuthedRequest).authUser.email;
-    const adminUser = await this.prisma.user.findUnique({ where: { email: adminEmail } });
-    if (!adminUser) throw new NotFoundException("Admin user not found");
-
-    const created = await this.prisma.supportMessage.create({
-      data: { message: text, restaurantId, userId: adminUser.id, isAdmin: true },
-      select: { id: true, message: true, isAdmin: true, createdAt: true },
-    });
-
-    // Notify the restaurant owner by email (best-effort).
     const restaurant = await this.prisma.restaurant.findUnique({
       where: { id: restaurantId },
       select: {
@@ -342,11 +337,39 @@ export class InboxController {
         },
       },
     });
-    const owner = restaurant?.restaurantUsers[0]?.user;
-    const locale = owner?.preferredLocale || restaurant?.defaultLanguage || "en";
+    if (!restaurant) throw new NotFoundException("Thread not found");
+    const owner = restaurant.restaurantUsers[0]?.user;
+    const target = owner?.preferredLocale || restaurant.defaultLanguage || "en";
+
+    // Send the approved preview verbatim, else translate the Russian original.
+    const approved = (body?.text ?? "").trim();
+    let outText = approved || ru;
+    if (!approved && target !== "ru") {
+      try {
+        outText = await translateText(ru, target, "ru");
+      } catch {
+        outText = ru;
+      }
+    }
+
+    const adminUser = await this.prisma.user.findUnique({ where: { email: adminEmail } });
+    if (!adminUser) throw new NotFoundException("Admin user not found");
+
+    const created = await this.prisma.supportMessage.create({
+      data: {
+        message: outText,
+        translatedRu: ru,
+        lang: target,
+        restaurantId,
+        userId: adminUser.id,
+        isAdmin: true,
+      },
+      select: { id: true, createdAt: true },
+    });
+
     if (owner?.email) {
       this.mail
-        .sendSupportReplyNotification(owner.email, locale)
+        .sendSupportReplyNotification(owner.email, target)
         .catch((err) => console.error("support email failed:", err));
     }
 
@@ -354,12 +377,35 @@ export class InboxController {
     return {
       id: created.id,
       direction: "out" as const,
-      body: created.message,
-      lang: null,
-      translatedRu: null,
+      body: outText,
+      lang: target,
+      translatedRu: ru,
       status: "",
       createdAt: created.createdAt.toISOString(),
     };
+  }
+
+  /** Owner's language for an internal thread (preferredLocale → default → en). */
+  private async internalLang(restaurantId: string): Promise<string> {
+    const r = await this.prisma.restaurant.findUnique({
+      where: { id: restaurantId },
+      select: {
+        defaultLanguage: true,
+        restaurantUsers: {
+          take: 1,
+          orderBy: { addedAt: "asc" },
+          select: { user: { select: { preferredLocale: true } } },
+        },
+      },
+    });
+    if (!r) throw new NotFoundException("Thread not found");
+    return r.restaurantUsers[0]?.user.preferredLocale || r.defaultLanguage || "en";
+  }
+
+  private async requireContact(contactId: string) {
+    const contact = await this.prisma.inboxContact.findUnique({ where: { id: contactId } });
+    if (!contact) throw new NotFoundException("Thread not found");
+    return contact;
   }
 
   /** Pin (watch) / hide (mute) a contact, or edit name/note. WhatsApp only. */

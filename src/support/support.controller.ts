@@ -1,11 +1,14 @@
-import { BadRequestException, Body, Controller, Get, Post, Req, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Logger, Post, Req, UseGuards } from "@nestjs/common";
 import type { Request } from "express";
 import { AuthGuard, type AuthedRequest } from "../auth/auth.guard";
 import { PrismaService } from "../prisma/prisma.service";
+import { detectAndTranslateToRu } from "../common/gemini-translate";
 
 @Controller("support/messages")
 @UseGuards(AuthGuard)
 export class SupportController {
+  private readonly logger = new Logger(SupportController.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   @Get()
@@ -27,8 +30,19 @@ export class SupportController {
     if (!text) throw new BadRequestException("Message is required");
     if (text.length > 2000) throw new BadRequestException("Message too long");
 
+    // Auto-translate to Russian for the admin inbox (best-effort).
+    let lang: string | null = null;
+    let translatedRu: string | null = null;
+    try {
+      const t = await detectAndTranslateToRu(text);
+      lang = t.lang;
+      translatedRu = t.ru;
+    } catch (err) {
+      this.logger.warn(`support translate-to-ru failed: ${(err as Error)?.message ?? err}`);
+    }
+
     const created = await this.prisma.supportMessage.create({
-      data: { message: text, restaurantId, userId, isAdmin: false },
+      data: { message: text, restaurantId, userId, isAdmin: false, lang, translatedRu },
       select: { id: true, message: true, isAdmin: true, createdAt: true },
     });
 

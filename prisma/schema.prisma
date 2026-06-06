@@ -370,6 +370,11 @@ model SupportMessage {
   // Per-restaurant chat (all users attached to the restaurant see it).
   restaurantId String
   message      String   @db.Text
+  // Auto-translation parity with the WhatsApp inbox: `lang` is the language of
+  // `message`; `translatedRu` holds the Russian rendering (inbound: translation
+  // of the owner's text; admin reply: the admin's Russian original).
+  lang         String?
+  translatedRu String?  @db.Text
   isAdmin      Boolean  @default(false)
   createdAt    DateTime @default(now())
 

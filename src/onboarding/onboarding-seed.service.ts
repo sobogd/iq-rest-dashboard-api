@@ -229,14 +229,15 @@ export class OnboardingSeedService {
     // Mixed shapes, sizes (percent of map) and rotations so the demo floor
     // looks like a real, hand-laid plan rather than a uniform grid.
     const tableSpecs = [
-      { number: 1, capacity: 2, zone: MAIN, x: 17, y: 24, shape: "circle", width: 11, height: 11, rotation: 0 },
-      { number: 2, capacity: 2, zone: MAIN, x: 39, y: 25, shape: "rect", width: 15, height: 10, rotation: 0 },
-      { number: 3, capacity: 4, zone: MAIN, x: 62, y: 24, shape: "circle", width: 14, height: 14, rotation: 0 },
-      { number: 4, capacity: 4, zone: MAIN, x: 84, y: 27, shape: "rect", width: 12, height: 17, rotation: 0 },
-      { number: 5, capacity: 4, zone: MAIN, x: 18, y: 60, shape: "rect", width: 18, height: 11, rotation: 12 },
-      { number: 6, capacity: 6, zone: MAIN, x: 44, y: 62, shape: "circle", width: 17, height: 17, rotation: 0 },
-      { number: 7, capacity: 2, zone: TERRACE, x: 67, y: 63, shape: "rect", width: 13, height: 9, rotation: -10 },
-      { number: 8, capacity: 2, zone: TERRACE, x: 85, y: 64, shape: "circle", width: 10, height: 10, rotation: 0 },
+      { number: 1, capacity: 2, zone: MAIN, x: 16, y: 19, shape: "circle", width: 13, height: 13, rotation: 0 },
+      { number: 2, capacity: 4, zone: MAIN, x: 45, y: 18, shape: "rect", width: 23, height: 13, rotation: 0 },
+      { number: 3, capacity: 6, zone: MAIN, x: 80, y: 20, shape: "circle", width: 21, height: 21, rotation: 0 },
+      { number: 4, capacity: 2, zone: MAIN, x: 15, y: 47, shape: "rect", width: 12, height: 12, rotation: 0 },
+      { number: 5, capacity: 8, zone: MAIN, x: 47, y: 48, shape: "rect", width: 27, height: 15, rotation: 0 },
+      { number: 6, capacity: 4, zone: MAIN, x: 81, y: 50, shape: "circle", width: 18, height: 18, rotation: 0 },
+      { number: 7, capacity: 4, zone: TERRACE, x: 21, y: 78, shape: "rect", width: 21, height: 12, rotation: 15 },
+      { number: 8, capacity: 6, zone: TERRACE, x: 53, y: 80, shape: "rect", width: 23, height: 16, rotation: -12 },
+      { number: 9, capacity: 2, zone: TERRACE, x: 83, y: 77, shape: "circle", width: 14, height: 14, rotation: 0 },
     ];
     const tables: Array<{ id: string; number: number }> = [];
     for (const spec of tableSpecs) {

@@ -156,7 +156,7 @@ export class CapiService {
           (array_agg(event ORDER BY at DESC) FILTER (WHERE event LIKE 'l_fbclid_%'))[1] AS last_fbclid_event,
           MAX(at) FILTER (WHERE event LIKE 'l_fbclid_%') AS fb_at,
           (array_agg(COALESCE("userId", "stitchedUserId") ORDER BY at DESC) FILTER (WHERE COALESCE("userId", "stitchedUserId") IS NOT NULL))[1] AS user_id,
-          bool_or(event = 'l_page_pricing' OR event LIKE 'l_demo%') AS has_content,
+          bool_or(event = 'l_page_pricing' OR event LIKE '%demo_open') AS has_content,
           bool_or(event LIKE '%onb%') AS has_onb,
           bool_or(event = 'l_onb_verify_success' OR event LIKE 'dash\\_%') AS has_registered
         FROM ev
@@ -186,7 +186,7 @@ export class CapiService {
       const events = new Set<CapiEventName>();
       if (r.has_content) events.add("ViewContent");
       if (r.has_registered) events.add("CompleteRegistration");
-      if (events.size === 0 && !r.user_id) continue;
+      if (events.size === 0) continue;
       const clickMs = r.fb_at ? r.fb_at.getTime() : Date.now();
       const prev = wanted.get(r.fbclid);
       if (prev) {
@@ -240,15 +240,15 @@ export class CapiService {
     let skipped = 0;
     let capped = false;
     outer: for (const [fbclid, { events, clickMs, userId }] of wanted) {
-      // Entering a demo account IS the InitiateCheckout milestone — but it is
-      // not a real registration, so swap CompleteRegistration for it. Demo
-      // identity comes from the resolved account (isDemo), not landing events.
+      // "Entered the dashboard" (has_registered = verify/dash activity) is the
+      // mid-funnel milestone. A demo account makes it InitiateCheckout; a real
+      // account makes it CompleteRegistration. Demo identity comes from the
+      // resolved account (isDemo), not landing events.
       const isDemo = !!userId && demoIds.has(userId);
-      if (isDemo) {
-        events.add("InitiateCheckout");
+      if (isDemo && events.has("CompleteRegistration")) {
         events.delete("CompleteRegistration");
+        events.add("InitiateCheckout");
       }
-      if (events.size === 0) continue;
       const match: CapiMatch = { userId: isDemo ? null : userId, email: userId ? emailById.get(userId) ?? null : null };
       for (const eventName of events) {
         const key = `${fbclid}|${eventName}`;

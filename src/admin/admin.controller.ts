@@ -717,7 +717,7 @@ export class AdminController {
         bool_or(gclid IS NOT NULL OR is_google_ads) AS has_google,
         bool_or(is_facebook_ads OR event LIKE 'l_fbclid_%') AS has_fb,
         bool_or(event LIKE '%onb%') AS has_onb,
-        bool_or(event = 'l_page_pricing' OR event LIKE 'l_demo%') AS has_content,
+        bool_or(event = 'l_page_pricing' OR event LIKE '%demo_open') AS has_content,
         bool_or(event = 'l_onb_verify_success' OR event LIKE 'dash\\_%') AS has_registered,
         (array_agg(event ORDER BY at DESC) FILTER (WHERE event LIKE 'l_fbclid_%'))[1] AS last_fbclid_event,
         MAX(at) FILTER (WHERE event LIKE 'l_fbclid_%') AS last_fb_at

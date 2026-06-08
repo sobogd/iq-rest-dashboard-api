@@ -156,7 +156,7 @@ export class CapiService {
           (array_agg(event ORDER BY at DESC) FILTER (WHERE event LIKE 'l_fbclid_%'))[1] AS last_fbclid_event,
           MAX(at) FILTER (WHERE event LIKE 'l_fbclid_%') AS fb_at,
           (array_agg(COALESCE("userId", "stitchedUserId") ORDER BY at DESC) FILTER (WHERE COALESCE("userId", "stitchedUserId") IS NOT NULL))[1] AS user_id,
-          bool_or(event = 'l_page_pricing' OR event LIKE '%demo%') AS has_content,
+          bool_or(event = 'l_page_pricing' OR event LIKE 'l_demo%') AS has_content,
           bool_or(event LIKE '%onb%') AS has_onb,
           bool_or(event = 'l_onb_verify_success' OR event LIKE 'dash\\_%') AS has_registered
         FROM ev

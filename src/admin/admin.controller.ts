@@ -687,6 +687,7 @@ export class AdminController {
       has_fb: boolean;
       has_onb: boolean;
       has_content: boolean;
+      has_registered: boolean;
       last_fbclid_event: string | null;
       last_fb_at: Date | null;
     };
@@ -717,6 +718,7 @@ export class AdminController {
         bool_or(is_facebook_ads OR event LIKE 'l_fbclid_%') AS has_fb,
         bool_or(event LIKE '%onb%') AS has_onb,
         bool_or(event = 'l_page_pricing' OR event LIKE '%demo%') AS has_content,
+        bool_or(event = 'l_onb_verify_success' OR event LIKE 'dash\\_%') AS has_registered,
         (array_agg(event ORDER BY at DESC) FILTER (WHERE event LIKE 'l_fbclid_%'))[1] AS last_fbclid_event,
         MAX(at) FILTER (WHERE event LIKE 'l_fbclid_%') AS last_fb_at
       FROM ev
@@ -727,6 +729,18 @@ export class AdminController {
     const labels = await this.resolveUsageLabels(
       rows.map((r) => ({ userId: r.uid, restaurantId: r.rid })),
     );
+
+    // Which sessions belong to ephemeral demo accounts — so the admin sees a
+    // "demo" marker and we don't count them as real registrations (mirrors the
+    // CAPI cron's demo exclusion).
+    const uids = Array.from(new Set(rows.map((r) => r.uid).filter((x): x is string => !!x)));
+    const demoSet = new Set<string>();
+    if (uids.length) {
+      const us = await this.prisma.user.findMany({ where: { id: { in: uids } }, select: { id: true, email: true, isDemo: true } });
+      for (const u of us) {
+        if (u.isDemo || u.email === "demo@iq-rest.com" || u.email.startsWith("demo+")) demoSet.add(u.id);
+      }
+    }
 
     // Which sessions already had a Meta CAPI event sent? Flag by the session's
     // latest fbclid (the one the FB chip would send to). One indexed lookup on
@@ -765,6 +779,7 @@ export class AdminController {
     return {
       sessions: rows.map((r) => {
         const latestFbclid = r.last_fbclid_event ? r.last_fbclid_event.replace(/^l_fbclid_/, "") : null;
+        const isDemo = r.uid ? demoSet.has(r.uid) : false;
         return {
           kind: r.kind,
           rid: r.rid,
@@ -779,6 +794,10 @@ export class AdminController {
           hasFacebook: r.has_fb,
           hasOnboarding: r.has_onb,
           hasContent: r.has_content,
+          // Real registration only — a demo account hitting the dashboard is not
+          // a registration (it has a fake email).
+          hasRegistered: r.has_registered && !isDemo,
+          isDemo,
           latestFbclid,
           latestFbTs: r.last_fb_at ? r.last_fb_at.getTime() : null,
           fbStage: fbStageOf(latestFbclid),

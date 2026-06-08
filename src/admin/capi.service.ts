@@ -201,14 +201,19 @@ export class CapiService {
     // Resolve emails for the userIds we found, to enrich the match (cookieless).
     const userIds = Array.from(new Set(Array.from(wanted.values()).map((w) => w.userId).filter((v): v is string => !!v)));
     const emailById = new Map<string, string>();
+    const demoIds = new Set<string>();
     if (userIds.length > 0) {
       const users = await this.prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, email: true, isDemo: true } });
       for (const u of users) {
-        // Never send ephemeral demo accounts to Facebook — their emails are
-        // fake (demo+<token>@iq-rest.com) and would pollute ad matching.
-        if (u.isDemo || !u.email) continue;
-        if (u.email === "demo@iq-rest.com" || u.email.startsWith("demo+")) continue;
-        emailById.set(u.id, u.email);
+        const isDemo = u.isDemo || u.email === "demo@iq-rest.com" || (!!u.email && u.email.startsWith("demo+"));
+        if (isDemo) {
+          // Demo = engagement only, never a registration. Mark so we drop its
+          // CompleteRegistration below; a demo->real claim flips isDemo and the
+          // next cron run then sends the registration for the real email.
+          demoIds.add(u.id);
+          continue;
+        }
+        if (u.email) emailById.set(u.id, u.email);
       }
     }
 
@@ -234,7 +239,10 @@ export class CapiService {
     let skipped = 0;
     let capped = false;
     outer: for (const [fbclid, { events, clickMs, userId }] of wanted) {
-      const match: CapiMatch = { userId, email: userId ? emailById.get(userId) ?? null : null };
+      // Demo accounts reach the dashboard (dash_* events) but are NOT real
+      // registrations — drop CompleteRegistration, keep the engagement events.
+      if (userId && demoIds.has(userId)) events.delete("CompleteRegistration");
+      const match: CapiMatch = { userId: userId && demoIds.has(userId) ? null : userId, email: userId ? emailById.get(userId) ?? null : null };
       for (const eventName of events) {
         const key = `${fbclid}|${eventName}`;
         if (successSet.has(key) || (errorCount.get(key) ?? 0) >= MAX_ERRORS) {

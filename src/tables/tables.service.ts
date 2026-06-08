@@ -11,6 +11,10 @@ interface TableUpsert {
   color?: string | null;
   x?: number | null;
   y?: number | null;
+  shape?: string;
+  rotation?: number;
+  width?: number | null;
+  height?: number | null;
   isActive?: boolean;
   sortOrder?: number;
   translations?: Record<string, { zone?: string; description?: string }> | null;
@@ -42,6 +46,10 @@ export class TablesService {
         color: body.color ?? null,
         x: body.x ?? null,
         y: body.y ?? null,
+        shape: body.shape === "rect" ? "rect" : "circle",
+        rotation: typeof body.rotation === "number" ? body.rotation : 0,
+        width: typeof body.width === "number" ? body.width : null,
+        height: typeof body.height === "number" ? body.height : null,
         isActive: body.isActive ?? true,
         sortOrder: (max._max.sortOrder ?? -1) + 1,
         translations: (body.translations as Prisma.InputJsonValue) ?? Prisma.JsonNull,
@@ -62,6 +70,10 @@ export class TablesService {
     if (body.color !== undefined) data.color = body.color ?? null;
     if (body.x !== undefined) data.x = body.x ?? null;
     if (body.y !== undefined) data.y = body.y ?? null;
+    if (body.shape !== undefined) data.shape = body.shape === "rect" ? "rect" : "circle";
+    if (body.rotation !== undefined) data.rotation = typeof body.rotation === "number" ? body.rotation : 0;
+    if (body.width !== undefined) data.width = typeof body.width === "number" ? body.width : null;
+    if (body.height !== undefined) data.height = typeof body.height === "number" ? body.height : null;
     if (body.isActive !== undefined) data.isActive = body.isActive;
     if (body.sortOrder !== undefined) data.sortOrder = body.sortOrder;
     if (body.translations !== undefined)

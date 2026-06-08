@@ -45,6 +45,7 @@ export class UserOrDeviceGuard implements CanActivate {
         restaurantId: auth.restaurantId,
         primaryRestaurantId: auth.restaurantId,
         viaGrant: false,
+        isDemo: false,
       };
       // Heartbeat — fire-and-forget so a stalled write doesn't slow requests.
       void this.devices.heartbeat(auth.deviceId).catch(() => undefined);

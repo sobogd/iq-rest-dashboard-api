@@ -147,7 +147,7 @@ export class RestaurantController {
     // restaurant. `canManageBilling` is false for users attached as managers
     // (RestaurantUser.addedBy non-null) — they see the page but can't checkout
     // / cancel on the owner's behalf.
-    const { restaurantId, viaGrant } = (req as AuthedRequest).authUser;
+    const { restaurantId, viaGrant, isDemo } = (req as AuthedRequest).authUser;
     const restaurant = await this.prisma.restaurant.findUnique({
       where: { id: restaurantId },
       select: {
@@ -171,7 +171,8 @@ export class RestaurantController {
       trialEndsAt: restaurant.trialEndsAt ? restaurant.trialEndsAt.toISOString() : null,
       aiImagesUsed: usage.aiImagesUsed,
       aiImagesLimit: usage.aiImagesLimit,
-      canManageBilling: !viaGrant,
+      // Demo accounts can't pay — hide the billing UI (the SPA gates on this).
+      canManageBilling: !viaGrant && !isDemo,
     };
   }
 

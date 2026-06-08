@@ -56,6 +56,9 @@ export class StripeController {
     ]);
     if (!restaurant) throw new BadRequestException("Restaurant not found");
     if (!user) throw new BadRequestException("User not found");
+    // Demo accounts can't pay — they convert via the "save your menu" email
+    // claim, not Stripe. The billing UI is hidden for them client-side too.
+    if (user.isDemo) throw new ForbiddenException("Demo accounts cannot start a subscription");
 
     const validKeys: string[] = [
       PRICE_LOOKUP_KEYS.BASIC_MONTHLY,
@@ -188,6 +191,7 @@ export class StripeController {
       this.prisma.restaurant.findUnique({ where: { id: restaurantId } }),
       this.prisma.user.findUnique({ where: { id: userId } }),
     ]);
+    if (user?.isDemo) throw new ForbiddenException("Demo accounts cannot manage billing");
     // Prefer the restaurant's own customer; fall back to the legacy per-user
     // customer for subscriptions created before per-restaurant billing.
     const customer = restaurant?.stripeCustomerId ?? user?.stripeCustomerId;

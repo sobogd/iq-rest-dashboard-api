@@ -27,6 +27,9 @@ export interface AuthedRequest extends Request {
     // restaurant has addedBy = null. Gates billing/delete on attached-as-
     // manager restaurants.
     viaGrant: boolean;
+    // Ephemeral demo account — gates billing (can't pay) and surfaces the
+    // "save your menu" banner client-side.
+    isDemo: boolean;
   };
 }
 
@@ -63,6 +66,7 @@ export class AuthGuard implements CanActivate {
       restaurantId: activeId,
       primaryRestaurantId: primaryId,
       viaGrant,
+      isDemo: user.isDemo,
     };
     return true;
   }

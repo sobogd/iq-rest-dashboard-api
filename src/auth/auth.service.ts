@@ -24,6 +24,7 @@ import {
   safeCompare,
 } from "../common/session-utils";
 import { validateEmail } from "../common/validate-email";
+import { randomUUID } from "crypto";
 
 export type SignupContext = { cuisine?: string; restaurantName: string };
 
@@ -40,16 +41,38 @@ function isLegacyEmail(_email: string | null | undefined): boolean {
   return false;
 }
 
+// Dashboard defaults to dark theme for accounts created on/after this date.
+// Older accounts keep the system-follow default so we don't flip anyone's UI.
+const DARK_DEFAULT_SINCE = new Date("2026-06-08T00:00:00Z");
+
 // Demo account: a fixed credential so we can hand out read-the-product access
 // without provisioning a real mailbox. The fixed code skips OTP verification
 // and no email is sent for it. Intentional backdoor scoped to this one email.
 const DEMO_EMAIL = "demo@iq-rest.com";
 const DEMO_CODE = "000000";
 
+// Per-visitor ephemeral demo accounts. Each "Try demo" click mints a fresh
+// `demo+<token>@iq-rest.com` user (isDemo=true), seeds a template restaurant,
+// and logs in without OTP. Cleaned up by DemoCleanupService once aged out.
+const DEMO_EMAIL_PREFIX = "demo+";
+const DEMO_EMAIL_DOMAIN = "iq-rest.com";
+// Rate-limit demo creation per IP so bots can't flood the table. Kept generous
+// because many legit visitors can share one NAT/office IP — too low would block
+// real people behind the same address.
+const DEMO_CREATE_WINDOW = 60 * 60 * 1000;
+const DEMO_CREATE_MAX = 20;
+
+/** True for any demo identity — the shared fixed account or a per-visitor one. */
+function isDemoEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  return email === DEMO_EMAIL || email.startsWith(DEMO_EMAIL_PREFIX);
+}
+
 @Injectable()
 export class AuthService implements OnModuleDestroy {
   private sendAttempts = new Map<string, { count: number; resetAt: number }>();
   private verifyAttempts = new Map<string, { count: number; resetAt: number }>();
+  private demoCreateAttempts = new Map<string, { count: number; resetAt: number }>();
   // Drop expired rate-limit entries periodically so the Maps don't grow forever
   // under abuse (each unique email leaves a record otherwise).
   private readonly rateLimitSweep = setInterval(() => this.sweepRateLimits(), 10 * 60 * 1000);
@@ -71,7 +94,7 @@ export class AuthService implements OnModuleDestroy {
 
   private sweepRateLimits(): void {
     const now = Date.now();
-    for (const map of [this.sendAttempts, this.verifyAttempts]) {
+    for (const map of [this.sendAttempts, this.verifyAttempts, this.demoCreateAttempts]) {
       for (const [key, entry] of map) {
         if (now > entry.resetAt) map.delete(key);
       }
@@ -353,6 +376,189 @@ export class AuthService implements OnModuleDestroy {
     };
   }
 
+  /** Mint a fresh per-visitor demo account: a `demo+<token>@iq-rest.com` user
+   *  (isDemo=true), seed a template restaurant, and issue a session — no OTP and
+   *  no email. Rate-limited per IP. The seed is fatal: a demo user with no
+   *  attached restaurant would 401 on every data endpoint (AuthGuard), so on
+   *  seed failure we roll the user back and surface an error.
+   *  Returns the session token + email so the controller can set cookies. */
+  async createDemo(ip: string | undefined, locale = "en", currency?: string): Promise<{ token: string; email: string; userId: string }> {
+    const ipKey = ip || "unknown";
+    if (this.rateLimit(this.demoCreateAttempts, ipKey, DEMO_CREATE_MAX, DEMO_CREATE_WINDOW)) {
+      throw new HttpException("Too many demo requests", HttpStatus.TOO_MANY_REQUESTS);
+    }
+
+    const normalizedLocale = this.i18n.urlLocale(locale);
+    const token = generateSessionToken();
+    const tokenHash = hashSessionToken(token);
+    const email = `${DEMO_EMAIL_PREFIX}${randomUUID().replace(/-/g, "")}@${DEMO_EMAIL_DOMAIN}`;
+
+    const user = await this.prisma.user.create({
+      data: {
+        email,
+        isDemo: true,
+        demoCreatedAt: new Date(),
+        preferredLocale: normalizedLocale,
+        sessionToken: tokenHash,
+      },
+    });
+
+    await this.prisma.session.create({
+      data: {
+        userId: user.id,
+        tokenHash,
+        expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
+      },
+    });
+
+    try {
+      await this.seed.seedTemplate({
+        userId: user.id,
+        cuisine: "restaurant",
+        restaurantName: this.defaultRestaurantName(normalizedLocale),
+        currency: currency || "EUR",
+        locale: normalizedLocale,
+        isDemo: true,
+      });
+    } catch {
+      // Roll back the half-provisioned demo user so it doesn't linger broken.
+      await this.prisma.user.delete({ where: { id: user.id } }).catch(() => undefined);
+      throw new HttpException("Failed to provision demo", HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+
+    return { token, email, userId: user.id };
+  }
+
+  /** Claim step 1 — a logged-in demo user enters a real email to keep their
+   *  work. We send an OTP to THAT email and stash it on the demo row. The code
+   *  is stored in the demo user's own otp fields (its email never receives mail,
+   *  so there's no collision). */
+  async claimStart(userId: string, emailRaw: string, locale = "en"): Promise<{ ok: true }> {
+    const email = validateEmail(emailRaw);
+    if (!email || isDemoEmail(email)) throw new BadRequestException("Invalid email");
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, isDemo: true },
+    });
+    if (!user?.isDemo) throw new BadRequestException("Not a demo account");
+
+    if (this.rateLimit(this.sendAttempts, email, SEND_LIMIT_MAX, SEND_LIMIT_WINDOW)) {
+      throw new HttpException("Too many requests", HttpStatus.TOO_MANY_REQUESTS);
+    }
+
+    const code = generateOTP();
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        claimEmail: email,
+        otp: hashOTP(code),
+        otpExpiresAt: new Date(Date.now() + OTP_EXPIRY_MS),
+        otpAttempts: 0,
+        preferredLocale: this.i18n.urlLocale(locale),
+      },
+    });
+    await this.mail.sendOtp({ email, code, locale });
+    return { ok: true };
+  }
+
+  /** Claim step 2 — verify the OTP and convert the demo account.
+   *  - target email free  → rename the demo user in place (keeps all data).
+   *  - target email taken → move the demo's owned restaurant(s) to the existing
+   *    user, delete the demo user, and switch the session to the existing user.
+   *  Returns a fresh session token only on the switch path (caller resets cookies). */
+  async claimVerify(userId: string, code: string, keepData: boolean): Promise<{ token?: string; email: string; switched: boolean }> {
+    const demo = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { restaurantUsers: { select: { restaurantId: true, addedBy: true } } },
+    });
+    if (!demo?.isDemo) throw new BadRequestException("Not a demo account");
+    if (!demo.claimEmail || !demo.otp || !demo.otpExpiresAt) throw new BadRequestException("NO_CODE");
+
+    if (this.rateLimit(this.verifyAttempts, demo.claimEmail, VERIFY_LIMIT_MAX, VERIFY_LIMIT_WINDOW)) {
+      throw new HttpException("TOO_MANY_ATTEMPTS", HttpStatus.TOO_MANY_REQUESTS);
+    }
+    if (demo.otpAttempts >= MAX_OTP_ATTEMPTS) {
+      await this.prisma.user.update({ where: { id: userId }, data: { otp: null, otpExpiresAt: null, otpAttempts: 0 } });
+      throw new HttpException("TOO_MANY_ATTEMPTS", HttpStatus.TOO_MANY_REQUESTS);
+    }
+    if (demo.otpExpiresAt < new Date()) {
+      await this.prisma.user.update({ where: { id: userId }, data: { otp: null, otpExpiresAt: null, otpAttempts: 0 } });
+      throw new BadRequestException("CODE_EXPIRED");
+    }
+    if (!safeCompare(demo.otp, hashOTP(code))) {
+      await this.prisma.user.update({ where: { id: userId }, data: { otpAttempts: { increment: 1 } } });
+      throw new BadRequestException("INVALID_CODE");
+    }
+
+    const targetEmail = demo.claimEmail;
+    const existing = await this.prisma.user.findUnique({ where: { email: targetEmail }, select: { id: true } });
+    const ownedRestaurantIds = demo.restaurantUsers
+      .filter((r) => r.addedBy === null)
+      .map((r) => r.restaurantId);
+
+    if (!existing) {
+      // Rename path — flip the demo row into a real account.
+      await this.prisma.$transaction(async (tx) => {
+        await tx.user.update({
+          where: { id: userId },
+          data: {
+            email: targetEmail,
+            isDemo: false,
+            demoCreatedAt: null,
+            claimEmail: null,
+            otp: null,
+            otpExpiresAt: null,
+            otpAttempts: 0,
+          },
+        });
+        await this.purgeDemoContent(tx, ownedRestaurantIds, keepData);
+      });
+      return { email: targetEmail, switched: false };
+    }
+
+    // Attach path — re-point the demo's owned restaurant(s) to the existing
+    // user, issue a session for them, then delete the demo user.
+    const token = generateSessionToken();
+    const tokenHash = hashSessionToken(token);
+    await this.prisma.$transaction(async (tx) => {
+      for (const rid of ownedRestaurantIds) {
+        await tx.restaurantUser.deleteMany({ where: { restaurantId: rid, userId } });
+        const already = await tx.restaurantUser.findFirst({ where: { restaurantId: rid, userId: existing.id } });
+        if (!already) {
+          await tx.restaurantUser.create({ data: { restaurantId: rid, userId: existing.id, addedBy: null } });
+        }
+      }
+      await this.purgeDemoContent(tx, ownedRestaurantIds, keepData);
+      await tx.session.create({
+        data: { userId: existing.id, tokenHash, expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000) },
+      });
+      // Cascades the demo's sessions + any leftover RestaurantUser rows.
+      await tx.user.delete({ where: { id: userId } });
+    });
+    return { token, email: targetEmail, switched: true };
+  }
+
+  /** Strip the demo's seeded sample content on claim. Fake orders and
+   *  reservations are ALWAYS removed (they would pollute analytics). When the
+   *  user chose "start clean" we also wipe the menu (tables + categories +
+   *  items); "keep my data" preserves tables + categories + items. */
+  private async purgeDemoContent(
+    tx: Prisma.TransactionClient,
+    restaurantIds: string[],
+    keepData: boolean,
+  ): Promise<void> {
+    if (restaurantIds.length === 0) return;
+    const where = { restaurantId: { in: restaurantIds } };
+    await tx.order.deleteMany({ where });
+    await tx.reservation.deleteMany({ where });
+    if (!keepData) {
+      // Reservations already gone; tables can be removed safely now.
+      await tx.table.deleteMany({ where });
+      await tx.item.deleteMany({ where });
+      await tx.category.deleteMany({ where });
+    }
+  }
+
   /** Resolve user from session cookie. Throws Unauthorized when missing/invalid.
    *
    *  When admin_original_* cookies are present we are inside an impersonation
@@ -363,7 +569,7 @@ export class AuthService implements OnModuleDestroy {
     cookieValue: string | undefined,
     email: string | undefined,
     impersonation?: { adminOrigSession?: string; adminOrigEmail?: string },
-  ): Promise<{ userId: string; email: string; onboardingStep: number; legacyDashboard: boolean }> {
+  ): Promise<{ userId: string; email: string; onboardingStep: number; legacyDashboard: boolean; isDemo: boolean; defaultDark: boolean }> {
     if (!cookieValue || !email) throw new UnauthorizedException();
     const adminEmail = impersonation?.adminOrigEmail;
     const adminSession = impersonation?.adminOrigSession;
@@ -409,6 +615,8 @@ export class AuthService implements OnModuleDestroy {
       // active restaurant has a menu yet.
       onboardingStep: 3,
       legacyDashboard: isLegacyEmail(user.email),
+      isDemo: user.isDemo,
+      defaultDark: user.createdAt >= DARK_DEFAULT_SINCE,
     };
   }
 

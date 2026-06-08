@@ -37,10 +37,20 @@ model User {
   upsellShownAt     DateTime?
   reminderSentAt    DateTime?
 
+  // Demo accounts — ephemeral, no email, no trial. Auto-deleted by the demo
+  // cleanup cron once `demoCreatedAt` ages out (unless claimed first). `isDemo`
+  // gates email suppression, the Stripe block, and the "save your menu" banner.
+  isDemo        Boolean   @default(false)
+  demoCreatedAt DateTime?
+  // Real email a demo user entered to claim (convert) the account — the OTP
+  // target during the claim flow. Cleared once the claim verifies.
+  claimEmail    String?
+
   supportMessages SupportMessage[]
   sessions        Session[]
   restaurantUsers RestaurantUser[]
 
+  @@index([isDemo, demoCreatedAt])
   @@map("users")
 }
 
@@ -237,6 +247,15 @@ model Table {
   // Floor-map position in percent (0-100); null = unplaced
   x            Float?
   y            Float?
+  // Floor-map marker shape: "circle" (default) or "rect". Width/height + rotation
+  // for the marker come in a later phase; today the size is capacity-derived.
+  shape        String   @default("circle")
+  // Floor-map marker rotation in degrees (0 = upright).
+  rotation     Float    @default(0)
+  // Floor-map marker size as a percent of the map (0-100); null = derive from
+  // capacity (legacy default). Set once the owner resizes via the handles.
+  width        Float?
+  height       Float?
   isActive     Boolean  @default(true)
   sortOrder    Int      @default(0)
   // Soft-delete marker. Hidden from active table lists but kept so older

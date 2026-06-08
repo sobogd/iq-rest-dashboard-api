@@ -8,11 +8,13 @@ import {
   Query,
   Req,
   Res,
+  UseGuards,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import type { Request, Response } from "express";
 import { AuthService } from "./auth.service";
-import { AppleCallbackDto, GoogleAuthDto, SendOtpDto, VerifyOtpDto } from "./dto";
+import { AuthGuard, type AuthedRequest } from "./auth.guard";
+import { AppleCallbackDto, ClaimStartDto, ClaimVerifyDto, DemoDto, GoogleAuthDto, SendOtpDto, VerifyOtpDto } from "./dto";
 import { authCookieOptions } from "../common/session-utils";
 import { getRequestCurrency } from "../common/geo";
 
@@ -55,6 +57,50 @@ export class AuthController {
     res.cookie(LEGACY_SESSION_COOKIE, token, opts);
     res.cookie(LEGACY_EMAIL_COOKIE, dto.email, { ...opts, httpOnly: false });
     return { ok: true, onboardingStep, isNewUser, legacyDashboard };
+  }
+
+  @Post("demo")
+  @HttpCode(HttpStatus.OK)
+  async demo(@Body() dto: DemoDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    // Cloudflare-forwarded client IP (falls back to express's resolved IP) keys
+    // the per-IP rate limit so bots can't flood the demo-user table.
+    const ip = (req.headers["cf-connecting-ip"]?.toString() || req.ip || "").trim() || undefined;
+    const currency = getRequestCurrency(req);
+    const result = await this.auth.createDemo(ip, dto.locale || "en", currency);
+    const domain = this.config.get<string>("COOKIE_DOMAIN") || undefined;
+    const opts = authCookieOptions(domain);
+    res.cookie(SESSION_COOKIE, result.token, opts);
+    res.cookie(EMAIL_COOKIE, result.email, { ...opts, httpOnly: false });
+    res.cookie(LEGACY_SESSION_COOKIE, result.token, opts);
+    res.cookie(LEGACY_EMAIL_COOKIE, result.email, { ...opts, httpOnly: false });
+    return { ok: true, email: result.email, userId: result.userId, onboardingStep: 3, isDemo: true };
+  }
+
+  @Post("demo/claim-start")
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(AuthGuard)
+  async claimStart(@Body() dto: ClaimStartDto, @Req() req: Request) {
+    const { userId } = (req as AuthedRequest).authUser;
+    return this.auth.claimStart(userId, dto.email, dto.locale || "en");
+  }
+
+  @Post("demo/claim-verify")
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(AuthGuard)
+  async claimVerify(@Body() dto: ClaimVerifyDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    const { userId } = (req as AuthedRequest).authUser;
+    const result = await this.auth.claimVerify(userId, dto.code, dto.keepData ?? true);
+    const domain = this.config.get<string>("COOKIE_DOMAIN") || undefined;
+    const opts = authCookieOptions(domain);
+    // Email always changes — refresh the email cookies the UI/session resolve on.
+    res.cookie(EMAIL_COOKIE, result.email, { ...opts, httpOnly: false });
+    res.cookie(LEGACY_EMAIL_COOKIE, result.email, { ...opts, httpOnly: false });
+    // Switch path deletes the demo user → its session is gone; install the new one.
+    if (result.switched && result.token) {
+      res.cookie(SESSION_COOKIE, result.token, opts);
+      res.cookie(LEGACY_SESSION_COOKIE, result.token, opts);
+    }
+    return { ok: true, email: result.email, switched: result.switched };
   }
 
   @Post("google")
@@ -268,6 +314,8 @@ export class AuthController {
         userId: user.userId,
         onboardingStep: user.onboardingStep,
         legacyDashboard: user.legacyDashboard,
+        isDemo: user.isDemo,
+        defaultDark: user.defaultDark,
         impersonatedBy: adminOrigEmail || null,
       };
     } catch {

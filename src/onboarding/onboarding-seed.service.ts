@@ -1,4 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { isSupportedCurrency } from "../common/stripe";
 import type { CuisineKey } from "./cuisine";
@@ -79,8 +80,11 @@ export class OnboardingSeedService {
     restaurantName: string;
     currency: string;
     locale: string | null | undefined;
+    /** Demo accounts get no trial — their data is ephemeral and the dashboard
+     *  shows a "save your menu" banner instead of a trial countdown. */
+    isDemo?: boolean;
   }): Promise<{ restaurantId: string } | null> {
-    const { userId, cuisine, restaurantName, currency } = params;
+    const { userId, cuisine, restaurantName, currency, isDemo = false } = params;
     const seedLocale = pickSeedLocale(params.locale);
     const template = cuisineTemplates[cuisine];
 
@@ -121,15 +125,17 @@ export class OnboardingSeedService {
           languages,
           defaultLanguage: seedLocale,
           // Orders are off by default now; the owner enables them in settings.
-          // Reservations stay on. Sample orders/reservations are still seeded.
-          ordersEnabled: false,
+          // Demo accounts turn them on so the seeded sample orders are visible
+          // and the full feature set is explorable. Reservations stay on.
+          ordersEnabled: isDemo,
           reservationsEnabled: true,
           ...(template.backgroundUrl ? { source: template.backgroundUrl, backgroundType: "image" } : {}),
           // FIRST restaurant of the account → 14-day trial. Subsequent ones
-          // (createForCompany) start with no trial.
+          // (createForCompany) start with no trial. Demo accounts also get no
+          // trial — the "save your menu" banner replaces the trial countdown.
           plan: "FREE",
           subscriptionStatus: "INACTIVE",
-          trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+          trialEndsAt: isDemo ? null : new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
         },
       });
 
@@ -197,11 +203,130 @@ export class OnboardingSeedService {
         createdItems.push({ ...created, nameMl });
       }
 
-      // No sample tables, orders or reservations are seeded — only the menu
-      // (categories + sample dishes). The orders/bookings pages show an
-      // "add a table" placeholder until the owner creates their first table.
+      // Real signups: no sample tables/orders/reservations — only the menu.
+      // Demo accounts get a fully-populated floor (tables + bookings + live
+      // orders) so the dashboard looks alive the moment you land in it.
+      if (isDemo && createdItems.length > 0) {
+        await this.seedDemoExtras(tx, restaurant.id, currency, createdItems);
+      }
+
       return { restaurantId: restaurant.id };
     });
+  }
+
+  /** Populate a demo restaurant's floor: a tidy grid of tables, a handful of
+   *  reservations across statuses/times, and a few live orders built from the
+   *  seeded dishes. Runs inside the seed transaction. */
+  private async seedDemoExtras(
+    tx: Prisma.TransactionClient,
+    restaurantId: string,
+    currency: string,
+    items: Array<{ id: string; price: { toString(): string }; nameMl: Record<string, string> }>,
+  ): Promise<void> {
+    // Tidy 2-row layout in floor-map percent coords. Mix of capacities/zones.
+    const MAIN = "Main hall";
+    const TERRACE = "Terrace";
+    // Mixed shapes, sizes (percent of map) and rotations so the demo floor
+    // looks like a real, hand-laid plan rather than a uniform grid.
+    const tableSpecs = [
+      { number: 1, capacity: 2, zone: MAIN, x: 17, y: 24, shape: "circle", width: 11, height: 11, rotation: 0 },
+      { number: 2, capacity: 2, zone: MAIN, x: 39, y: 25, shape: "rect", width: 15, height: 10, rotation: 0 },
+      { number: 3, capacity: 4, zone: MAIN, x: 62, y: 24, shape: "circle", width: 14, height: 14, rotation: 0 },
+      { number: 4, capacity: 4, zone: MAIN, x: 84, y: 27, shape: "rect", width: 12, height: 17, rotation: 0 },
+      { number: 5, capacity: 4, zone: MAIN, x: 18, y: 60, shape: "rect", width: 18, height: 11, rotation: 12 },
+      { number: 6, capacity: 6, zone: MAIN, x: 44, y: 62, shape: "circle", width: 17, height: 17, rotation: 0 },
+      { number: 7, capacity: 2, zone: TERRACE, x: 67, y: 63, shape: "rect", width: 13, height: 9, rotation: -10 },
+      { number: 8, capacity: 2, zone: TERRACE, x: 85, y: 64, shape: "circle", width: 10, height: 10, rotation: 0 },
+    ];
+    const tables: Array<{ id: string; number: number }> = [];
+    for (const spec of tableSpecs) {
+      const t = await tx.table.create({
+        data: {
+          restaurantId,
+          number: spec.number,
+          capacity: spec.capacity,
+          zone: spec.zone,
+          x: spec.x,
+          y: spec.y,
+          shape: spec.shape,
+          width: spec.width,
+          height: spec.height,
+          rotation: spec.rotation,
+          sortOrder: spec.number,
+        },
+      });
+      tables.push({ id: t.id, number: t.number });
+    }
+
+    // Reservations — today + tomorrow, varied statuses. @db.Date stores the
+    // date part only; the wall-clock time lives in startTime.
+    const today = new Date();
+    const dateOnly = (offsetDays: number) => {
+      const d = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + offsetDays));
+      return d;
+    };
+    const reservationSpecs = [
+      { tableIdx: 5, date: 0, startTime: "19:00", duration: 120, guestName: "Anna Schmidt", guestsCount: 6, status: "confirmed" },
+      { tableIdx: 2, date: 0, startTime: "20:00", duration: 90, guestName: "Marco Rossi", guestsCount: 4, status: "pending" },
+      { tableIdx: 0, date: 0, startTime: "13:00", duration: 60, guestName: "Yuki Tanaka", guestsCount: 2, status: "completed" },
+      { tableIdx: 3, date: 1, startTime: "19:30", duration: 120, guestName: "Sophie Martin", guestsCount: 4, status: "confirmed" },
+      { tableIdx: 6, date: 0, startTime: "21:00", duration: 90, guestName: "Liam O'Brien", guestsCount: 2, status: "pending" },
+    ];
+    for (const r of reservationSpecs) {
+      const table = tables[r.tableIdx];
+      await tx.reservation.create({
+        data: {
+          restaurantId,
+          tableId: table.id,
+          date: dateOnly(r.date),
+          startTime: r.startTime,
+          duration: r.duration,
+          guestName: r.guestName,
+          guestEmail: `${r.guestName.toLowerCase().replace(/[^a-z]+/g, ".")}@example.com`,
+          guestsCount: r.guestsCount,
+          status: r.status,
+        },
+      });
+    }
+
+    // Live orders built from the seeded dishes. Each item is a snapshot row in
+    // the shape the dashboard/KDS expect ({ id, dishId, dishNameSnapshot,
+    // basePriceSnapshot, options, notes, status, createdAt }).
+    const nowIso = new Date().toISOString();
+    const pick = (i: number) => items[i % items.length];
+    const lineItem = (src: ReturnType<typeof pick>, status: string, idx: number) => ({
+      id: `seed_${idx}_${src.id}`,
+      dishId: src.id,
+      dishNameSnapshot: src.nameMl,
+      basePriceSnapshot: src.price.toString(),
+      options: [] as unknown[],
+      notes: "",
+      status,
+      createdAt: nowIso,
+      discount: null,
+    });
+    const orderSpecs: Array<{ tableNumber: number; status: string; lines: Array<{ i: number; status: string }> }> = [
+      { tableNumber: 6, status: "in_progress", lines: [{ i: 0, status: "cooking" }, { i: 1, status: "pending" }] },
+      { tableNumber: 3, status: "new", lines: [{ i: 2, status: "pending" }, { i: 3, status: "pending" }, { i: 0, status: "ready" }] },
+      { tableNumber: 1, status: "in_progress", lines: [{ i: 4, status: "served" }, { i: 5, status: "cooking" }] },
+    ];
+    let dailyNumber = 1;
+    for (const o of orderSpecs) {
+      const lines = o.lines.map((l, idx) => lineItem(pick(l.i), l.status, idx));
+      const total = lines.reduce((sum, l) => sum + Number(l.basePriceSnapshot || 0), 0);
+      await tx.order.create({
+        data: {
+          restaurantId,
+          items: lines as unknown as Prisma.InputJsonValue,
+          total,
+          currency,
+          tableNumber: o.tableNumber,
+          status: o.status,
+          orderDate: dateOnly(0),
+          dailyNumber: dailyNumber++,
+        },
+      });
+    }
   }
 
   /** Mirror RestaurantService.uniqueSlug — kept private to the seeder so it doesn't pull in

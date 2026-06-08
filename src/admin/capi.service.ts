@@ -202,8 +202,14 @@ export class CapiService {
     const userIds = Array.from(new Set(Array.from(wanted.values()).map((w) => w.userId).filter((v): v is string => !!v)));
     const emailById = new Map<string, string>();
     if (userIds.length > 0) {
-      const users = await this.prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, email: true } });
-      for (const u of users) if (u.email) emailById.set(u.id, u.email);
+      const users = await this.prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, email: true, isDemo: true } });
+      for (const u of users) {
+        // Never send ephemeral demo accounts to Facebook — their emails are
+        // fake (demo+<token>@iq-rest.com) and would pollute ad matching.
+        if (u.isDemo || !u.email) continue;
+        if (u.email === "demo@iq-rest.com" || u.email.startsWith("demo+")) continue;
+        emailById.set(u.id, u.email);
+      }
     }
 
     // Journal lookup for these fbclids: a successful (fbclid,eventName) is never

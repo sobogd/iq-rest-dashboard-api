@@ -529,6 +529,11 @@ export class AuthService implements OnModuleDestroy {
         }
       }
       await this.purgeDemoContent(tx, ownedRestaurantIds, keepData);
+      // Re-point the demo's analytics events to the real account so the Meta
+      // CAPI cron attributes the CompleteRegistration to the existing user's
+      // email (otherwise the events would orphan on the deleted demo id).
+      await tx.usageEvent.updateMany({ where: { userId }, data: { userId: existing.id } });
+      await tx.usageEvent.updateMany({ where: { stitchedUserId: userId }, data: { stitchedUserId: existing.id } });
       await tx.session.create({
         data: { userId: existing.id, tokenHash, expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000) },
       });

@@ -175,17 +175,18 @@ export class CapiService {
 
     if (rows.length === 0) return { sent: 0, skipped: 0 };
 
-    // Build the set of (fbclid → events to ensure). Full ladder: every reached
-    // milestone. ViewContent ⊂ content/demo; InitiateCheckout ⊂ onboarding;
-    // CompleteRegistration ⊂ verify_success or any dashboard activity.
+    // Build the set of (fbclid → events to ensure). ViewContent = pricing /
+    // landing iframe demo. InitiateCheckout is NOT a landing event — it means
+    // the visitor entered a DEMO ACCOUNT (resolved from the dashboard / isDemo,
+    // applied in the match loop below). CompleteRegistration = real dashboard
+    // activity by a non-demo account.
     const wanted = new Map<string, { events: Set<CapiEventName>; clickMs: number; userId: string | null }>();
     for (const r of rows) {
       if (!r.fbclid) continue;
       const events = new Set<CapiEventName>();
       if (r.has_content) events.add("ViewContent");
-      if (r.has_onb) events.add("InitiateCheckout");
       if (r.has_registered) events.add("CompleteRegistration");
-      if (events.size === 0) continue;
+      if (events.size === 0 && !r.user_id) continue;
       const clickMs = r.fb_at ? r.fb_at.getTime() : Date.now();
       const prev = wanted.get(r.fbclid);
       if (prev) {
@@ -239,10 +240,16 @@ export class CapiService {
     let skipped = 0;
     let capped = false;
     outer: for (const [fbclid, { events, clickMs, userId }] of wanted) {
-      // Demo accounts reach the dashboard (dash_* events) but are NOT real
-      // registrations — drop CompleteRegistration, keep the engagement events.
-      if (userId && demoIds.has(userId)) events.delete("CompleteRegistration");
-      const match: CapiMatch = { userId: userId && demoIds.has(userId) ? null : userId, email: userId ? emailById.get(userId) ?? null : null };
+      // Entering a demo account IS the InitiateCheckout milestone — but it is
+      // not a real registration, so swap CompleteRegistration for it. Demo
+      // identity comes from the resolved account (isDemo), not landing events.
+      const isDemo = !!userId && demoIds.has(userId);
+      if (isDemo) {
+        events.add("InitiateCheckout");
+        events.delete("CompleteRegistration");
+      }
+      if (events.size === 0) continue;
+      const match: CapiMatch = { userId: isDemo ? null : userId, email: userId ? emailById.get(userId) ?? null : null };
       for (const eventName of events) {
         const key = `${fbclid}|${eventName}`;
         if (successSet.has(key) || (errorCount.get(key) ?? 0) >= MAX_ERRORS) {

@@ -1,4 +1,4 @@
-import { IsBoolean, IsEmail, IsIn, IsOptional, IsString, Length, MaxLength, ValidateNested } from "class-validator";
+import { IsEmail, IsIn, IsOptional, IsString, Length, MaxLength, ValidateNested } from "class-validator";
 import { Type } from "class-transformer";
 import { CUISINE_KEYS } from "../onboarding/cuisine";
 
@@ -33,33 +33,6 @@ export class VerifyOtpDto {
   @IsString()
   @Length(6, 6)
   code!: string;
-}
-
-export class DemoDto {
-  @IsOptional()
-  @IsString()
-  locale?: string;
-}
-
-export class ClaimStartDto {
-  @IsEmail()
-  email!: string;
-
-  @IsOptional()
-  @IsString()
-  locale?: string;
-}
-
-export class ClaimVerifyDto {
-  @IsString()
-  @Length(6, 6)
-  code!: string;
-
-  /** true → keep tables + menu (categories/items); false → start with an empty
-   *  restaurant. Fake orders/reservations are removed either way. */
-  @IsOptional()
-  @IsBoolean()
-  keepData?: boolean;
 }
 
 export class GoogleAuthDto {

@@ -371,6 +371,9 @@ export class RestaurantService {
         paymentMethods: baseSettings?.paymentMethods ?? ["cash", "card"],
         timezone: baseSettings?.timezone ?? "UTC",
         startedFromScratch: !source,
+        // Name was typed in the create-restaurant form → no onboarding modals.
+        onboardingNameDone: true,
+        onboardingFillDone: true,
         // Per-restaurant billing: a new (second+) restaurant starts FREE
         // without a trial. plan/billingCycle/stripeSubscriptionId/trialEndsAt
         // stay null — owner must check out separately for this restaurant.

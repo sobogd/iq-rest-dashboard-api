@@ -8,13 +8,11 @@ import {
   Query,
   Req,
   Res,
-  UseGuards,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import type { Request, Response } from "express";
 import { AuthService } from "./auth.service";
-import { AuthGuard, type AuthedRequest } from "./auth.guard";
-import { AppleCallbackDto, ClaimStartDto, ClaimVerifyDto, DemoDto, GoogleAuthDto, SendOtpDto, VerifyOtpDto } from "./dto";
+import { AppleCallbackDto, GoogleAuthDto, SendOtpDto, VerifyOtpDto } from "./dto";
 import { authCookieOptions } from "../common/session-utils";
 import { getRequestCurrency } from "../common/geo";
 
@@ -26,9 +24,6 @@ const EMAIL_COOKIE = "iqr_email";
 // old dashboard (and vice versa).
 const LEGACY_SESSION_COOKIE = "session";
 const LEGACY_EMAIL_COOKIE = "user_email";
-// Non-httpOnly — the SPA reads it to send the active-restaurant header.
-const ACTIVE_RESTAURANT_COOKIE = "iqr_active_restaurant_id";
-const ACTIVE_RESTAURANT_MAX_AGE = 365 * 24 * 60 * 60 * 1000;
 
 @Controller("auth")
 export class AuthController {
@@ -60,60 +55,6 @@ export class AuthController {
     res.cookie(LEGACY_SESSION_COOKIE, token, opts);
     res.cookie(LEGACY_EMAIL_COOKIE, dto.email, { ...opts, httpOnly: false });
     return { ok: true, onboardingStep, isNewUser, legacyDashboard };
-  }
-
-  @Post("demo")
-  @HttpCode(HttpStatus.OK)
-  async demo(@Body() dto: DemoDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
-    // Cloudflare-forwarded client IP (falls back to express's resolved IP) keys
-    // the per-IP rate limit so bots can't flood the demo-user table.
-    const ip = (req.headers["cf-connecting-ip"]?.toString() || req.ip || "").trim() || undefined;
-    const currency = getRequestCurrency(req);
-    // Reuse an existing live demo account if the visitor still holds its
-    // session cookie — repeat "Try demo" clicks must reopen the same account,
-    // not spawn a fresh ephemeral one each time.
-    const cookies = req.cookies as Record<string, string | undefined> | undefined;
-    const existing = await this.auth.getLiveDemo(cookies?.[SESSION_COOKIE], cookies?.[EMAIL_COOKIE]);
-    const result = existing ?? (await this.auth.createDemo(ip, dto.locale || "en", currency));
-    const domain = this.config.get<string>("COOKIE_DOMAIN") || undefined;
-    const opts = authCookieOptions(domain);
-    res.cookie(SESSION_COOKIE, result.token, opts);
-    res.cookie(EMAIL_COOKIE, result.email, { ...opts, httpOnly: false });
-    res.cookie(LEGACY_SESSION_COOKIE, result.token, opts);
-    res.cookie(LEGACY_EMAIL_COOKIE, result.email, { ...opts, httpOnly: false });
-    return { ok: true, email: result.email, userId: result.userId, onboardingStep: 3, isDemo: true };
-  }
-
-  @Post("demo/claim-start")
-  @HttpCode(HttpStatus.OK)
-  @UseGuards(AuthGuard)
-  async claimStart(@Body() dto: ClaimStartDto, @Req() req: Request) {
-    const { userId } = (req as AuthedRequest).authUser;
-    return this.auth.claimStart(userId, dto.email, dto.locale || "en");
-  }
-
-  @Post("demo/claim-verify")
-  @HttpCode(HttpStatus.OK)
-  @UseGuards(AuthGuard)
-  async claimVerify(@Body() dto: ClaimVerifyDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
-    const { userId } = (req as AuthedRequest).authUser;
-    const result = await this.auth.claimVerify(userId, dto.code, dto.keepData ?? true);
-    const domain = this.config.get<string>("COOKIE_DOMAIN") || undefined;
-    const opts = authCookieOptions(domain);
-    // Email always changes — refresh the email cookies the UI/session resolve on.
-    res.cookie(EMAIL_COOKIE, result.email, { ...opts, httpOnly: false });
-    res.cookie(LEGACY_EMAIL_COOKIE, result.email, { ...opts, httpOnly: false });
-    // Switch path deletes the demo user → its session is gone; install the new one.
-    if (result.switched && result.token) {
-      res.cookie(SESSION_COOKIE, result.token, opts);
-      res.cookie(LEGACY_SESSION_COOKIE, result.token, opts);
-    }
-    // Land the user on the just-saved restaurant (it's a fresh attachment, so it
-    // wouldn't be the default-active one for an existing account).
-    if (result.activeRestaurantId) {
-      res.cookie(ACTIVE_RESTAURANT_COOKIE, result.activeRestaurantId, { ...opts, httpOnly: false, maxAge: ACTIVE_RESTAURANT_MAX_AGE });
-    }
-    return { ok: true, email: result.email, switched: result.switched };
   }
 
   @Post("google")
@@ -191,27 +132,6 @@ export class AuthController {
       const domain = this.config.get<string>("COOKIE_DOMAIN") || undefined;
       const opts = authCookieOptions(domain);
 
-      // Demo "save my menu" via Google: convert the current demo account to the
-      // Google identity, keeping the menu. Only when the request still carries a
-      // demo session — otherwise fall through to a normal Google login.
-      if (parsedState.claim) {
-        const cookies = req.cookies as Record<string, string | undefined> | undefined;
-        const demoUserId = await this.auth.demoUserIdFromSession(cookies?.[SESSION_COOKIE], cookies?.[EMAIL_COOKIE]);
-        if (demoUserId) {
-          const claim = await this.auth.claimViaGoogle(demoUserId, credential, parsedState.keepData ?? true);
-          res.cookie(EMAIL_COOKIE, claim.email, { ...opts, httpOnly: false });
-          res.cookie(LEGACY_EMAIL_COOKIE, claim.email, { ...opts, httpOnly: false });
-          if (claim.switched && claim.token) {
-            res.cookie(SESSION_COOKIE, claim.token, opts);
-            res.cookie(LEGACY_SESSION_COOKIE, claim.token, opts);
-          }
-          if (claim.activeRestaurantId) {
-            res.cookie(ACTIVE_RESTAURANT_COOKIE, claim.activeRestaurantId, { ...opts, httpOnly: false, maxAge: ACTIVE_RESTAURANT_MAX_AGE });
-          }
-          return res.redirect(302, `${dashboardBase}/${locale}/dashboard`);
-        }
-      }
-
       const acceptLang = req.headers["accept-language"]?.toString().split(",")[0]?.split("-")[0];
       const currency = getRequestCurrency(req);
       const result = await this.auth.verifyGoogleCredential(
@@ -287,26 +207,6 @@ export class AuthController {
       const domain = this.config.get<string>("COOKIE_DOMAIN") || undefined;
       const opts = authCookieOptions(domain);
 
-      // Demo "save my menu" via Apple — convert the demo account to the Apple
-      // identity, keeping the menu (only when a demo session is still present).
-      if (parsedState.claim) {
-        const cookies = req.cookies as Record<string, string | undefined> | undefined;
-        const demoUserId = await this.auth.demoUserIdFromSession(cookies?.[SESSION_COOKIE], cookies?.[EMAIL_COOKIE]);
-        if (demoUserId) {
-          const claim = await this.auth.claimViaApple(demoUserId, idToken, parsedState.keepData ?? true);
-          res.cookie(EMAIL_COOKIE, claim.email, { ...opts, httpOnly: false });
-          res.cookie(LEGACY_EMAIL_COOKIE, claim.email, { ...opts, httpOnly: false });
-          if (claim.switched && claim.token) {
-            res.cookie(SESSION_COOKIE, claim.token, opts);
-            res.cookie(LEGACY_SESSION_COOKIE, claim.token, opts);
-          }
-          if (claim.activeRestaurantId) {
-            res.cookie(ACTIVE_RESTAURANT_COOKIE, claim.activeRestaurantId, { ...opts, httpOnly: false, maxAge: ACTIVE_RESTAURANT_MAX_AGE });
-          }
-          return res.redirect(302, `${dashboardBase}/${locale}/dashboard`);
-        }
-      }
-
       const acceptLang = req.headers["accept-language"]?.toString().split(",")[0]?.split("-")[0];
       const currency = getRequestCurrency(req);
       const result = await this.auth.verifyAppleCredential(
@@ -372,6 +272,7 @@ export class AuthController {
         legacyDashboard: user.legacyDashboard,
         isDemo: user.isDemo,
         defaultDark: user.defaultDark,
+        accountCreatedAt: user.accountCreatedAt,
         impersonatedBy: adminOrigEmail || null,
       };
     } catch {

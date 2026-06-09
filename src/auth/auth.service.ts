@@ -13,7 +13,6 @@ import { MailService } from "../mail/mail.service";
 import { I18nService } from "../i18n/i18n.service";
 import { OnboardingSeedService } from "../onboarding/onboarding-seed.service";
 import { isCuisineKey, type CuisineKey } from "../onboarding/cuisine";
-import { DEFAULT_RESTAURANT_NAME } from "../onboarding/cuisine-templates";
 import {
   generateOTP,
   generateSessionToken,
@@ -24,7 +23,6 @@ import {
   safeCompare,
 } from "../common/session-utils";
 import { validateEmail } from "../common/validate-email";
-import { randomUUID } from "crypto";
 
 export type SignupContext = { cuisine?: string; restaurantName: string };
 
@@ -45,34 +43,10 @@ function isLegacyEmail(_email: string | null | undefined): boolean {
 // Older accounts keep the system-follow default so we don't flip anyone's UI.
 const DARK_DEFAULT_SINCE = new Date("2026-06-08T00:00:00Z");
 
-// Demo account: a fixed credential so we can hand out read-the-product access
-// without provisioning a real mailbox. The fixed code skips OTP verification
-// and no email is sent for it. Intentional backdoor scoped to this one email.
-const DEMO_EMAIL = "demo@iq-rest.com";
-const DEMO_CODE = "000000";
-
-// Per-visitor ephemeral demo accounts. Each "Try demo" click mints a fresh
-// `demo+<token>@iq-rest.com` user (isDemo=true), seeds a template restaurant,
-// and logs in without OTP. Cleaned up by DemoCleanupService once aged out.
-const DEMO_EMAIL_PREFIX = "demo+";
-const DEMO_EMAIL_DOMAIN = "iq-rest.com";
-// Rate-limit demo creation per IP so bots can't flood the table. Kept generous
-// because many legit visitors can share one NAT/office IP — too low would block
-// real people behind the same address.
-const DEMO_CREATE_WINDOW = 60 * 60 * 1000;
-const DEMO_CREATE_MAX = 20;
-
-/** True for any demo identity — the shared fixed account or a per-visitor one. */
-function isDemoEmail(email: string | null | undefined): boolean {
-  if (!email) return false;
-  return email === DEMO_EMAIL || email.startsWith(DEMO_EMAIL_PREFIX);
-}
-
 @Injectable()
 export class AuthService implements OnModuleDestroy {
   private sendAttempts = new Map<string, { count: number; resetAt: number }>();
   private verifyAttempts = new Map<string, { count: number; resetAt: number }>();
-  private demoCreateAttempts = new Map<string, { count: number; resetAt: number }>();
   // Drop expired rate-limit entries periodically so the Maps don't grow forever
   // under abuse (each unique email leaves a record otherwise).
   private readonly rateLimitSweep = setInterval(() => this.sweepRateLimits(), 10 * 60 * 1000);
@@ -94,7 +68,7 @@ export class AuthService implements OnModuleDestroy {
 
   private sweepRateLimits(): void {
     const now = Date.now();
-    for (const map of [this.sendAttempts, this.verifyAttempts, this.demoCreateAttempts]) {
+    for (const map of [this.sendAttempts, this.verifyAttempts]) {
       for (const [key, entry] of map) {
         if (now > entry.resetAt) map.delete(key);
       }
@@ -138,7 +112,7 @@ export class AuthService implements OnModuleDestroy {
     // doesn't land on a blank dashboard. Existing users are left alone (their pending fields
     // are not overwritten with defaults).
     if (!existing && Object.keys(pending).length === 0) {
-      pending = this.defaultSignupContext(currency, normalizedLocale);
+      pending = this.defaultSignupContext(currency);
     }
 
     if (existing) {
@@ -185,10 +159,7 @@ export class AuthService implements OnModuleDestroy {
       }
     }
 
-    // Demo account accepts the fixed DEMO_CODE in verifyOtp — no real email.
-    if (email !== DEMO_EMAIL) {
-      await this.mail.sendOtp({ email, code, locale });
-    }
+    await this.mail.sendOtp({ email, code, locale });
     return { isNewUser };
   }
 
@@ -209,50 +180,45 @@ export class AuthService implements OnModuleDestroy {
     };
   }
 
-  /** Localized default restaurant name ("My restaurant" in the user's language).
-   *  Onboarding is currently skipped, so every brand-new account gets this name. */
-  private defaultRestaurantName(locale: string | null | undefined): string {
-    const short = this.i18n.urlLocale(locale || "en");
-    return DEFAULT_RESTAURANT_NAME[short] || DEFAULT_RESTAURANT_NAME.en;
-  }
-
-  /** Fallback context for a brand-new user who didn't go through the create-flow
-   *  (the cuisine/name steps are skipped now). Picks the generic "restaurant"
-   *  cuisine and the localized default name so they land in a populated dashboard. */
+  /** Fallback context for a brand-new user who didn't go through the create-flow.
+   *  Only the currency matters for seeding now (the empty restaurant carries no
+   *  name/cuisine — the onboarding wizard collects the name). `pendingCuisine`
+   *  is kept purely as a "seed an empty restaurant on first verify" marker. */
   private defaultSignupContext(
     currency: string | undefined,
-    locale: string | null | undefined,
   ): { pendingCuisine: CuisineKey; pendingRestaurantName: string; pendingCurrency: string } {
     return {
       pendingCuisine: "restaurant",
-      pendingRestaurantName: this.defaultRestaurantName(locale),
+      pendingRestaurantName: "",
       pendingCurrency: currency || "EUR",
     };
   }
 
-  /** After a successful auth (OTP or Google), if the user has a stored signup context AND no
-   *  restaurant yet, seed a template restaurant. Pending fields are cleared **only on success**
-   *  so a transient seed failure can be retried by simply logging in again.
-   *  Returns true when seeding actually happened in this call (so callers can skip a follow-up
-   *  query for the now-flipped onboardingStep). */
+  /** After a successful auth (OTP/Google/Apple), if the user has a pending
+   *  signup marker AND no restaurant yet, seed an EMPTY restaurant (no menu —
+   *  the onboarding wizard fills it). Pending fields are cleared **only on
+   *  success** so a transient failure retries on next login. Returns true when
+   *  seeding actually happened in this call. */
   private async applyPendingAndMaybeSeed(userId: string, fallbackLocale: string | null | undefined): Promise<boolean> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {
-        pendingCuisine: true,
-        pendingRestaurantName: true,
         pendingCurrency: true,
         preferredLocale: true,
         restaurantUsers: { take: 1, select: { id: true } },
       },
     });
-    if (!user?.pendingCuisine) return false;
+    if (!user) return false;
 
     const hasRestaurant = user.restaurantUsers.length > 0;
 
-    // Restaurant already attached or cuisine no longer valid → context is moot;
-    // clear pending and exit so the seed doesn't run again on next login.
-    if (hasRestaurant || !isCuisineKey(user.pendingCuisine)) {
+    // Restaurant already attached → pending is moot; clear it and exit.
+    // NOTE: we seed whenever the user has NO restaurant, regardless of any
+    // pending signup marker. This also self-heals accounts orphaned when their
+    // last restaurant was deleted (a co-owner/admin delete leaves the other
+    // attached users with zero restaurants → AuthGuard would 401 them
+    // otherwise). They get a fresh empty restaurant and the onboarding modals.
+    if (hasRestaurant) {
       await this.prisma.user.update({
         where: { id: userId },
         data: { pendingCuisine: null, pendingRestaurantName: null, pendingCurrency: null },
@@ -262,17 +228,15 @@ export class AuthService implements OnModuleDestroy {
 
     let seeded = false;
     try {
-      await this.seed.seedTemplate({
+      await this.seed.seedEmptyRestaurant({
         userId,
-        cuisine: user.pendingCuisine,
-        restaurantName: user.pendingRestaurantName || this.defaultRestaurantName(user.preferredLocale || fallbackLocale),
         currency: user.pendingCurrency || "EUR",
         locale: user.preferredLocale || fallbackLocale,
       });
       seeded = true;
     } catch (err) {
       // eslint-disable-next-line no-console
-      console.error("[auth] template seed failed — pending kept for retry on next login", err);
+      console.error("[auth] empty-restaurant seed failed — pending kept for retry on next login", err);
     }
 
     if (seeded) {
@@ -297,43 +261,36 @@ export class AuthService implements OnModuleDestroy {
       include: { restaurantUsers: { take: 1, select: { id: true } } },
     });
 
-    // Demo account: skip all OTP validation when the fixed code is given. The
-    // row itself must exist (sendOtp creates it on first login), but its otp /
-    // expiry / attempt counters are irrelevant for the bypass.
-    const isDemoBypass = email === DEMO_EMAIL && code === DEMO_CODE;
-
     if (!user) {
       throw new BadRequestException("INVALID_CODE");
     }
 
-    if (!isDemoBypass) {
-      if (!user.otp || !user.otpExpiresAt) {
-        throw new BadRequestException("INVALID_CODE");
-      }
+    if (!user.otp || !user.otpExpiresAt) {
+      throw new BadRequestException("INVALID_CODE");
+    }
 
-      if (user.otpAttempts >= MAX_OTP_ATTEMPTS) {
-        await this.prisma.user.update({
-          where: { email },
-          data: { otp: null, otpExpiresAt: null, otpAttempts: 0 },
-        });
-        throw new HttpException("TOO_MANY_ATTEMPTS", HttpStatus.TOO_MANY_REQUESTS);
-      }
+    if (user.otpAttempts >= MAX_OTP_ATTEMPTS) {
+      await this.prisma.user.update({
+        where: { email },
+        data: { otp: null, otpExpiresAt: null, otpAttempts: 0 },
+      });
+      throw new HttpException("TOO_MANY_ATTEMPTS", HttpStatus.TOO_MANY_REQUESTS);
+    }
 
-      if (user.otpExpiresAt < new Date()) {
-        await this.prisma.user.update({
-          where: { email },
-          data: { otp: null, otpExpiresAt: null, otpAttempts: 0 },
-        });
-        throw new BadRequestException("CODE_EXPIRED");
-      }
+    if (user.otpExpiresAt < new Date()) {
+      await this.prisma.user.update({
+        where: { email },
+        data: { otp: null, otpExpiresAt: null, otpAttempts: 0 },
+      });
+      throw new BadRequestException("CODE_EXPIRED");
+    }
 
-      if (!safeCompare(user.otp, hashOTP(code))) {
-        await this.prisma.user.update({
-          where: { email },
-          data: { otpAttempts: { increment: 1 } },
-        });
-        throw new BadRequestException("INVALID_CODE");
-      }
+    if (!safeCompare(user.otp, hashOTP(code))) {
+      await this.prisma.user.update({
+        where: { email },
+        data: { otpAttempts: { increment: 1 } },
+      });
+      throw new BadRequestException("INVALID_CODE");
     }
 
     // Success — issue session token.
@@ -376,282 +333,6 @@ export class AuthService implements OnModuleDestroy {
     };
   }
 
-  /** Mint a fresh per-visitor demo account: a `demo+<token>@iq-rest.com` user
-   *  (isDemo=true), seed a template restaurant, and issue a session — no OTP and
-   *  no email. Rate-limited per IP. The seed is fatal: a demo user with no
-   *  attached restaurant would 401 on every data endpoint (AuthGuard), so on
-   *  seed failure we roll the user back and surface an error.
-   *  Returns the session token + email so the controller can set cookies. */
-  async createDemo(ip: string | undefined, locale = "en", currency?: string): Promise<{ token: string; email: string; userId: string }> {
-    const ipKey = ip || "unknown";
-    if (this.rateLimit(this.demoCreateAttempts, ipKey, DEMO_CREATE_MAX, DEMO_CREATE_WINDOW)) {
-      throw new HttpException("Too many demo requests", HttpStatus.TOO_MANY_REQUESTS);
-    }
-
-    const normalizedLocale = this.i18n.urlLocale(locale);
-    const token = generateSessionToken();
-    const tokenHash = hashSessionToken(token);
-    const email = `${DEMO_EMAIL_PREFIX}${randomUUID().replace(/-/g, "")}@${DEMO_EMAIL_DOMAIN}`;
-
-    const user = await this.prisma.user.create({
-      data: {
-        email,
-        isDemo: true,
-        demoCreatedAt: new Date(),
-        preferredLocale: normalizedLocale,
-        sessionToken: tokenHash,
-      },
-    });
-
-    await this.prisma.session.create({
-      data: {
-        userId: user.id,
-        tokenHash,
-        expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
-      },
-    });
-
-    try {
-      await this.seed.seedTemplate({
-        userId: user.id,
-        cuisine: "restaurant",
-        restaurantName: this.defaultRestaurantName(normalizedLocale),
-        currency: currency || "EUR",
-        locale: normalizedLocale,
-        isDemo: true,
-      });
-    } catch {
-      // Roll back the half-provisioned demo user so it doesn't linger broken.
-      await this.prisma.user.delete({ where: { id: user.id } }).catch(() => undefined);
-      throw new HttpException("Failed to provision demo", HttpStatus.INTERNAL_SERVER_ERROR);
-    }
-
-    return { token, email, userId: user.id };
-  }
-
-  /** Reuse an already-provisioned demo: if the caller still carries a valid
-   *  session cookie for a live `isDemo` user, return that same token instead of
-   *  minting a new ephemeral account. Returns null when there's no live demo
-   *  session (no cookie, expired, claimed to a real account, or purged). */
-  async getLiveDemo(
-    cookieValue: string | undefined,
-    email: string | undefined,
-  ): Promise<{ token: string; email: string; userId: string } | null> {
-    if (!cookieValue || !email) return null;
-    const user = await this.prisma.user.findUnique({ where: { email } });
-    if (!user || !user.isDemo) return null;
-    const tokenHash = hashSessionToken(cookieValue);
-    const sessionRow = await this.prisma.session.findUnique({ where: { tokenHash } });
-    const sessionRowValid =
-      sessionRow !== null &&
-      sessionRow.userId === user.id &&
-      (sessionRow.expiresAt === null || sessionRow.expiresAt > new Date());
-    const legacyValid = user.sessionToken !== null && safeCompare(user.sessionToken, tokenHash);
-    if (!sessionRowValid && !legacyValid) return null;
-    return { token: cookieValue, email: user.email, userId: user.id };
-  }
-
-  /** Claim step 1 — a logged-in demo user enters a real email to keep their
-   *  work. We send an OTP to THAT email and stash it on the demo row. The code
-   *  is stored in the demo user's own otp fields (its email never receives mail,
-   *  so there's no collision). */
-  async claimStart(userId: string, emailRaw: string, locale = "en"): Promise<{ ok: true }> {
-    const email = validateEmail(emailRaw);
-    if (!email || isDemoEmail(email)) throw new BadRequestException("Invalid email");
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true, isDemo: true },
-    });
-    if (!user?.isDemo) throw new BadRequestException("Not a demo account");
-
-    if (this.rateLimit(this.sendAttempts, email, SEND_LIMIT_MAX, SEND_LIMIT_WINDOW)) {
-      throw new HttpException("Too many requests", HttpStatus.TOO_MANY_REQUESTS);
-    }
-
-    const code = generateOTP();
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: {
-        claimEmail: email,
-        otp: hashOTP(code),
-        otpExpiresAt: new Date(Date.now() + OTP_EXPIRY_MS),
-        otpAttempts: 0,
-        preferredLocale: this.i18n.urlLocale(locale),
-      },
-    });
-    await this.mail.sendOtp({ email, code, locale });
-    return { ok: true };
-  }
-
-  /** Claim step 2 — verify the OTP and convert the demo account.
-   *  - target email free  → rename the demo user in place (keeps all data).
-   *  - target email taken → move the demo's owned restaurant(s) to the existing
-   *    user, delete the demo user, and switch the session to the existing user.
-   *  Returns a fresh session token only on the switch path (caller resets cookies). */
-  async claimVerify(userId: string, code: string, keepData: boolean): Promise<{ token?: string; email: string; switched: boolean; activeRestaurantId?: string }> {
-    const demo = await this.prisma.user.findUnique({
-      where: { id: userId },
-      include: { restaurantUsers: { select: { restaurantId: true, addedBy: true } } },
-    });
-    if (!demo?.isDemo) throw new BadRequestException("Not a demo account");
-    if (!demo.claimEmail || !demo.otp || !demo.otpExpiresAt) throw new BadRequestException("NO_CODE");
-
-    if (this.rateLimit(this.verifyAttempts, demo.claimEmail, VERIFY_LIMIT_MAX, VERIFY_LIMIT_WINDOW)) {
-      throw new HttpException("TOO_MANY_ATTEMPTS", HttpStatus.TOO_MANY_REQUESTS);
-    }
-    if (demo.otpAttempts >= MAX_OTP_ATTEMPTS) {
-      await this.prisma.user.update({ where: { id: userId }, data: { otp: null, otpExpiresAt: null, otpAttempts: 0 } });
-      throw new HttpException("TOO_MANY_ATTEMPTS", HttpStatus.TOO_MANY_REQUESTS);
-    }
-    if (demo.otpExpiresAt < new Date()) {
-      await this.prisma.user.update({ where: { id: userId }, data: { otp: null, otpExpiresAt: null, otpAttempts: 0 } });
-      throw new BadRequestException("CODE_EXPIRED");
-    }
-    if (!safeCompare(demo.otp, hashOTP(code))) {
-      await this.prisma.user.update({ where: { id: userId }, data: { otpAttempts: { increment: 1 } } });
-      throw new BadRequestException("INVALID_CODE");
-    }
-
-    // OTP ok — clear it and convert the account to the verified email.
-    await this.prisma.user.update({ where: { id: userId }, data: { otp: null, otpExpiresAt: null, otpAttempts: 0, claimEmail: null } });
-    return this.convertDemo(userId, demo.claimEmail, keepData);
-  }
-
-  /** Resolve a demo account from its session cookie for an OAuth-based claim.
-   *  Returns the userId only when the session is valid AND the user is a demo;
-   *  otherwise null (the caller falls back to a normal Google/Apple login). */
-  async demoUserIdFromSession(session: string | undefined, email: string | undefined): Promise<string | null> {
-    if (!session || !email) return null;
-    try {
-      const u = await this.resolveSession(session, email);
-      return u.isDemo ? u.userId : null;
-    } catch {
-      return null;
-    }
-  }
-
-  /** Claim a demo account via a verified Google id_token (full-page redirect). */
-  async claimViaGoogle(demoUserId: string, credential: string, keepData: boolean): Promise<{ token?: string; email: string; switched: boolean; activeRestaurantId?: string }> {
-    const clientId = this.config.get<string>("GOOGLE_CLIENT_ID");
-    if (!clientId) throw new HttpException("Google auth not configured", HttpStatus.INTERNAL_SERVER_ERROR);
-    const { OAuth2Client } = await import("google-auth-library");
-    const oauth = new OAuth2Client(clientId);
-    let email: string | undefined;
-    try {
-      const ticket = await oauth.verifyIdToken({ idToken: credential, audience: clientId });
-      email = (ticket.getPayload() as { email?: string } | undefined)?.email;
-    } catch {
-      throw new BadRequestException("Invalid Google token");
-    }
-    if (!email) throw new BadRequestException("Invalid Google token");
-    return this.convertDemo(demoUserId, email.trim().toLowerCase(), keepData);
-  }
-
-  /** Claim a demo account via a verified Apple id_token (full-page redirect). */
-  async claimViaApple(demoUserId: string, idToken: string, keepData: boolean): Promise<{ token?: string; email: string; switched: boolean; activeRestaurantId?: string }> {
-    const { verifyAppleIdToken } = await import("./apple-auth");
-    let identity: import("./apple-auth").AppleIdentity;
-    try {
-      identity = await verifyAppleIdToken(this.appleConfig(), idToken);
-    } catch {
-      throw new BadRequestException("Invalid Apple token");
-    }
-    if (!identity.email) throw new BadRequestException("Invalid Apple token");
-    return this.convertDemo(demoUserId, identity.email.trim().toLowerCase(), keepData);
-  }
-
-  /** Shared demo → real conversion (used by OTP, Google and Apple claims):
-   *  - target email free  → rename the demo row in place (keeps all data).
-   *  - target email taken → move the demo's restaurant(s) to the existing user,
-   *    re-point analytics, delete the demo, switch the session. */
-  private async convertDemo(userId: string, emailRaw: string, keepData: boolean): Promise<{ token?: string; email: string; switched: boolean; activeRestaurantId?: string }> {
-    const targetEmail = validateEmail(emailRaw);
-    if (!targetEmail) throw new BadRequestException("Invalid email");
-    const demo = await this.prisma.user.findUnique({
-      where: { id: userId },
-      include: { restaurantUsers: { select: { restaurantId: true, addedBy: true } } },
-    });
-    if (!demo?.isDemo) throw new BadRequestException("Not a demo account");
-
-    const existing = await this.prisma.user.findUnique({ where: { email: targetEmail }, select: { id: true } });
-    const ownedRestaurantIds = demo.restaurantUsers
-      .filter((r) => r.addedBy === null)
-      .map((r) => r.restaurantId);
-
-    if (!existing) {
-      // Rename path — flip the demo row into a real account.
-      await this.prisma.$transaction(async (tx) => {
-        await tx.user.update({
-          where: { id: userId },
-          data: { email: targetEmail, isDemo: false, demoCreatedAt: null, claimEmail: null, otp: null, otpExpiresAt: null, otpAttempts: 0 },
-        });
-        await this.purgeDemoContent(tx, ownedRestaurantIds, keepData);
-      });
-      return { email: targetEmail, switched: false };
-    }
-
-    // Attach path — the target email already has an account. Issue a session
-    // for it and delete the demo user.
-    const token = generateSessionToken();
-    const tokenHash = hashSessionToken(token);
-    let activeRestaurantId: string | null = null;
-    await this.prisma.$transaction(async (tx) => {
-      if (keepData) {
-        // Move the demo's restaurant(s) over as the existing user's venues, drop
-        // the fake orders/reservations, and make the saved one active so the
-        // user lands right on it (not buried behind their older restaurants).
-        for (const rid of ownedRestaurantIds) {
-          await tx.restaurantUser.deleteMany({ where: { restaurantId: rid, userId } });
-          const already = await tx.restaurantUser.findFirst({ where: { restaurantId: rid, userId: existing.id } });
-          if (!already) {
-            await tx.restaurantUser.create({ data: { restaurantId: rid, userId: existing.id, addedBy: null } });
-          }
-        }
-        await this.purgeDemoContent(tx, ownedRestaurantIds, true);
-        activeRestaurantId = ownedRestaurantIds[0] ?? null;
-      } else {
-        // Start clean — the user doesn't want the demo menu, so discard the demo
-        // restaurant(s) entirely (cascades menu/tables/orders) instead of
-        // attaching an empty venue to their account.
-        if (ownedRestaurantIds.length) {
-          await tx.restaurant.deleteMany({ where: { id: { in: ownedRestaurantIds } } });
-        }
-      }
-      // Re-point the demo's analytics events to the real account so the Meta
-      // CAPI cron attributes the CompleteRegistration to the existing user's
-      // email (otherwise the events would orphan on the deleted demo id).
-      await tx.usageEvent.updateMany({ where: { userId }, data: { userId: existing.id } });
-      await tx.usageEvent.updateMany({ where: { stitchedUserId: userId }, data: { stitchedUserId: existing.id } });
-      await tx.session.create({
-        data: { userId: existing.id, tokenHash, expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000) },
-      });
-      // Cascades the demo's sessions + any leftover RestaurantUser rows.
-      await tx.user.delete({ where: { id: userId } });
-    });
-    return { token, email: targetEmail, switched: true, activeRestaurantId: activeRestaurantId ?? undefined };
-  }
-
-  /** Strip the demo's seeded sample content on claim. Fake orders and
-   *  reservations are ALWAYS removed (they would pollute analytics). When the
-   *  user chose "start clean" we also wipe the menu (tables + categories +
-   *  items); "keep my data" preserves tables + categories + items. */
-  private async purgeDemoContent(
-    tx: Prisma.TransactionClient,
-    restaurantIds: string[],
-    keepData: boolean,
-  ): Promise<void> {
-    if (restaurantIds.length === 0) return;
-    const where = { restaurantId: { in: restaurantIds } };
-    await tx.order.deleteMany({ where });
-    await tx.reservation.deleteMany({ where });
-    if (!keepData) {
-      // Reservations already gone; tables can be removed safely now.
-      await tx.table.deleteMany({ where });
-      await tx.item.deleteMany({ where });
-      await tx.category.deleteMany({ where });
-    }
-  }
-
   /** Resolve user from session cookie. Throws Unauthorized when missing/invalid.
    *
    *  When admin_original_* cookies are present we are inside an impersonation
@@ -662,7 +343,7 @@ export class AuthService implements OnModuleDestroy {
     cookieValue: string | undefined,
     email: string | undefined,
     impersonation?: { adminOrigSession?: string; adminOrigEmail?: string },
-  ): Promise<{ userId: string; email: string; onboardingStep: number; legacyDashboard: boolean; isDemo: boolean; defaultDark: boolean }> {
+  ): Promise<{ userId: string; email: string; onboardingStep: number; legacyDashboard: boolean; isDemo: boolean; defaultDark: boolean; accountCreatedAt: string }> {
     if (!cookieValue || !email) throw new UnauthorizedException();
     const adminEmail = impersonation?.adminOrigEmail;
     const adminSession = impersonation?.adminOrigSession;
@@ -710,6 +391,9 @@ export class AuthService implements OnModuleDestroy {
       legacyDashboard: isLegacyEmail(user.email),
       isDemo: user.isDemo,
       defaultDark: user.createdAt >= DARK_DEFAULT_SINCE,
+      // Account creation time — the dashboard gates the daily trial reminder
+      // modal on this (first shown ≥24h after signup, then once per day).
+      accountCreatedAt: user.createdAt.toISOString(),
     };
   }
 
@@ -816,7 +500,7 @@ export class AuthService implements OnModuleDestroy {
     // Brand-new Google account with no create-flow context → use the default template.
     let pending = this.normalizeSignupContext(signupContext, currency);
     if (isNewUser && Object.keys(pending).length === 0) {
-      pending = this.defaultSignupContext(currency, locale);
+      pending = this.defaultSignupContext(currency);
     }
     await this.prisma.user.update({
       where: { id: user.id },
@@ -913,7 +597,7 @@ export class AuthService implements OnModuleDestroy {
     const tokenHash = hashSessionToken(token);
     let pending = this.normalizeSignupContext(signupContext, currency);
     if (isNewUser && Object.keys(pending).length === 0) {
-      pending = this.defaultSignupContext(currency, locale);
+      pending = this.defaultSignupContext(currency);
     }
     await this.prisma.user.update({
       where: { id: user.id },

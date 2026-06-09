@@ -139,6 +139,13 @@ model Restaurant {
   checklistBrandCustomized Boolean @default(false)
   startedFromScratch       Boolean @default(false)
   fromScanner              Boolean @default(false)
+  // First-login onboarding modals (two independent steps, persisted so they
+  // never reappear once handled). Name step: set true when the owner enters a
+  // name or skips. Fill step: set true when they pick demo / scan / scratch.
+  // New empty restaurants start false; restaurants created via the
+  // multi-restaurant flow start true; existing rows are backfilled to true.
+  onboardingNameDone       Boolean @default(false)
+  onboardingFillDone       Boolean @default(false)
 
   // UI banners (per-restaurant dismissals)
   scanBannerDismissed      Boolean @default(false)

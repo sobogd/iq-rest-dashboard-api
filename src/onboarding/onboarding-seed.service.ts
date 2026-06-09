@@ -2,8 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { isSupportedCurrency } from "../common/stripe";
-import type { CuisineKey } from "./cuisine";
-import { cuisineTemplates, commonPlaceholders, SAMPLE_PREFIX, type LocaleString } from "./cuisine-templates";
+import { cuisineTemplates, SAMPLE_PREFIX, type LocaleString } from "./cuisine-templates";
 import { isReservedSlug, slugify } from "../common/reserved-slugs";
 
 // Locales for which we ship at least subtitle/category/item translations. Anything outside this
@@ -66,27 +65,18 @@ export class OnboardingSeedService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Seed a brand-new user with a template restaurant + categories + items + tables + sample
-   *  reservations. Sample dishes are named "Sample: …" so the owner can spot and replace them
-   *  (no sample orders — they would skew revenue analytics). Idempotent: aborts if the user
-   *  already has an attached restaurant.
-   *
-   *  The new restaurant is the user's FIRST → it gets a fresh 14-day trial.
-   *  Subsequent restaurants (created via restaurant.controller.createForCompany)
-   *  start FREE without a trial. */
-  async seedTemplate(params: {
+  /** Seed a brand-new user with an EMPTY restaurant (no menu, single language,
+   *  blank title) so the dashboard's AuthGuard has a restaurant to resolve. The
+   *  first-login onboarding wizard then collects the name and offers to fill
+   *  demo data. Idempotent: aborts if the user already has an attached
+   *  restaurant. The new restaurant is the user's FIRST → 14-day trial. */
+  async seedEmptyRestaurant(params: {
     userId: string;
-    cuisine: CuisineKey;
-    restaurantName: string;
     currency: string;
     locale: string | null | undefined;
-    /** Demo accounts get no trial — their data is ephemeral and the dashboard
-     *  shows a "save your menu" banner instead of a trial countdown. */
-    isDemo?: boolean;
   }): Promise<{ restaurantId: string } | null> {
-    const { userId, cuisine, restaurantName, currency, isDemo = false } = params;
+    const { userId, currency } = params;
     const seedLocale = pickSeedLocale(params.locale);
-    const template = cuisineTemplates[cuisine];
 
     const existing = await this.prisma.restaurantUser.findFirst({
       where: { userId },
@@ -97,66 +87,72 @@ export class OnboardingSeedService {
       return null;
     }
 
-    const subtitle = pick(template.subtitle, seedLocale);
-    // Always offer English as a secondary language; deduplicate in case seedLocale is en.
-    const languages = Array.from(new Set([seedLocale, "en"]));
-    const slug = await this.uniqueSlug(restaurantName);
-    // No default hero description — only the restaurant name shows over the
-    // background. Avoids the "replace this text" placeholder looking unpolished.
-    const description = null;
+    // Title is intentionally blank — the onboarding modal collects it. Pick a
+    // pretty random slug (adjective-noun) instead of "restaurant1/2/3…".
+    const slug = await this.generatePrettySlug();
 
     return this.prisma.$transaction(async (tx) => {
       const restaurant = await tx.restaurant.create({
         data: {
-          title: restaurantName,
-          subtitle,
+          title: "",
           slug,
-          description,
-          address: commonPlaceholders.address,
           currency,
-          // Billing currency: the Scandinavian menu currencies (NOK/SEK/DKK)
-          // double as billing currencies; everything else bills in EUR.
+          // Scandinavian menu currencies double as billing currencies; else EUR.
           billingCurrency: isSupportedCurrency(currency) ? currency : "EUR",
           // Dark accent by default for newly onboarded restaurants.
           accentColor: "#1A1A1A",
-          // New restaurants show the language switcher as a globe icon over the
-          // hero. Existing restaurants keep the inline nav-list row (schema default).
+          // Globe-icon language switcher over the hero for new restaurants.
           languageSwitcher: "top",
-          languages,
+          // Single language only — onboarding "start from scratch" keeps one
+          // language; demo-fill doesn't add more either.
+          languages: [seedLocale],
           defaultLanguage: seedLocale,
-          // Orders are off by default now; the owner enables them in settings.
-          // Demo accounts turn them on so the seeded sample orders are visible
-          // and the full feature set is explorable. Reservations stay on.
-          ordersEnabled: isDemo,
+          ordersEnabled: false,
           reservationsEnabled: true,
-          ...(template.backgroundUrl ? { source: template.backgroundUrl, backgroundType: "image" } : {}),
-          // FIRST restaurant of the account → 14-day trial. Subsequent ones
-          // (createForCompany) start with no trial. Demo accounts also get no
-          // trial — the "save your menu" banner replaces the trial countdown.
           plan: "FREE",
           subscriptionStatus: "INACTIVE",
-          trialEndsAt: isDemo ? null : new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+          trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
         },
       });
 
       // Link the seeding user to the new restaurant via the flat access model.
       // addedBy is null for the FIRST user of a restaurant (the creator).
       await tx.restaurantUser.create({
-        data: {
-          restaurantId: restaurant.id,
-          userId,
-          addedBy: null,
-        },
+        data: { restaurantId: restaurant.id, userId, addedBy: null },
       });
 
-      // Categories — default-lang name + JSON translations across every locale we have content for.
-      // Sequential awaits inside a Prisma transaction — Promise.all on the same tx instance
-      // can violate isolation guarantees, so loop instead.
+      return { restaurantId: restaurant.id };
+    });
+  }
+
+  /** Fill an existing (empty) restaurant with demo data: the generic template
+   *  menu ("Sample: …" dishes) plus a fully-populated floor — tables, bookings
+   *  and live orders — so the owner can explore every feature. Idempotent:
+   *  aborts (returns ok:false) if the restaurant already has any items, so a
+   *  double-click can't duplicate the menu. Does NOT flip onboardingDone — the
+   *  caller owns that. */
+  async fillDemo(restaurantId: string): Promise<{ ok: boolean }> {
+    const restaurant = await this.prisma.restaurant.findUnique({
+      where: { id: restaurantId },
+      select: { id: true, currency: true, defaultLanguage: true },
+    });
+    if (!restaurant) return { ok: false };
+
+    const existingItems = await this.prisma.item.count({ where: { restaurantId } });
+    if (existingItems > 0) return { ok: false };
+
+    const seedLocale = pickSeedLocale(restaurant.defaultLanguage);
+    const currency = restaurant.currency;
+    const template = cuisineTemplates.restaurant;
+
+    await this.prisma.$transaction(async (tx) => {
+      // Categories — default-lang name + JSON translations. Sequential awaits
+      // (Promise.all on the same tx can violate isolation).
       const createdCategories: Array<{ id: string }> = [];
       for (const cat of template.categories) {
         const created = await tx.category.create({
           data: {
-            restaurantId: restaurant.id,
+            restaurantId,
             name: pick(cat.name, seedLocale)!,
             translations: buildNameTranslations(cat.name, seedLocale),
             sortOrder: cat.sortOrder,
@@ -165,9 +161,7 @@ export class OnboardingSeedService {
         createdCategories.push(created);
       }
 
-      // Items — keyed by categoryIndex into createdCategories. Also keep the
-      // full multilingual name on the in-memory item so the order-seeding
-      // step below can stamp the dashboard-expected dishNameSnapshot.
+      // Items — "Sample: " prefixed so the owner can spot and replace them.
       const createdItems: Array<{
         id: string;
         name: string;
@@ -176,9 +170,6 @@ export class OnboardingSeedService {
       }> = [];
       for (const item of template.items) {
         const category = createdCategories[item.categoryIndex];
-        // Prefix every sample dish with a localized "Sample: " so the owner can
-        // spot (and replace/delete) the seeded items at a glance — this replaces
-        // the old isExample flag as the way to mark seeded content.
         const sampleName: LocaleString = {} as LocaleString;
         const nameMl: Record<string, string> = {};
         for (const [lang, value] of Object.entries(item.name)) {
@@ -190,7 +181,7 @@ export class OnboardingSeedService {
         }
         const created = await tx.item.create({
           data: {
-            restaurantId: restaurant.id,
+            restaurantId,
             categoryId: category.id,
             name: pick(sampleName, seedLocale)!,
             description: pick(item.description, seedLocale),
@@ -203,15 +194,15 @@ export class OnboardingSeedService {
         createdItems.push({ ...created, nameMl });
       }
 
-      // Real signups: no sample tables/orders/reservations — only the menu.
-      // Demo accounts get a fully-populated floor (tables + bookings + live
-      // orders) so the dashboard looks alive the moment you land in it.
-      if (isDemo && createdItems.length > 0) {
-        await this.seedDemoExtras(tx, restaurant.id, currency, createdItems);
+      // Turn orders on so the seeded sample orders are visible, then lay down
+      // the tables + bookings + live orders.
+      await tx.restaurant.update({ where: { id: restaurantId }, data: { ordersEnabled: true } });
+      if (createdItems.length > 0) {
+        await this.seedDemoExtras(tx, restaurantId, currency, createdItems);
       }
-
-      return { restaurantId: restaurant.id };
     });
+
+    return { ok: true };
   }
 
   /** Populate a demo restaurant's floor: a tidy grid of tables, a handful of
@@ -328,6 +319,42 @@ export class OnboardingSeedService {
         },
       });
     }
+  }
+
+  // Pretty-slug word pools — adjective + noun gives ~20×20 = 400 readable
+  // combinations (e.g. "cozy-bistro", "golden-pantry"), used for the public
+  // URL of a brand-new empty restaurant instead of "restaurant1/2/3…".
+  private static readonly SLUG_ADJ = [
+    "cozy", "golden", "rustic", "sunny", "urban", "little", "grand", "hidden",
+    "royal", "fresh", "savory", "velvet", "amber", "copper", "olive", "crimson",
+    "hearty", "lively", "modern", "classic",
+  ];
+  private static readonly SLUG_NOUN = [
+    "kitchen", "table", "fork", "spoon", "plate", "bistro", "eatery", "pantry",
+    "grill", "hearth", "feast", "harvest", "supper", "garden", "corner", "market",
+    "larder", "oven", "cellar", "table-spot",
+  ];
+
+  /** Pick a pretty, unique adjective-noun slug for a brand-new empty restaurant.
+   *  Tries random combinations; after a few collisions it adds a short random
+   *  suffix, and ultimately falls back to the incremental `uniqueSlug`. */
+  private async generatePrettySlug(): Promise<string> {
+    const adj = OnboardingSeedService.SLUG_ADJ;
+    const noun = OnboardingSeedService.SLUG_NOUN;
+    const rand = (n: number) => Math.floor(Math.random() * n);
+    for (let attempt = 0; attempt < 30; attempt++) {
+      let candidate = `${adj[rand(adj.length)]}-${noun[rand(noun.length)]}`;
+      // After enough collisions, disambiguate with a short base36 suffix.
+      if (attempt >= 12) candidate += `-${Math.random().toString(36).slice(2, 5)}`;
+      if (isReservedSlug(candidate)) continue;
+      const taken = await this.prisma.restaurant.findFirst({
+        where: { slug: candidate },
+        select: { id: true },
+      });
+      if (!taken) return candidate;
+    }
+    // Extremely unlikely fallback — incremental "rest", "rest1", …
+    return this.uniqueSlug("rest");
   }
 
   /** Mirror RestaurantService.uniqueSlug — kept private to the seeder so it doesn't pull in

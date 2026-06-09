@@ -18,6 +18,7 @@ import {
 import type { Request, Response } from "express";
 import { AuthGuard, type AuthedRequest } from "../auth/auth.guard";
 import { RestaurantService } from "./restaurant.service";
+import { OnboardingSeedService } from "../onboarding/onboarding-seed.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { callGeminiImage, uploadGeneratedImage } from "../common/gemini-image";
 import { consumeAiImageQuota, getAiImageUsage, refundAiImageUsage } from "../common/ai-quota";
@@ -32,7 +33,11 @@ const ACTIVE_COOKIE_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000;
 @Controller()
 @UseGuards(AuthGuard)
 export class RestaurantController {
-  constructor(private readonly svc: RestaurantService, private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly svc: RestaurantService,
+    private readonly prisma: PrismaService,
+    private readonly onboarding: OnboardingSeedService,
+  ) {}
 
   // ---- Active restaurant ----
 
@@ -139,6 +144,39 @@ export class RestaurantController {
       data: { scanBannerDismissed: true },
     });
     return { ok: true };
+  }
+
+  /** Mark a first-login onboarding step as handled so its modal never reappears.
+   *  `name` → the owner entered a name or skipped; `fill` → they picked a fill
+   *  type (scan / start-from-scratch). The demo choice goes through
+   *  /onboarding/fill-demo which sets the fill flag itself. */
+  @Post("onboarding/step")
+  async onboardingStep(@Req() req: Request, @Body() body: { step?: "name" | "fill" }) {
+    const { restaurantId } = (req as AuthedRequest).authUser;
+    const data =
+      body?.step === "name"
+        ? { onboardingNameDone: true }
+        : body?.step === "fill"
+          ? { onboardingFillDone: true }
+          : null;
+    if (!data) throw new BadRequestException("step must be 'name' or 'fill'");
+    await this.prisma.restaurant.update({ where: { id: restaurantId }, data });
+    return { ok: true };
+  }
+
+  /** Onboarding "fill with demo data" choice — seed the active restaurant with
+   *  demo data (menu + tables + bookings + orders) and mark the fill step done.
+   *  Idempotent: the seed aborts if the restaurant already has items, so a
+   *  double-click can't duplicate it. */
+  @Post("onboarding/fill-demo")
+  async fillDemo(@Req() req: Request) {
+    const { restaurantId } = (req as AuthedRequest).authUser;
+    const result = await this.onboarding.fillDemo(restaurantId);
+    await this.prisma.restaurant.update({
+      where: { id: restaurantId },
+      data: { onboardingFillDone: true },
+    });
+    return { ok: result.ok };
   }
 
   @Get("restaurant/subscription")

@@ -488,7 +488,7 @@ export class AuthService implements OnModuleDestroy {
    *  - target email taken → move the demo's owned restaurant(s) to the existing
    *    user, delete the demo user, and switch the session to the existing user.
    *  Returns a fresh session token only on the switch path (caller resets cookies). */
-  async claimVerify(userId: string, code: string, keepData: boolean): Promise<{ token?: string; email: string; switched: boolean }> {
+  async claimVerify(userId: string, code: string, keepData: boolean): Promise<{ token?: string; email: string; switched: boolean; activeRestaurantId?: string }> {
     const demo = await this.prisma.user.findUnique({
       where: { id: userId },
       include: { restaurantUsers: { select: { restaurantId: true, addedBy: true } } },
@@ -531,7 +531,7 @@ export class AuthService implements OnModuleDestroy {
   }
 
   /** Claim a demo account via a verified Google id_token (full-page redirect). */
-  async claimViaGoogle(demoUserId: string, credential: string, keepData: boolean): Promise<{ token?: string; email: string; switched: boolean }> {
+  async claimViaGoogle(demoUserId: string, credential: string, keepData: boolean): Promise<{ token?: string; email: string; switched: boolean; activeRestaurantId?: string }> {
     const clientId = this.config.get<string>("GOOGLE_CLIENT_ID");
     if (!clientId) throw new HttpException("Google auth not configured", HttpStatus.INTERNAL_SERVER_ERROR);
     const { OAuth2Client } = await import("google-auth-library");
@@ -548,7 +548,7 @@ export class AuthService implements OnModuleDestroy {
   }
 
   /** Claim a demo account via a verified Apple id_token (full-page redirect). */
-  async claimViaApple(demoUserId: string, idToken: string, keepData: boolean): Promise<{ token?: string; email: string; switched: boolean }> {
+  async claimViaApple(demoUserId: string, idToken: string, keepData: boolean): Promise<{ token?: string; email: string; switched: boolean; activeRestaurantId?: string }> {
     const { verifyAppleIdToken } = await import("./apple-auth");
     let identity: import("./apple-auth").AppleIdentity;
     try {
@@ -564,7 +564,7 @@ export class AuthService implements OnModuleDestroy {
    *  - target email free  → rename the demo row in place (keeps all data).
    *  - target email taken → move the demo's restaurant(s) to the existing user,
    *    re-point analytics, delete the demo, switch the session. */
-  private async convertDemo(userId: string, emailRaw: string, keepData: boolean): Promise<{ token?: string; email: string; switched: boolean }> {
+  private async convertDemo(userId: string, emailRaw: string, keepData: boolean): Promise<{ token?: string; email: string; switched: boolean; activeRestaurantId?: string }> {
     const targetEmail = validateEmail(emailRaw);
     if (!targetEmail) throw new BadRequestException("Invalid email");
     const demo = await this.prisma.user.findUnique({
@@ -590,19 +590,33 @@ export class AuthService implements OnModuleDestroy {
       return { email: targetEmail, switched: false };
     }
 
-    // Attach path — re-point the demo's owned restaurant(s) to the existing
-    // user, issue a session for them, then delete the demo user.
+    // Attach path — the target email already has an account. Issue a session
+    // for it and delete the demo user.
     const token = generateSessionToken();
     const tokenHash = hashSessionToken(token);
+    let activeRestaurantId: string | null = null;
     await this.prisma.$transaction(async (tx) => {
-      for (const rid of ownedRestaurantIds) {
-        await tx.restaurantUser.deleteMany({ where: { restaurantId: rid, userId } });
-        const already = await tx.restaurantUser.findFirst({ where: { restaurantId: rid, userId: existing.id } });
-        if (!already) {
-          await tx.restaurantUser.create({ data: { restaurantId: rid, userId: existing.id, addedBy: null } });
+      if (keepData) {
+        // Move the demo's restaurant(s) over as the existing user's venues, drop
+        // the fake orders/reservations, and make the saved one active so the
+        // user lands right on it (not buried behind their older restaurants).
+        for (const rid of ownedRestaurantIds) {
+          await tx.restaurantUser.deleteMany({ where: { restaurantId: rid, userId } });
+          const already = await tx.restaurantUser.findFirst({ where: { restaurantId: rid, userId: existing.id } });
+          if (!already) {
+            await tx.restaurantUser.create({ data: { restaurantId: rid, userId: existing.id, addedBy: null } });
+          }
+        }
+        await this.purgeDemoContent(tx, ownedRestaurantIds, true);
+        activeRestaurantId = ownedRestaurantIds[0] ?? null;
+      } else {
+        // Start clean — the user doesn't want the demo menu, so discard the demo
+        // restaurant(s) entirely (cascades menu/tables/orders) instead of
+        // attaching an empty venue to their account.
+        if (ownedRestaurantIds.length) {
+          await tx.restaurant.deleteMany({ where: { id: { in: ownedRestaurantIds } } });
         }
       }
-      await this.purgeDemoContent(tx, ownedRestaurantIds, keepData);
       // Re-point the demo's analytics events to the real account so the Meta
       // CAPI cron attributes the CompleteRegistration to the existing user's
       // email (otherwise the events would orphan on the deleted demo id).
@@ -614,7 +628,7 @@ export class AuthService implements OnModuleDestroy {
       // Cascades the demo's sessions + any leftover RestaurantUser rows.
       await tx.user.delete({ where: { id: userId } });
     });
-    return { token, email: targetEmail, switched: true };
+    return { token, email: targetEmail, switched: true, activeRestaurantId: activeRestaurantId ?? undefined };
   }
 
   /** Strip the demo's seeded sample content on claim. Fake orders and

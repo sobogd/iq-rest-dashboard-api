@@ -26,6 +26,9 @@ const EMAIL_COOKIE = "iqr_email";
 // old dashboard (and vice versa).
 const LEGACY_SESSION_COOKIE = "session";
 const LEGACY_EMAIL_COOKIE = "user_email";
+// Non-httpOnly — the SPA reads it to send the active-restaurant header.
+const ACTIVE_RESTAURANT_COOKIE = "iqr_active_restaurant_id";
+const ACTIVE_RESTAURANT_MAX_AGE = 365 * 24 * 60 * 60 * 1000;
 
 @Controller("auth")
 export class AuthController {
@@ -104,6 +107,11 @@ export class AuthController {
     if (result.switched && result.token) {
       res.cookie(SESSION_COOKIE, result.token, opts);
       res.cookie(LEGACY_SESSION_COOKIE, result.token, opts);
+    }
+    // Land the user on the just-saved restaurant (it's a fresh attachment, so it
+    // wouldn't be the default-active one for an existing account).
+    if (result.activeRestaurantId) {
+      res.cookie(ACTIVE_RESTAURANT_COOKIE, result.activeRestaurantId, { ...opts, httpOnly: false, maxAge: ACTIVE_RESTAURANT_MAX_AGE });
     }
     return { ok: true, email: result.email, switched: result.switched };
   }
@@ -197,6 +205,9 @@ export class AuthController {
             res.cookie(SESSION_COOKIE, claim.token, opts);
             res.cookie(LEGACY_SESSION_COOKIE, claim.token, opts);
           }
+          if (claim.activeRestaurantId) {
+            res.cookie(ACTIVE_RESTAURANT_COOKIE, claim.activeRestaurantId, { ...opts, httpOnly: false, maxAge: ACTIVE_RESTAURANT_MAX_AGE });
+          }
           return res.redirect(302, `${dashboardBase}/${locale}/dashboard`);
         }
       }
@@ -288,6 +299,9 @@ export class AuthController {
           if (claim.switched && claim.token) {
             res.cookie(SESSION_COOKIE, claim.token, opts);
             res.cookie(LEGACY_SESSION_COOKIE, claim.token, opts);
+          }
+          if (claim.activeRestaurantId) {
+            res.cookie(ACTIVE_RESTAURANT_COOKIE, claim.activeRestaurantId, { ...opts, httpOnly: false, maxAge: ACTIVE_RESTAURANT_MAX_AGE });
           }
           return res.redirect(302, `${dashboardBase}/${locale}/dashboard`);
         }

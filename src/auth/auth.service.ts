@@ -512,7 +512,67 @@ export class AuthService implements OnModuleDestroy {
       throw new BadRequestException("INVALID_CODE");
     }
 
-    const targetEmail = demo.claimEmail;
+    // OTP ok — clear it and convert the account to the verified email.
+    await this.prisma.user.update({ where: { id: userId }, data: { otp: null, otpExpiresAt: null, otpAttempts: 0, claimEmail: null } });
+    return this.convertDemo(userId, demo.claimEmail, keepData);
+  }
+
+  /** Resolve a demo account from its session cookie for an OAuth-based claim.
+   *  Returns the userId only when the session is valid AND the user is a demo;
+   *  otherwise null (the caller falls back to a normal Google/Apple login). */
+  async demoUserIdFromSession(session: string | undefined, email: string | undefined): Promise<string | null> {
+    if (!session || !email) return null;
+    try {
+      const u = await this.resolveSession(session, email);
+      return u.isDemo ? u.userId : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Claim a demo account via a verified Google id_token (full-page redirect). */
+  async claimViaGoogle(demoUserId: string, credential: string, keepData: boolean): Promise<{ token?: string; email: string; switched: boolean }> {
+    const clientId = this.config.get<string>("GOOGLE_CLIENT_ID");
+    if (!clientId) throw new HttpException("Google auth not configured", HttpStatus.INTERNAL_SERVER_ERROR);
+    const { OAuth2Client } = await import("google-auth-library");
+    const oauth = new OAuth2Client(clientId);
+    let email: string | undefined;
+    try {
+      const ticket = await oauth.verifyIdToken({ idToken: credential, audience: clientId });
+      email = (ticket.getPayload() as { email?: string } | undefined)?.email;
+    } catch {
+      throw new BadRequestException("Invalid Google token");
+    }
+    if (!email) throw new BadRequestException("Invalid Google token");
+    return this.convertDemo(demoUserId, email.trim().toLowerCase(), keepData);
+  }
+
+  /** Claim a demo account via a verified Apple id_token (full-page redirect). */
+  async claimViaApple(demoUserId: string, idToken: string, keepData: boolean): Promise<{ token?: string; email: string; switched: boolean }> {
+    const { verifyAppleIdToken } = await import("./apple-auth");
+    let identity: import("./apple-auth").AppleIdentity;
+    try {
+      identity = await verifyAppleIdToken(this.appleConfig(), idToken);
+    } catch {
+      throw new BadRequestException("Invalid Apple token");
+    }
+    if (!identity.email) throw new BadRequestException("Invalid Apple token");
+    return this.convertDemo(demoUserId, identity.email.trim().toLowerCase(), keepData);
+  }
+
+  /** Shared demo → real conversion (used by OTP, Google and Apple claims):
+   *  - target email free  → rename the demo row in place (keeps all data).
+   *  - target email taken → move the demo's restaurant(s) to the existing user,
+   *    re-point analytics, delete the demo, switch the session. */
+  private async convertDemo(userId: string, emailRaw: string, keepData: boolean): Promise<{ token?: string; email: string; switched: boolean }> {
+    const targetEmail = validateEmail(emailRaw);
+    if (!targetEmail) throw new BadRequestException("Invalid email");
+    const demo = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { restaurantUsers: { select: { restaurantId: true, addedBy: true } } },
+    });
+    if (!demo?.isDemo) throw new BadRequestException("Not a demo account");
+
     const existing = await this.prisma.user.findUnique({ where: { email: targetEmail }, select: { id: true } });
     const ownedRestaurantIds = demo.restaurantUsers
       .filter((r) => r.addedBy === null)
@@ -523,15 +583,7 @@ export class AuthService implements OnModuleDestroy {
       await this.prisma.$transaction(async (tx) => {
         await tx.user.update({
           where: { id: userId },
-          data: {
-            email: targetEmail,
-            isDemo: false,
-            demoCreatedAt: null,
-            claimEmail: null,
-            otp: null,
-            otpExpiresAt: null,
-            otpAttempts: 0,
-          },
+          data: { email: targetEmail, isDemo: false, demoCreatedAt: null, claimEmail: null, otp: null, otpExpiresAt: null, otpAttempts: 0 },
         });
         await this.purgeDemoContent(tx, ownedRestaurantIds, keepData);
       });

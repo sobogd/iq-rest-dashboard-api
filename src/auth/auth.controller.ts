@@ -163,7 +163,7 @@ export class AuthController {
     const dashboardBase = this.config.get<string>("DASHBOARD_URL") || "https://dashboard.iq-rest.com";
     const apiBase = this.config.get<string>("API_PUBLIC_URL") || "https://dashboard-api.iq-rest.com";
 
-    let parsedState: { locale?: string; signupContext?: { cuisine: string; restaurantName: string } } = {};
+    let parsedState: { locale?: string; signupContext?: { cuisine: string; restaurantName: string }; claim?: boolean; keepData?: boolean } = {};
     try {
       if (state) {
         const json = Buffer.from(state, "base64url").toString("utf8");
@@ -180,6 +180,27 @@ export class AuthController {
 
     try {
       const credential = await this.auth.exchangeGoogleCode(code, `${apiBase}/api/auth/google/callback`);
+      const domain = this.config.get<string>("COOKIE_DOMAIN") || undefined;
+      const opts = authCookieOptions(domain);
+
+      // Demo "save my menu" via Google: convert the current demo account to the
+      // Google identity, keeping the menu. Only when the request still carries a
+      // demo session — otherwise fall through to a normal Google login.
+      if (parsedState.claim) {
+        const cookies = req.cookies as Record<string, string | undefined> | undefined;
+        const demoUserId = await this.auth.demoUserIdFromSession(cookies?.[SESSION_COOKIE], cookies?.[EMAIL_COOKIE]);
+        if (demoUserId) {
+          const claim = await this.auth.claimViaGoogle(demoUserId, credential, parsedState.keepData ?? true);
+          res.cookie(EMAIL_COOKIE, claim.email, { ...opts, httpOnly: false });
+          res.cookie(LEGACY_EMAIL_COOKIE, claim.email, { ...opts, httpOnly: false });
+          if (claim.switched && claim.token) {
+            res.cookie(SESSION_COOKIE, claim.token, opts);
+            res.cookie(LEGACY_SESSION_COOKIE, claim.token, opts);
+          }
+          return res.redirect(302, `${dashboardBase}/${locale}/dashboard`);
+        }
+      }
+
       const acceptLang = req.headers["accept-language"]?.toString().split(",")[0]?.split("-")[0];
       const currency = getRequestCurrency(req);
       const result = await this.auth.verifyGoogleCredential(
@@ -188,8 +209,6 @@ export class AuthController {
         currency,
         locale || acceptLang || null,
       );
-      const domain = this.config.get<string>("COOKIE_DOMAIN") || undefined;
-      const opts = authCookieOptions(domain);
       res.cookie(SESSION_COOKIE, result.token, opts);
       res.cookie(EMAIL_COOKIE, result.email, { ...opts, httpOnly: false });
       res.cookie(LEGACY_SESSION_COOKIE, result.token, opts);
@@ -222,7 +241,7 @@ export class AuthController {
     const dashboardBase = this.config.get<string>("DASHBOARD_URL") || "https://dashboard.iq-rest.com";
     const apiBase = this.config.get<string>("API_PUBLIC_URL") || "https://dashboard-api.iq-rest.com";
 
-    let parsedState: { locale?: string; signupContext?: { cuisine: string; restaurantName: string } } = {};
+    let parsedState: { locale?: string; signupContext?: { cuisine: string; restaurantName: string }; claim?: boolean; keepData?: boolean } = {};
     try {
       if (body.state) {
         parsedState = JSON.parse(Buffer.from(body.state, "base64url").toString("utf8"));
@@ -254,6 +273,26 @@ export class AuthController {
         body.code,
         `${apiBase}/api/auth/apple/callback`,
       );
+      const domain = this.config.get<string>("COOKIE_DOMAIN") || undefined;
+      const opts = authCookieOptions(domain);
+
+      // Demo "save my menu" via Apple — convert the demo account to the Apple
+      // identity, keeping the menu (only when a demo session is still present).
+      if (parsedState.claim) {
+        const cookies = req.cookies as Record<string, string | undefined> | undefined;
+        const demoUserId = await this.auth.demoUserIdFromSession(cookies?.[SESSION_COOKIE], cookies?.[EMAIL_COOKIE]);
+        if (demoUserId) {
+          const claim = await this.auth.claimViaApple(demoUserId, idToken, parsedState.keepData ?? true);
+          res.cookie(EMAIL_COOKIE, claim.email, { ...opts, httpOnly: false });
+          res.cookie(LEGACY_EMAIL_COOKIE, claim.email, { ...opts, httpOnly: false });
+          if (claim.switched && claim.token) {
+            res.cookie(SESSION_COOKIE, claim.token, opts);
+            res.cookie(LEGACY_SESSION_COOKIE, claim.token, opts);
+          }
+          return res.redirect(302, `${dashboardBase}/${locale}/dashboard`);
+        }
+      }
+
       const acceptLang = req.headers["accept-language"]?.toString().split(",")[0]?.split("-")[0];
       const currency = getRequestCurrency(req);
       const result = await this.auth.verifyAppleCredential(
@@ -263,8 +302,6 @@ export class AuthController {
         currency,
         locale || acceptLang || null,
       );
-      const domain = this.config.get<string>("COOKIE_DOMAIN") || undefined;
-      const opts = authCookieOptions(domain);
       res.cookie(SESSION_COOKIE, result.token, opts);
       res.cookie(EMAIL_COOKIE, result.email, { ...opts, httpOnly: false });
       res.cookie(LEGACY_SESSION_COOKIE, result.token, opts);

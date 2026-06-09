@@ -429,6 +429,28 @@ export class AuthService implements OnModuleDestroy {
     return { token, email, userId: user.id };
   }
 
+  /** Reuse an already-provisioned demo: if the caller still carries a valid
+   *  session cookie for a live `isDemo` user, return that same token instead of
+   *  minting a new ephemeral account. Returns null when there's no live demo
+   *  session (no cookie, expired, claimed to a real account, or purged). */
+  async getLiveDemo(
+    cookieValue: string | undefined,
+    email: string | undefined,
+  ): Promise<{ token: string; email: string; userId: string } | null> {
+    if (!cookieValue || !email) return null;
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    if (!user || !user.isDemo) return null;
+    const tokenHash = hashSessionToken(cookieValue);
+    const sessionRow = await this.prisma.session.findUnique({ where: { tokenHash } });
+    const sessionRowValid =
+      sessionRow !== null &&
+      sessionRow.userId === user.id &&
+      (sessionRow.expiresAt === null || sessionRow.expiresAt > new Date());
+    const legacyValid = user.sessionToken !== null && safeCompare(user.sessionToken, tokenHash);
+    if (!sessionRowValid && !legacyValid) return null;
+    return { token: cookieValue, email: user.email, userId: user.id };
+  }
+
   /** Claim step 1 — a logged-in demo user enters a real email to keep their
    *  work. We send an OTP to THAT email and stash it on the demo row. The code
    *  is stored in the demo user's own otp fields (its email never receives mail,

@@ -66,7 +66,12 @@ export class AuthController {
     // the per-IP rate limit so bots can't flood the demo-user table.
     const ip = (req.headers["cf-connecting-ip"]?.toString() || req.ip || "").trim() || undefined;
     const currency = getRequestCurrency(req);
-    const result = await this.auth.createDemo(ip, dto.locale || "en", currency);
+    // Reuse an existing live demo account if the visitor still holds its
+    // session cookie — repeat "Try demo" clicks must reopen the same account,
+    // not spawn a fresh ephemeral one each time.
+    const cookies = req.cookies as Record<string, string | undefined> | undefined;
+    const existing = await this.auth.getLiveDemo(cookies?.[SESSION_COOKIE], cookies?.[EMAIL_COOKIE]);
+    const result = existing ?? (await this.auth.createDemo(ip, dto.locale || "en", currency));
     const domain = this.config.get<string>("COOKIE_DOMAIN") || undefined;
     const opts = authCookieOptions(domain);
     res.cookie(SESSION_COOKIE, result.token, opts);

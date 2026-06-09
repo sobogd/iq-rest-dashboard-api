@@ -953,7 +953,14 @@ export class AdminController {
         ) ru ON COALESCE(ue."userId", ue."stitchedUserId") IS NOT NULL
         WHERE ue.at >= ${fromD} AND ue.at <= ${toD}
       )
-      SELECT id, at, event, ip, country, region, device, platform, gclid, is_facebook_ads, is_google_ads, eff_rid, eff_uid,
+      SELECT id, at, event, ip, country, region, device, platform, gclid, is_facebook_ads, is_google_ads,
+             -- Display restaurant per event: dashboard actions ALWAYS belong to
+             -- a venue, so if the active-restaurant cookie wasn't stamped yet
+             -- (e.g. a fresh single-restaurant/demo user before any switch),
+             -- fall back to the user's first restaurant. Landing l_* events keep
+             -- the explicit-only value (no venue).
+             CASE WHEN event LIKE 'dash\\_%' THEN match_rid ELSE eff_rid END AS eff_rid,
+             eff_uid,
              COUNT(*) OVER()::int AS total
       FROM ev
       WHERE ${cond}

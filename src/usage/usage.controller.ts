@@ -174,7 +174,22 @@ export class UsageController {
     // dashboard cookie so admin "by restaurant" filters work directly.
     // Anonymous events leave both userId and restaurantId null.
     const ACTIVE_RESTAURANT_COOKIE = "iqr_active_restaurant_id";
-    const activeRestaurantId = readCookie(req, ACTIVE_RESTAURANT_COOKIE) ?? null;
+    let restaurantId = readCookie(req, ACTIVE_RESTAURANT_COOKIE) ?? null;
+
+    // A dashboard action ALWAYS belongs to a venue, but the active-restaurant
+    // cookie isn't set until the user first switches/creates a restaurant — so
+    // a fresh single-restaurant or demo user's early dash_* events would land
+    // with restaurantId null. Stamp the user's first restaurant in that case so
+    // per-restaurant analytics + the session detail show the right venue. Only
+    // for dash_* (landing l_* events legitimately carry no restaurant).
+    if (!restaurantId && userId && event.startsWith("dash_")) {
+      const ru = await this.prisma.restaurantUser.findFirst({
+        where: { userId },
+        orderBy: { addedAt: "asc" },
+        select: { restaurantId: true },
+      });
+      restaurantId = ru?.restaurantId ?? null;
+    }
 
     await this.prisma.usageEvent.create({
       data: {
@@ -189,7 +204,7 @@ export class UsageController {
         is_facebook_ads: isFacebookAds,
         is_search: isSearch,
         userId,
-        restaurantId: activeRestaurantId,
+        restaurantId,
         ip,
       },
     });

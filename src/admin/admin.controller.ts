@@ -957,9 +957,10 @@ export class AdminController {
              -- Display restaurant per event: dashboard actions ALWAYS belong to
              -- a venue, so if the active-restaurant cookie wasn't stamped yet
              -- (e.g. a fresh single-restaurant/demo user before any switch),
-             -- fall back to the user's first restaurant. Landing l_* events keep
-             -- the explicit-only value (no venue).
-             CASE WHEN event LIKE 'dash\\_%' THEN match_rid ELSE eff_rid END AS eff_rid,
+             -- fall back to the user's first restaurant. Landing l_* events get
+             -- NO venue chip — even if one happened to be stamped (logged-in user
+             -- browsing the marketing site), a landing page isn't a venue action.
+             CASE WHEN event LIKE 'dash\\_%' THEN match_rid ELSE NULL END AS eff_rid,
              eff_uid,
              COUNT(*) OVER()::int AS total
       FROM ev

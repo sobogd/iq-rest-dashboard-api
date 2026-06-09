@@ -19,6 +19,7 @@ function hashField(value: string): string {
 
 export type CapiEventName =
   | "ViewContent"
+  | "Lead"
   | "InitiateCheckout"
   | "CompleteRegistration"
   | "Subscribe";
@@ -34,7 +35,7 @@ interface FbSessionRow {
   fb_at: Date;
   user_id: string | null; // effective user reached in the session (for em/external_id)
   has_content: boolean; // pricing page OR demo
-  has_onb: boolean; // any onboarding step
+  has_lead: boolean; // opened the signup modal (started registration) — main opt event
   has_registered: boolean; // verify_success OR any dashboard event
 }
 
@@ -157,7 +158,7 @@ export class CapiService {
           MAX(at) FILTER (WHERE event LIKE 'l_fbclid_%') AS fb_at,
           (array_agg(COALESCE("userId", "stitchedUserId") ORDER BY at DESC) FILTER (WHERE COALESCE("userId", "stitchedUserId") IS NOT NULL))[1] AS user_id,
           bool_or(event = 'l_page_pricing' OR event LIKE '%demo_open') AS has_content,
-          bool_or(event LIKE '%onb%') AS has_onb,
+          bool_or(event LIKE 'l_onb_open_%' AND event NOT IN ('l_onb_open_terms', 'l_onb_open_privacy')) AS has_lead,
           bool_or(event = 'l_onb_verify_success' OR event LIKE 'dash\\_%') AS has_registered
         FROM ev
         GROUP BY eff_rid, (CASE WHEN eff_rid IS NULL THEN COALESCE(ip, region) END)
@@ -167,7 +168,7 @@ export class CapiService {
         fb_at,
         user_id,
         has_content,
-        has_onb,
+        has_lead,
         has_registered
       FROM grouped
       WHERE last_fbclid_event IS NOT NULL
@@ -185,6 +186,11 @@ export class CapiService {
       if (!r.fbclid) continue;
       const events = new Set<CapiEventName>();
       if (r.has_content) events.add("ViewContent");
+      // Lead = opened the signup modal (started registration). This is the
+      // primary ad-set optimization event: it fires in-session (inside the
+      // 7-day click window) and is several times more frequent than the
+      // completed registration, so the ad set can leave the learning phase.
+      if (r.has_lead) events.add("Lead");
       if (r.has_registered) events.add("CompleteRegistration");
       if (events.size === 0) continue;
       const clickMs = r.fb_at ? r.fb_at.getTime() : Date.now();

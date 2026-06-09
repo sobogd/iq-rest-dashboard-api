@@ -207,7 +207,12 @@ export class RestaurantController {
     @Res({ passthrough: true }) res: Response,
     @Body() body: { name: string; duplicateFromId?: string | null },
   ) {
-    const { userId } = (req as AuthedRequest).authUser;
+    const { userId, isDemo } = (req as AuthedRequest).authUser;
+    // Demo accounts can't create extra restaurants — their data is ephemeral
+    // and the multi-restaurant flow is a paid-account feature. The SPA hides
+    // the "+ Add restaurant" button for demo users; this is the server-side
+    // guard against a hand-crafted request.
+    if (isDemo) throw new ForbiddenException("Demo accounts cannot create restaurants");
     const created = await this.svc.createForCompany(userId, body);
     // Auto-switch the cookie so the next request lands on the new restaurant.
     res.cookie(ACTIVE_RESTAURANT_COOKIE, created.id, {

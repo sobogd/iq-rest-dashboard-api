@@ -63,16 +63,24 @@ export class UsageStitchService {
           if (island.length === 0) return;
           const rids = new Set<string>();
           const uids = new Set<string>();
-          const effR = new Set<string>();
           for (const e of island) {
-            if (e.restaurantId) { rids.add(e.restaurantId); effR.add(e.restaurantId); }
-            if (e.userId) { uids.add(e.userId); const r = userRest.get(e.userId); if (r) effR.add(r); }
+            if (e.restaurantId) rids.add(e.restaurantId);
+            if (e.userId) uids.add(e.userId);
           }
           const identified = rids.size > 0 || uids.size > 0;
-          const ambiguous = effR.size > 1 || uids.size > 1;
+          // Ambiguity is about distinct HUMANS sharing one device fingerprint,
+          // not about how many restaurants one human owns. A single user with
+          // several restaurants must NOT block stitching (that was the bug:
+          // effR.size>1 made multi-restaurant owners ambiguous). Only when two
+          // different users identified themselves on the same fingerprint do we
+          // refuse to attribute the anonymous events (can't tell whose they are).
+          const ambiguous = uids.size > 1;
           if (identified && !ambiguous) {
-            const rid = rids.size ? [...rids][0] : null;
             const uid = uids.size ? [...uids][0] : null;
+            // Stitch the restaurant too (first explicit one, else the user's
+            // first attached restaurant) — kept for CAPI restaurant attribution;
+            // session grouping itself now keys on the user, not the restaurant.
+            const rid = rids.size ? [...rids][0] : uid ? userRest.get(uid) ?? null : null;
             for (const e of island) {
               if (!e.restaurantId && !e.userId) assignments.push({ id: e.id, rid, uid });
             }

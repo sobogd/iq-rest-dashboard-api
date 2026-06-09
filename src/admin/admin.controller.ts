@@ -674,7 +674,6 @@ export class AdminController {
     }
     type Row = {
       kind: string;
-      rid: string | null;
       uid: string | null;
       ipkey: string | null;
       has_ip: boolean;
@@ -683,6 +682,7 @@ export class AdminController {
       first_at: Date;
       last_at: Date;
       event_count: number;
+      restaurant_count: number;
       has_google: boolean;
       has_fb: boolean;
       has_onb: boolean;
@@ -691,22 +691,22 @@ export class AdminController {
       last_fbclid_event: string | null;
       last_fb_at: Date | null;
     };
+    // Group by the effective USER (its own events + anonymous pre-login events
+    // stitched to it). A user with several restaurants is ONE session — the
+    // restaurant is no longer part of the session key (it surfaces per-event in
+    // the detail view instead). Truly-anonymous activity (never identified)
+    // still groups by ip/region fingerprint.
     const rows = await this.prisma.$queryRaw<Row[]>(Prisma.sql`
       WITH ev AS (
         SELECT ue.*,
-               COALESCE(ue."manualRestaurantId", ue."restaurantId", ue."stitchedRestaurantId", ru."restaurantId") AS eff_rid,
+               COALESCE(ue."manualRestaurantId", ue."restaurantId", ue."stitchedRestaurantId") AS eff_rid,
                COALESCE(ue."userId", ue."stitchedUserId") AS eff_uid
         FROM usage_events ue
-        LEFT JOIN LATERAL (
-          SELECT "restaurantId" FROM restaurant_users
-          WHERE "userId" = COALESCE(ue."userId", ue."stitchedUserId") ORDER BY "addedAt" ASC LIMIT 1
-        ) ru ON COALESCE(ue."userId", ue."stitchedUserId") IS NOT NULL
         WHERE ue.at >= ${start} AND ue.at < ${end}
       )
       SELECT
-        CASE WHEN eff_rid IS NOT NULL THEN 'r' ELSE 'a' END AS kind,
-        eff_rid AS rid,
-        (array_remove(array_agg(DISTINCT eff_uid), NULL))[1] AS uid,
+        CASE WHEN eff_uid IS NOT NULL THEN 'u' ELSE 'a' END AS kind,
+        eff_uid AS uid,
         MAX(COALESCE(ip, region)) AS ipkey,
         bool_or(ip IS NOT NULL) AS has_ip,
         MAX(country) AS country,
@@ -714,6 +714,7 @@ export class AdminController {
         MIN(at) AS first_at,
         MAX(at) AS last_at,
         COUNT(*)::int AS event_count,
+        COUNT(DISTINCT eff_rid)::int AS restaurant_count,
         bool_or(gclid IS NOT NULL OR is_google_ads) AS has_google,
         bool_or(is_facebook_ads OR event LIKE 'l_fbclid_%') AS has_fb,
         bool_or(event LIKE '%onb%') AS has_onb,
@@ -722,12 +723,12 @@ export class AdminController {
         (array_agg(event ORDER BY at DESC) FILTER (WHERE event LIKE 'l_fbclid_%'))[1] AS last_fbclid_event,
         MAX(at) FILTER (WHERE event LIKE 'l_fbclid_%') AS last_fb_at
       FROM ev
-      GROUP BY eff_rid, (CASE WHEN eff_rid IS NULL THEN COALESCE(ip, region) END)
+      GROUP BY eff_uid, (CASE WHEN eff_uid IS NULL THEN COALESCE(ip, region) END)
       ORDER BY MAX(at) DESC
     `);
 
     const labels = await this.resolveUsageLabels(
-      rows.map((r) => ({ userId: r.uid, restaurantId: r.rid })),
+      rows.map((r) => ({ userId: r.uid, restaurantId: null })),
     );
 
     // Which sessions belong to ephemeral demo accounts — so the admin sees a
@@ -782,7 +783,7 @@ export class AdminController {
         const isDemo = r.uid ? demoSet.has(r.uid) : false;
         return {
           kind: r.kind,
-          rid: r.rid,
+          uid: r.uid,
           ipkey: r.ipkey,
           hasIp: r.has_ip,
           country: r.country,
@@ -790,6 +791,9 @@ export class AdminController {
           firstAt: r.first_at.toISOString(),
           lastAt: r.last_at.toISOString(),
           eventCount: r.event_count,
+          // How many distinct restaurants this user touched in the window — a
+          // hint shown next to the badge; the names live in the detail view.
+          restaurantCount: r.restaurant_count,
           hasGoogle: r.has_google,
           hasFacebook: r.has_fb,
           hasOnboarding: r.has_onb,
@@ -802,7 +806,6 @@ export class AdminController {
           latestFbTs: r.last_fb_at ? r.last_fb_at.getTime() : null,
           fbStage: fbStageOf(latestFbclid),
           userLabel: r.uid ? labels.email(r.uid) : null,
-          restaurantLabel: labels.restaurantName(r.rid, r.uid),
         };
       }),
     };
@@ -815,14 +818,18 @@ export class AdminController {
   @Get("usage/sessions/events")
   async usageSessionEvents(
     @Query("kind") kind?: string,
+    @Query("uid") uid?: string,
     @Query("rid") rid?: string,
     @Query("ipkey") ipkey?: string,
     @Query("from") from?: string,
     @Query("to") to?: string,
   ) {
-    const { rows, summary } = await this.loadSessionEvents(kind, rid, ipkey, from, to);
+    const { rows, summary, restaurants } = await this.loadSessionEvents(kind, uid, rid, ipkey, from, to);
     return {
       summary,
+      // restaurantId → title for every restaurant referenced by an event in this
+      // session, so the client can label each dash_* event with its venue.
+      restaurants,
       events: rows.map((r) => ({
         id: r.id,
         at: r.at.toISOString(),
@@ -832,6 +839,7 @@ export class AdminController {
         platform: r.platform,
         gclid: r.gclid,
         isFacebookAds: r.is_facebook_ads,
+        restaurantId: r.eff_rid,
       })),
     };
   }
@@ -842,10 +850,11 @@ export class AdminController {
   @Post("usage/sessions/analyze")
   async analyzeUsageSession(
     @Body()
-    body: { kind?: string; rid?: string; ipkey?: string; from?: string; to?: string },
+    body: { kind?: string; uid?: string; rid?: string; ipkey?: string; from?: string; to?: string },
   ) {
     const { rows, summary } = await this.loadSessionEvents(
       body.kind,
+      body.uid,
       body.rid,
       body.ipkey,
       body.from,
@@ -881,6 +890,7 @@ export class AdminController {
   // by both the events listing and the AI analysis endpoint.
   private async loadSessionEvents(
     kind?: string,
+    uid?: string,
     rid?: string,
     ipkey?: string,
     from?: string,
@@ -892,14 +902,18 @@ export class AdminController {
     if (Number.isNaN(fromD.getTime()) || Number.isNaN(toD.getTime())) {
       throw new BadRequestException("from/to invalid");
     }
-    // Match the SAME effective-restaurant grouping as /usage/sessions so an
-    // anonymous (ip) group never leaks identified events that merely share its
-    // ip, and a restaurant group catches its userId-only events.
+    // Match the SAME grouping as /usage/sessions:
+    //   'u' → the whole user (own + stitched anonymous events), across restaurants
+    //   'r' → LEGACY restaurant grouping (old bookmarks/tabs), matched via match_rid
+    //   'a' → a never-identified ip/region fingerprint
+    if (kind === "u" && !uid) throw new BadRequestException("uid required");
     if (kind === "r" && !rid) throw new BadRequestException("rid required");
     const cond =
-      kind === "r"
-        ? Prisma.sql`eff_rid = ${rid}`
-        : Prisma.sql`eff_rid IS NULL AND COALESCE(ip, region) = ${ipkey ?? ""}`;
+      kind === "u"
+        ? Prisma.sql`eff_uid = ${uid}`
+        : kind === "r"
+          ? Prisma.sql`match_rid = ${rid}`
+          : Prisma.sql`eff_uid IS NULL AND COALESCE(ip, region) = ${ipkey ?? ""}`;
     type Row = {
       id: string;
       at: Date;
@@ -924,7 +938,14 @@ export class AdminController {
         SELECT ue.id, ue.at, ue.event, ue.ip, ue.country, ue.region, ue.device, ue.platform,
                ue.gclid, ue.is_facebook_ads, ue.is_google_ads,
                COALESCE(ue."userId", ue."stitchedUserId") AS eff_uid,
-               COALESCE(ue."manualRestaurantId", ue."restaurantId", ue."stitchedRestaurantId", ru."restaurantId") AS eff_rid
+               -- Display restaurant: ONLY the explicit one on the event (active-
+               -- restaurant cookie / manual / stitched). No first-restaurant
+               -- fallback here, so landing l_* events correctly show no venue and
+               -- each dash_* event shows the restaurant that was active for it.
+               COALESCE(ue."manualRestaurantId", ue."restaurantId", ue."stitchedRestaurantId") AS eff_rid,
+               -- Match restaurant for the LEGACY 'r' filter: keeps the old
+               -- first-restaurant fallback so userId-only events still match.
+               COALESCE(ue."manualRestaurantId", ue."restaurantId", ue."stitchedRestaurantId", ru."restaurantId") AS match_rid
         FROM usage_events ue
         LEFT JOIN LATERAL (
           SELECT "restaurantId" FROM restaurant_users
@@ -965,7 +986,21 @@ export class AdminController {
       hasFacebook,
     };
 
-    return { rows, summary };
+    // restaurantId → title for every venue referenced by an event in this
+    // session — the client labels each dash_* event with it.
+    const restaurantIds = Array.from(
+      new Set(rows.map((r) => r.eff_rid).filter((x): x is string => !!x)),
+    );
+    const restaurants: Record<string, string> = {};
+    if (restaurantIds.length) {
+      const rs = await this.prisma.restaurant.findMany({
+        where: { id: { in: restaurantIds } },
+        select: { id: true, title: true },
+      });
+      for (const r of rs) restaurants[r.id] = r.title;
+    }
+
+    return { rows, summary, restaurants };
   }
 
   // Resolve a batch of userId / restaurantId to display labels. `email` is the
@@ -1044,6 +1079,7 @@ export class AdminController {
       to?: string;
       sessions?: Array<{
         kind?: string;
+        uid?: string | null;
         rid?: string | null;
         ipkey?: string | null;
         hasIp?: boolean;
@@ -1060,17 +1096,21 @@ export class AdminController {
     }
     let deleted = 0;
     for (const s of list) {
+      if (s.kind === "u" && !s.uid) continue;
       if (s.kind === "r" && !s.rid) continue;
-      // Same effective-restaurant matching as the list/events so deleting an
-      // anonymous ip group never removes identified events sharing that ip.
+      // Same grouping as the list/events so deleting one session never removes
+      // events of another that merely shares its ip.
       const cond =
-        s.kind === "r"
-          ? Prisma.sql`eff_rid = ${s.rid}`
-          : Prisma.sql`eff_rid IS NULL AND COALESCE(ip, region) = ${s.ipkey ?? ""}`;
+        s.kind === "u"
+          ? Prisma.sql`eff_uid = ${s.uid}`
+          : s.kind === "r"
+            ? Prisma.sql`match_rid = ${s.rid}`
+            : Prisma.sql`eff_uid IS NULL AND COALESCE(ip, region) = ${s.ipkey ?? ""}`;
       const r = await this.prisma.$executeRaw(Prisma.sql`
         WITH ev AS (
           SELECT ue.id,
-                 COALESCE(ue."manualRestaurantId", ue."restaurantId", ue."stitchedRestaurantId", ru."restaurantId") AS eff_rid,
+                 COALESCE(ue."userId", ue."stitchedUserId") AS eff_uid,
+                 COALESCE(ue."manualRestaurantId", ue."restaurantId", ue."stitchedRestaurantId", ru."restaurantId") AS match_rid,
                  ue.ip, ue.region
           FROM usage_events ue
           LEFT JOIN LATERAL (
@@ -1154,7 +1194,7 @@ export class AdminController {
   @HttpCode(HttpStatus.OK)
   async assignSession(
     @Body()
-    body: { kind?: string; rid?: string | null; ipkey?: string | null; from?: string; to?: string; restaurantId?: string },
+    body: { kind?: string; uid?: string | null; rid?: string | null; ipkey?: string | null; from?: string; to?: string; restaurantId?: string },
   ) {
     const restaurantId = (body.restaurantId ?? "").trim();
     if (!restaurantId) throw new BadRequestException("restaurantId required");
@@ -1165,13 +1205,16 @@ export class AdminController {
       throw new BadRequestException("from/to invalid");
     }
     const cond =
-      body.kind === "r"
-        ? Prisma.sql`eff_rid = ${body.rid}`
-        : Prisma.sql`eff_rid IS NULL AND COALESCE(ip, region) = ${body.ipkey ?? ""}`;
+      body.kind === "u"
+        ? Prisma.sql`eff_uid = ${body.uid}`
+        : body.kind === "r"
+          ? Prisma.sql`match_rid = ${body.rid}`
+          : Prisma.sql`eff_uid IS NULL AND COALESCE(ip, region) = ${body.ipkey ?? ""}`;
     const updated = await this.prisma.$executeRaw(Prisma.sql`
       WITH ev AS (
         SELECT ue.id,
-               COALESCE(ue."manualRestaurantId", ue."restaurantId", ue."stitchedRestaurantId", ru."restaurantId") AS eff_rid,
+               COALESCE(ue."userId", ue."stitchedUserId") AS eff_uid,
+               COALESCE(ue."manualRestaurantId", ue."restaurantId", ue."stitchedRestaurantId", ru."restaurantId") AS match_rid,
                ue.ip, ue.region
         FROM usage_events ue
         LEFT JOIN LATERAL (

@@ -16,8 +16,13 @@ import { AuthService } from "../auth/auth.service";
 import { PrismaService } from "../prisma/prisma.service";
 
 const EVENT_REGEX = /^[a-z0-9_]{1,64}$/;
+// Paid click ids — legacy dedicated names AND the new unified l_param_ names.
+// Both carry a raw, case-sensitive id (with . and -) up to 512 chars, so they
+// need a permissive regex separate from the generic EVENT_REGEX.
 const GCLID_EVENT_REGEX = /^l_gclid_[A-Za-z0-9_-]{1,256}$/;
 const FBCLID_EVENT_REGEX = /^l_fbclid_[A-Za-z0-9_.-]{1,512}$/;
+const GCLID_PARAM_REGEX = /^l_param_gclid__[A-Za-z0-9_-]{1,256}$/;
+const FBCLID_PARAM_REGEX = /^l_param_fbclid__[A-Za-z0-9_.-]{1,512}$/;
 const REFERRER_HOST_REGEX =
   /(?:^|\.)(google|bing|yandex|duckduckgo|yahoo|baidu|ecosia|qwant|startpage|mojeek|brave)\.[a-z.]+$/i;
 const SESSION_COOKIE = "iqr_session";
@@ -114,8 +119,8 @@ export class UsageController {
     // store name as-is, bypass bot filtering so every paid click is recorded
     // regardless of UA.
     const event = rawEvent;
-    const isGoogleAds = GCLID_EVENT_REGEX.test(rawEvent);
-    const isFacebookAds = FBCLID_EVENT_REGEX.test(rawEvent);
+    const isGoogleAds = GCLID_EVENT_REGEX.test(rawEvent) || GCLID_PARAM_REGEX.test(rawEvent);
+    const isFacebookAds = FBCLID_EVENT_REGEX.test(rawEvent) || FBCLID_PARAM_REGEX.test(rawEvent);
     const isPaidAds = isGoogleAds || isFacebookAds;
 
     if (!isPaidAds && !EVENT_REGEX.test(rawEvent)) {

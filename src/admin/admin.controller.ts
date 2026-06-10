@@ -716,12 +716,12 @@ export class AdminController {
         COUNT(*)::int AS event_count,
         COUNT(DISTINCT eff_rid)::int AS restaurant_count,
         bool_or(gclid IS NOT NULL OR is_google_ads) AS has_google,
-        bool_or(is_facebook_ads OR event LIKE 'l_fbclid_%') AS has_fb,
+        bool_or(is_facebook_ads OR event LIKE 'l_fbclid_%' OR event LIKE 'l_param_fbclid__%') AS has_fb,
         bool_or(event LIKE '%onb%') AS has_onb,
         bool_or(event = 'l_page_pricing' OR event LIKE '%demo_open') AS has_content,
         bool_or(event = 'l_onb_verify_success' OR event LIKE 'dash\\_%') AS has_registered,
-        (array_agg(event ORDER BY at DESC) FILTER (WHERE event LIKE 'l_fbclid_%'))[1] AS last_fbclid_event,
-        MAX(at) FILTER (WHERE event LIKE 'l_fbclid_%') AS last_fb_at
+        (array_agg(event ORDER BY at DESC) FILTER (WHERE event LIKE 'l_fbclid_%' OR event LIKE 'l_param_fbclid__%'))[1] AS last_fbclid_event,
+        MAX(at) FILTER (WHERE event LIKE 'l_fbclid_%' OR event LIKE 'l_param_fbclid__%') AS last_fb_at
       FROM ev
       GROUP BY eff_uid, (CASE WHEN eff_uid IS NULL THEN COALESCE(ip, region) END)
       ORDER BY MAX(at) DESC
@@ -749,7 +749,7 @@ export class AdminController {
     const fbclids = Array.from(
       new Set(
         rows
-          .map((r) => (r.last_fbclid_event ? r.last_fbclid_event.replace(/^l_fbclid_/, "") : null))
+          .map((r) => (r.last_fbclid_event ? r.last_fbclid_event.replace(/^(l_param_fbclid__|l_fbclid_)/, "") : null))
           .filter((x): x is string => !!x),
       ),
     );
@@ -779,7 +779,7 @@ export class AdminController {
 
     return {
       sessions: rows.map((r) => {
-        const latestFbclid = r.last_fbclid_event ? r.last_fbclid_event.replace(/^l_fbclid_/, "") : null;
+        const latestFbclid = r.last_fbclid_event ? r.last_fbclid_event.replace(/^(l_param_fbclid__|l_fbclid_)/, "") : null;
         const isDemo = r.uid ? demoSet.has(r.uid) : false;
         return {
           kind: r.kind,
@@ -978,10 +978,10 @@ export class AdminController {
     const labels = await this.resolveUsageLabels([{ userId: effUid, restaurantId: effRid }]);
     const total = rows.length > 0 ? rows[0].total : 0;
     const hasGoogle = rows.some(
-      (r) => r.is_google_ads || r.gclid || r.event.startsWith("l_gclid_"),
+      (r) => r.is_google_ads || r.gclid || r.event.startsWith("l_gclid_") || r.event.startsWith("l_param_gclid__"),
     );
     const hasFacebook = rows.some(
-      (r) => r.is_facebook_ads || r.event.startsWith("l_fbclid_"),
+      (r) => r.is_facebook_ads || r.event.startsWith("l_fbclid_") || r.event.startsWith("l_param_fbclid__"),
     );
     const summary = {
       country,

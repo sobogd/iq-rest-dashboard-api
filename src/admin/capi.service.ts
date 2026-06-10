@@ -154,8 +154,8 @@ export class CapiService {
       ),
       grouped AS (
         SELECT
-          (array_agg(event ORDER BY at DESC) FILTER (WHERE event LIKE 'l_fbclid_%'))[1] AS last_fbclid_event,
-          MAX(at) FILTER (WHERE event LIKE 'l_fbclid_%') AS fb_at,
+          (array_agg(event ORDER BY at DESC) FILTER (WHERE event LIKE 'l_fbclid_%' OR event LIKE 'l_param_fbclid__%'))[1] AS last_fbclid_event,
+          MAX(at) FILTER (WHERE event LIKE 'l_fbclid_%' OR event LIKE 'l_param_fbclid__%') AS fb_at,
           (array_agg(COALESCE("userId", "stitchedUserId") ORDER BY at DESC) FILTER (WHERE COALESCE("userId", "stitchedUserId") IS NOT NULL))[1] AS user_id,
           bool_or(event = 'l_page_pricing' OR event LIKE '%demo_open') AS has_content,
           bool_or(event LIKE 'l_onb_open_%' AND event NOT IN ('l_onb_open_terms', 'l_onb_open_privacy')) AS has_lead,
@@ -164,7 +164,7 @@ export class CapiService {
         GROUP BY eff_rid, (CASE WHEN eff_rid IS NULL THEN COALESCE(ip, region) END)
       )
       SELECT
-        regexp_replace(last_fbclid_event, '^l_fbclid_', '') AS fbclid,
+        regexp_replace(last_fbclid_event, '^(l_param_fbclid__|l_fbclid_)', '') AS fbclid,
         fb_at,
         user_id,
         has_content,
